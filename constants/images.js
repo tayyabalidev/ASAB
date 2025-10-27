@@ -35,4 +35,5 @@ export default {
   splash3,
   splash4,
   beigeBack,
+  backgroundImage: require("../assets/images/backgroundImage.png"),
 };

@@ -13,7 +13,7 @@ import useAppwrite from "../../lib/useAppwrite";
 import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard } from "../../components";
-import { images } from "../../constants/images";
+import { images } from "../../constants";
 
 // Component to display pending request with user details
 const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
@@ -700,15 +700,33 @@ const Profile = () => {
   };
 
   return (
-    <SafeAreaView style={{ backgroundColor: '#032727', flex: 1 }}>
+    <SafeAreaView style={{ backgroundColor: '#000', flex: 1 }}>
       <ScrollView style={{ flex: 1, backgroundColor: '#000' }}>
-        {/* Profile Section with Gradient Background */}
-        <LinearGradient
-          colors={['#032727', '#000']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={{ flex: 1 }}
-        >
+        {/* Profile Section with Background Image */}
+        <View style={{ flex: 1, position: 'relative' }}>
+          {/* Background Image */}
+          <Image
+            source={images.backgroundImage}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: '100%',
+              height: '100%',
+              resizeMode: 'cover'
+            }}
+          />
+          {/* Dark overlay for better text readability */}
+          <View style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.4)'
+          }} />
           {/* Header with logout and menu */}
           <View className="flex-row justify-between items-center px-4 pt-4 pb-6">
             <TouchableOpacity onPress={logout}>
@@ -882,7 +900,7 @@ const Profile = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </LinearGradient>
+        </View>
 
         {/* Content Sections with Black Background */}
         <View style={{ backgroundColor: '#000', flex: 1 }}>
@@ -1190,7 +1208,11 @@ const Profile = () => {
                         alignItems: 'center',
                         marginBottom: 5
                       }}>
-                        <Text style={{ color: liked ? '#ff4757' : '#fff', fontSize: 20 }}>❤️</Text>
+                        <Image 
+                          source={liked ? icons.heartCheck : icons.heartUncheck} 
+                          style={{ width: 60, height: 60 }} 
+                          resizeMode="contain" 
+                        />
                       </View>
                       <TouchableOpacity onPress={handleOpenLikesModal}>
                         <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
@@ -1208,7 +1230,11 @@ const Profile = () => {
                         alignItems: 'center',
                         marginBottom: 5
                       }}>
-                        <Text style={{ color: '#fff', fontSize: 18 }}>💬</Text>
+                        <Image 
+                          source={icons.messages} 
+                          style={{ width: 60, height: 60 }} 
+                          resizeMode="contain" 
+                        />
                       </View>
                       <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(commentsCount)}</Text>
                     </TouchableOpacity>
@@ -1224,28 +1250,11 @@ const Profile = () => {
                         alignItems: 'center',
                         marginBottom: 5
                       }}>
-                        <View style={{
-                          width: 20,
-                          height: 24,
-                          backgroundColor: bookmarked ? '#ffc107' : '#fff',
-                          borderRadius: 2,
-                          position: 'relative'
-                        }}>
-                          <View style={{
-                            position: 'absolute',
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            height: 8,
-                            backgroundColor: bookmarked ? '#ffc107' : '#fff',
-                            borderTopLeftRadius: 0,
-                            borderTopRightRadius: 0,
-                            borderBottomLeftRadius: 2,
-                            borderBottomRightRadius: 2,
-                            transform: [{ rotate: '45deg' }],
-                            top: 16
-                          }} />
-                        </View>
+                        <Image 
+                          source={bookmarked ? icons.saved : icons.unsaved} 
+                          style={{ width: 60, height: 60 }} 
+                          resizeMode="contain" 
+                        />
                       </View>
                       <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{bookmarked ? 'Saved' : 'Save'}</Text>
                     </TouchableOpacity>
@@ -1261,48 +1270,11 @@ const Profile = () => {
                         alignItems: 'center',
                         marginBottom: 5
                       }}>
-                        <View style={{
-                          width: 20,
-                          height: 20,
-                          position: 'relative'
-                        }}>
-                          {/* Main arrow body */}
-                          <View style={{
-                            width: 16,
-                            height: 2,
-                            backgroundColor: '#fff',
-                            position: 'absolute',
-                            top: 9,
-                            left: 0
-                          }} />
-                          {/* Arrow head */}
-                          <View style={{
-                            width: 0,
-                            height: 0,
-                            backgroundColor: 'transparent',
-                            borderStyle: 'solid',
-                            borderLeftWidth: 8,
-                            borderRightWidth: 0,
-                            borderBottomWidth: 6,
-                            borderTopWidth: 6,
-                            borderLeftColor: '#fff',
-                            borderRightColor: 'transparent',
-                            borderBottomColor: 'transparent',
-                            borderTopColor: 'transparent',
-                            position: 'absolute',
-                            top: 7,
-                            right: 0
-                          }} />
-                          {/* Vertical line */}
-                          <View style={{
-                            width: 2,
-                            height: 12,
-                            backgroundColor: '#fff',
-                            position: 'absolute',
-                            top: 4,
-                            left: 2
-                          }} />
-                        </View>
+                        <Image 
+                          source={icons.unshared} 
+                          style={{ width: 60, height: 60 }} 
+                          resizeMode="contain" 
+                        />
                       </View>
                       <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(shareCount)}</Text>
                     </TouchableOpacity>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { FlatList, Image, RefreshControl, Text, View, TouchableOpacity, Dimensions, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, Share, Alert, ScrollView } from "react-native";
+import { Platform } from "react-native";
+import { FlatList, Image, RefreshControl, Text, View, TouchableOpacity, Dimensions, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Share, Alert, ScrollView } from "react-native";
 import { ResizeMode, Video } from "expo-av";
 import { router, useFocusEffect } from "expo-router";
 import { GestureHandlerRootView, PanGestureHandler, State, Gesture } from "react-native-gesture-handler";
@@ -303,7 +304,16 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
   };
 
   return (
-    <View style={{ height: SCREEN_HEIGHT, backgroundColor: '#000', overflow: 'hidden' }}>
+    <View style={{ 
+      height: SCREEN_HEIGHT, 
+      backgroundColor: '#000', 
+      overflow: 'hidden', 
+      position: 'relative',
+      ...(Platform.OS === 'ios' && { 
+        paddingTop: 0,
+        marginTop: 0 
+      })
+    }}>
     
                                          {/* Swipe Gesture Handler for Profile Opening - TikTok Style */}
                    <PanGestureHandler
@@ -344,7 +354,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={handleVideoPress}
-        style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#000' }}
+        style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, backgroundColor: '#000' }}
       >
         {item.video ? (
         <Video
@@ -358,16 +368,21 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
           isMuted={false}
           useNativeControls={false}
           onError={(error) => {
-              
-            }}
-            onLoad={() => {
-              
-            }}
+            console.log('Video error:', error);
+          }}
+          onLoad={() => {
+            console.log('Video loaded successfully');
+          }}
           onPlaybackStatusUpdate={(status) => {
             if (status.didJustFinish) {
               setPlay(false);
             }
           }}
+          {...(Platform.OS === 'ios' && {
+            allowsExternalPlayback: false,
+            playInSilentModeIOS: true,
+            ignoreSilentSwitch: 'ignore'
+          })}
         />
         ) : (
           <View style={{ width: '100%', height: '100%', backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }}>
@@ -412,7 +427,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
       </View>
 
       {/* Right Side Interaction Buttons */}
-      <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 10 }}>
+      <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 20 }}>
         {/* Profile Picture */}
         <TouchableOpacity onPress={handleProfilePress} style={{ marginBottom: 20, alignItems: 'center' }}>
           <View style={{ position: 'relative' }}>
@@ -430,16 +445,21 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
                    bottom: -2, 
                    right: -2, 
                    backgroundColor: isFollowing ? '#4CAF50' : '#007AFF', 
-                   width: 20, 
-                   height: 20, 
-                   borderRadius: 10, 
+                   width: 24, 
+                   height: 24, 
+                   borderRadius: 12, 
                    justifyContent: 'center', 
                    alignItems: 'center',
-                   borderWidth: isFollowing ? 1 : 0,
-                   borderColor: isFollowing ? '#fff' : 'transparent'
+                   borderWidth: 2,
+                   borderColor: '#fff',
+                   shadowColor: '#000',
+                   shadowOffset: { width: 0, height: 2 },
+                   shadowOpacity: 0.3,
+                   shadowRadius: 4,
+                   elevation: 4
                  }}
                >
-                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>
+                 <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
                    {isFollowing ? '✓' : '+'}
                  </Text>
                </TouchableOpacity>
@@ -458,7 +478,11 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
             alignItems: 'center',
             marginBottom: 5
           }}>
-            <Text style={{ color: liked ? '#ff4757' : '#fff', fontSize: 20 }}>❤️</Text>
+            <Image 
+              source={liked ? icons.heartCheck : icons.heartUncheck} 
+              style={{ width: 60, height: 60 }} 
+              resizeMode="contain" 
+            />
           </View>
           <TouchableOpacity onPress={handleOpenLikesModal}>
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
@@ -476,7 +500,11 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
             alignItems: 'center',
             marginBottom: 5
           }}>
-            <Text style={{ color: '#fff', fontSize: 18 }}>💬</Text>
+            <Image 
+              source={icons.messages} 
+              style={{ width: 60, height: 60 }} 
+              resizeMode="contain" 
+            />
           </View>
           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(commentsCount)}</Text>
         </TouchableOpacity>
@@ -492,28 +520,11 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
             alignItems: 'center',
             marginBottom: 5
           }}>
-            <View style={{
-              width: 20,
-              height: 24,
-              backgroundColor: bookmarked ? '#ffc107' : '#fff',
-              borderRadius: 2,
-              position: 'relative'
-            }}>
-              <View style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: 8,
-                backgroundColor: bookmarked ? '#ffc107' : '#fff',
-                borderTopLeftRadius: 0,
-                borderTopRightRadius: 0,
-                borderBottomLeftRadius: 2,
-                borderBottomRightRadius: 2,
-                transform: [{ rotate: '45deg' }],
-                top: 16
-              }} />
-            </View>
+            <Image 
+              source={bookmarked ? icons.saved : icons.unsaved} 
+              style={{ width: 60, height: 60 }} 
+              resizeMode="contain" 
+            />
           </View>
           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{bookmarked ? 'Saved' : 'Save'}</Text>
         </TouchableOpacity>
@@ -529,55 +540,18 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
             alignItems: 'center',
             marginBottom: 5
           }}>
-            <View style={{
-              width: 20,
-              height: 20,
-              position: 'relative'
-            }}>
-              {/* Main arrow body */}
-              <View style={{
-                width: 16,
-                height: 2,
-                backgroundColor: '#fff',
-                position: 'absolute',
-                top: 9,
-                left: 0
-              }} />
-              {/* Arrow head */}
-              <View style={{
-                width: 0,
-                height: 0,
-                backgroundColor: 'transparent',
-                borderStyle: 'solid',
-                borderLeftWidth: 8,
-                borderRightWidth: 0,
-                borderBottomWidth: 6,
-                borderTopWidth: 6,
-                borderLeftColor: '#fff',
-                borderRightColor: 'transparent',
-                borderBottomColor: 'transparent',
-                borderTopColor: 'transparent',
-                position: 'absolute',
-                top: 7,
-                right: 0
-              }} />
-              {/* Vertical line */}
-              <View style={{
-                width: 2,
-                height: 12,
-                backgroundColor: '#fff',
-                position: 'absolute',
-                top: 4,
-                left: 2
-              }} />
-            </View>
+            <Image 
+              source={icons.unshared} 
+              style={{ width: 60, height: 60 }} 
+              resizeMode="contain" 
+            />
           </View>
           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(shareCount)}</Text>
         </TouchableOpacity>
       </View>
 
       {/* Bottom Left Video Information */}
-      <View style={{ position: 'absolute', bottom: 100, left: 15, right: 80, zIndex: 10 }}>
+      <View style={{ position: 'absolute', bottom: 100, left: 15, right: 80, zIndex: 20 }}>
         <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
           {item.creator.username}
         </Text>
@@ -858,7 +832,7 @@ const Home = () => {
         width: getVideoWidth(), 
         height: getVideoHeight(), 
         borderRadius: 16, 
-        marginTop: 12, 
+        marginTop: 18, 
         backgroundColor: 'rgba(255,255,255,0.1)',
         overflow: 'hidden',
         shadowColor: '#000',
@@ -883,11 +857,16 @@ const Home = () => {
               useNativeControls={false}
               posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
               onError={(error) => {
-                
+                console.log('Trending video error:', error);
               }}
               onLoad={() => {
-                
+                console.log('Trending video loaded');
               }}
+              {...(Platform.OS === 'ios' && {
+                allowsExternalPlayback: false,
+                playInSilentModeIOS: true,
+                ignoreSilentSwitch: 'ignore'
+              })}
             />
             
             {/* Play/Pause Overlay - Same as home page */}
@@ -917,14 +896,38 @@ const Home = () => {
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#032727' }}>
-        <LinearGradient
-          colors={['#032727', '#000']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={{ flex: 1 }}
-        >
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
+      <SafeAreaView 
+        style={{ flex: 1, backgroundColor: '#000'}} 
+        edges={Platform.OS === 'ios' ? ['top', 'left', 'right'] : ['top', 'left', 'right']}
+      >
+        <View style={{ flex: 1, position: 'relative' }}>
+          {/* Background Image */}
+          <Image
+            source={images.backgroundImage || images.empty}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: '100%',
+              height: '100%',
+              resizeMode: 'cover'
+            }}
+            onError={(error) => {
+              console.log('Background image failed to load:', error);
+            }}
+          />
+          {/* Dark overlay for better text readability */}
+          <View style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.3)'
+          }} />
         {/* Combined Scrollable Content with Trending and Videos */}
         <FlatList
             data={displayPosts}
@@ -940,6 +943,8 @@ const Home = () => {
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
             }
+            style={{ flex: 1 }}
+            contentContainerStyle={{ flexGrow: 1 }}
           getItemLayout={(data, index) => {
             // Calculate exact header height based on actual component heights
             // Welcome section: ~120px, Search: ~80px, Trending: 470px + padding
@@ -962,7 +967,7 @@ const Home = () => {
               borderBottomColor: 'rgba(255,255,255,0.1)'
             }}>
               {/* Header with Logo and ASAB Badge */}
-              <View style={{ paddingHorizontal: 20, marginBottom: 20 }}>
+              <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   {/* Left Logo */}
                   <Image
@@ -1009,12 +1014,11 @@ const Home = () => {
               </View>
 
               {/* Search Bar */}
-              <View style={{ paddingHorizontal: 20, marginBottom: 20 }}>
+              <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
                   backgroundColor: 'rgba(255,255,255,0.1)',
-                  borderRadius: 24,
                   paddingHorizontal: 20,
                   paddingVertical: 12,
                   borderWidth: 1,
@@ -1076,10 +1080,10 @@ const Home = () => {
               {/* Trending Videos Section */}
               {latestPosts && latestPosts.length > 0 ? (
                 <View style={{ 
+                  backgroundColor: '#020E0D', 
                   paddingVertical: 20,
                   borderBottomWidth: 1,
-                  borderBottomColor: 'rgba(255,255,255,0.1)',
-                  height: 470
+                  height: 400
                 }}>
                   <Text style={{ 
                     color: '#fff', 
@@ -1091,33 +1095,13 @@ const Home = () => {
                     Trending Videos
               </Text>
                   
-                  <View style={{ 
-                    overflow: 'hidden',
-                    marginHorizontal: -20,
-                    justifyContent: 'center',
-                    alignItems: 'center'
-                  }}>
-                    <ScrollView 
-                      horizontal 
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{ 
-                        paddingHorizontal: 40,
-                        paddingLeft: 60,
-                        paddingRight: 60,
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                      decelerationRate="fast"
-                      bounces={false}
-                      centerContent={true}
-                      snapToInterval={126}
-                      snapToAlignment="center"
-                      onMomentumScrollEnd={handleTrendingScroll}
-                      onScrollEndDrag={handleTrendingScroll}
-                    >
-                      {latestPosts.slice(0, 5).map((item, index) => renderTrendingItem({ item, index }))}
-                    </ScrollView>
-                  </View>
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 20 }}
+                  >
+                    {latestPosts.slice(0, 5).map((item, index) => renderTrendingItem({ item, index }))}
+                  </ScrollView>
                   
                   {/* Carousel Indicators */}
                   <View style={{ 
@@ -1131,7 +1115,7 @@ const Home = () => {
                           width: 8, 
                           height: 8, 
                           borderRadius: 4, 
-                          backgroundColor: index === currentTrendingIndex ? '#FFD700' : 'rgba(255,255,255,0.3)', 
+                          backgroundColor: index === 1 ? '#FFD700' : 'rgba(255,255,255,0.3)', 
                           marginHorizontal: 4 
                         }} 
                       />
@@ -1140,11 +1124,10 @@ const Home = () => {
 
                                                       </View>
                ) : null}
-
             </View>
         )}
         />
-        </LinearGradient>
+        </View>
       </SafeAreaView>
     </GestureHandlerRootView>
   );

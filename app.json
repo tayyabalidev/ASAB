@@ -5,28 +5,31 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.sora",
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs access to camera for video calls and recording videos",
         "NSMicrophoneUsageDescription": "This app needs access to microphone for audio calls and video recording",
         "NSPhotoLibraryUsageDescription": "This app needs access to photo library to select and upload videos",
-        "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication"
+        "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication",
+        "UIStatusBarStyle": "UIStatusBarStyleLightContent",
+        "UIViewControllerBasedStatusBarAppearance": false
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
       "permissions": [
         "android.permission.CAMERA",

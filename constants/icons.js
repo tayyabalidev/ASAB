@@ -13,12 +13,23 @@ import play from "../assets/icons/play.png";
 import inbox from "../assets/icons/box.png";
 import friends from "../assets/icons/friends.png";
 
-// For now, we'll use existing icons as placeholders for the missing ones
-// You can replace these with actual heart, comment, and share icons later
-const heart = play; // Placeholder - replace with actual heart icon
-const comment = inbox; // Placeholder - replace with actual comment icon  
-const share = rightArrow; // Placeholder - replace with actual share icon
-const bookmark = inbox; // Placeholder - replace with actual bookmark icon
+// Heart icons
+import heartCheck from "../assets/icons/heartCheck.png";
+import heartUncheck from "../assets/icons/heartUncheck.png";
+
+// Bookmark icons
+import saved from "../assets/icons/saved.png";
+import unsaved from "../assets/icons/unsaved.png";
+
+// Message icon
+import messages from "../assets/icons/messages.png";
+
+// Share icons
+import shared from "../assets/icons/shared.png";
+import unshared from "../assets/icons/unshared.png";
+
+// Bookmark icon
+import bookmark from "../assets/icons/bookmark.png";
 
 export default {
   play,
@@ -35,8 +46,16 @@ export default {
   eye,
   inbox,
   friends,
-  heart,
-  comment,
-  share,
+  // Heart icons
+  heartCheck,
+  heartUncheck,
+  // Bookmark icons
+  saved,
+  unsaved,
   bookmark,
+  // Message icon
+  messages,
+  // Share icons
+  shared,
+  unshared,
 };

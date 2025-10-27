@@ -61,17 +61,20 @@ const TabLayout = () => {
     <>
       <Tabs
         screenOptions={{
-          tabBarActiveTintColor: "#a77df8",
-          tabBarInactiveTintColor: "#8ff7fa",
+          tabBarActiveTintColor: "#FFA001",
+          tabBarInactiveTintColor: "#76E6FF",
           tabBarShowLabel: false,
           tabBarStyle: {
-            backgroundColor: "#161622",
-            height: 94,
+
+            backgroundColor: "#000",
+            height: 80,
             borderTopWidth: 0,
+            paddingBottom: 0,
+            paddingTop: 0,
           },
           tabBarItemStyle: {
-            paddingHorizontal: 30,
-            marginHorizontal: 8,
+            paddingHorizontal: 35,
+            marginHorizontal: 10,
           },
         }}
       >
@@ -120,28 +123,11 @@ const TabLayout = () => {
         />
         <Tabs.Screen
           name="chat"
-          options={({ route }) => ({
+          options={{
             title: "Chat",
             headerShown: false,
-            tabBarStyle: route.params?.inChat
-              ? { display: "none" }
-              : {
-                  backgroundColor: "#161622",
-                  height: 84,
-                  borderTopWidth: 0,
-                },
-            tabBarItemStyle: {
-              paddingHorizontal: 16,
-              marginHorizontal: 8,
-            },
-            tabBarIcon: ({ color, focused }) => (
-              <TabIcon
-                name="Inbox"
-                color={color}
-                focused={focused}
-              />
-            ),
-          })}
+            href: null, // Hide from tab bar
+          }}
         />
         <Tabs.Screen
           name="profile"
@@ -176,7 +162,7 @@ const TabLayout = () => {
       </Tabs>
 
       <Loader isLoading={loading} />
-      <StatusBar backgroundColor="#161622" style="light" />
+      <StatusBar backgroundColor="#000" style="light" />
     </>
   );
 };
