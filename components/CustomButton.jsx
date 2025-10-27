@@ -1,5 +1,6 @@
 import { ActivityIndicator, Text, TouchableOpacity } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { useGlobalContext } from "../context/GlobalProvider";
 
 const CustomButton = ({
   title,
@@ -8,6 +9,7 @@ const CustomButton = ({
   textStyles,
   isLoading,
 }) => {
+  const { isDarkMode } = useGlobalContext();
   return (
     <TouchableOpacity
       onPress={handlePress}
@@ -16,7 +18,7 @@ const CustomButton = ({
       className={containerStyles}
     >
       <LinearGradient
-        colors={['#501478', '#965014']}
+        colors={isDarkMode ? ['#501478', '#965014'] : ['#8B5CF6', '#D97706']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         className={`rounded-xl min-h-[62px] flex flex-row justify-center items-center ${

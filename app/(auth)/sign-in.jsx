@@ -13,13 +13,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { images } from "../../constants";
 import FormField from "../../components/FormField";
 import CustomButton from "../../components/CustomButton";
+import ThemeToggle from "../../components/ThemeToggle";
 import { signIn, getCurrentUser } from "../../lib/appwrite";
 import { useRouter } from "expo-router";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const SignIn = () => {
   const router = useRouter();
-  const { setUser, setIsLogged } = useGlobalContext();
+  const { setUser, setIsLogged, isDarkMode } = useGlobalContext();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
     email: "",
@@ -48,14 +49,19 @@ const SignIn = () => {
 
   return (
     <LinearGradient
-      colors={['#032727', '#000']}
+      colors={isDarkMode ? ['#032727', '#000'] : ['#F0FDF4', '#FFFFFF']}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
       style={{ flex: 1 }}
     >
       <SafeAreaView className="h-full">
+        {/* Theme Toggle */}
+        <View className="absolute top-12 right-4 z-10">
+          <ThemeToggle />
+        </View>
+        
         {/* Background Logo */}
-        <View className="absolute inset-0 justify-center items-center opacity-10">
+        <View className={`absolute inset-0 justify-center items-center ${isDarkMode ? 'opacity-10' : 'opacity-5'}`}>
           <Image
             source={images.logo}
             resizeMode="contain"
@@ -67,10 +73,10 @@ const SignIn = () => {
         <View className="w-full justify-end min-h-[90vh] px-4 py-6">
 
           <View className="space-y-4">
-            <Text className="text-2xl font-bold text-white text-center">
+            <Text className={`text-2xl font-bold text-center ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
               Sign In to ASAB
             </Text>
-            <Text className="text-gray-300 text-center">
+            <Text className={`text-center ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
               Welcome back! Please sign in to your account
             </Text>
           </View>
@@ -100,7 +106,7 @@ const SignIn = () => {
           />
 
           <View className="flex-row justify-center mt-6">
-            <Text className="text-gray-300">Don't have an account? </Text>
+            <Text className={isDarkMode ? "text-gray-300" : "text-gray-600"}>Don't have an account? </Text>
             <TouchableOpacity onPress={() => router.push("/sign-up")}>
               <Text className="text-secondary">Sign Up</Text>
             </TouchableOpacity>

@@ -84,7 +84,7 @@ const DonationPage = () => {
             onPress: () => {
               // Reset form before going back
               resetForm();
-              router.back();
+              router.replace('/home');
             }
           }
         ]
@@ -104,7 +104,7 @@ const DonationPage = () => {
     <SafeAreaView className="bg-primary h-full">
       {/* Header */}
       <View className="flex-row items-center justify-between px-4 pt-4 pb-6">
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.replace('/home')}>
           <Image
             source={icons.leftArrow}
             resizeMode="contain"

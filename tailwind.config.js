@@ -18,6 +18,15 @@ module.exports = {
         gray: {
           100: "#CDCDE0",
         },
+        // Light mode colors
+        light: {
+          primary: "#FFFFFF",
+          secondary: "#F8F9FA",
+          text: "#1A1A1A",
+          textSecondary: "#6B7280",
+          border: "#E5E7EB",
+          accent: "#FF9C01",
+        },
       },
       fontFamily: {
         pregular: ["Poppins-Regular", "sans-serif"],

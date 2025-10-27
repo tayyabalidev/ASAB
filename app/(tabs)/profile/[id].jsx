@@ -103,7 +103,7 @@ const UserProfile = () => {
       } catch (error) {
         console.error("Error fetching profile user:", error);
         Alert.alert("Error", "Failed to load profile");
-        router.back();
+        router.replace('/home');
       } finally {
         setLoading(false);
       }
@@ -159,7 +159,7 @@ const UserProfile = () => {
   }, [likesModalVisible, modalVideo]);
 
   const handleBack = () => {
-    router.back();
+    router.replace('/home');
   };
 
   // Re-enable request access function

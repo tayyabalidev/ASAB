@@ -159,6 +159,14 @@ const TabLayout = () => {
             href: null, // Hide from tab bar
           }}
         />
+        <Tabs.Screen
+          name="live-streams"
+          options={{
+            title: "Live Streams",
+            headerShown: false,
+            href: null, // Hide from tab bar
+          }}
+        />
       </Tabs>
 
       <Loader isLoading={loading} />

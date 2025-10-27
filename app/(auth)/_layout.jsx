@@ -5,7 +5,7 @@ import { Loader } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const AuthLayout = () => {
-  const { loading, isLogged } = useGlobalContext();
+  const { loading, isLogged, isDarkMode } = useGlobalContext();
 
   if (!loading && isLogged) return <Redirect href="/home" />;
 
@@ -27,7 +27,7 @@ const AuthLayout = () => {
       </Stack>
 
       <Loader isLoading={loading} />
-      <StatusBar backgroundColor="#2D1B0A" style="light" />
+      <StatusBar backgroundColor={isDarkMode ? "#2D1B0A" : "#F0FDF4"} style={isDarkMode ? "light" : "dark"} />
     </>
   );
 };

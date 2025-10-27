@@ -16,3 +16,4 @@ export { default as LiveChatPanel } from './LiveChatPanel';
 export { default as LiveReactions } from './LiveReactions';
 export { default as PictureInPicturePlayer } from './PictureInPicturePlayer';
 export { default as SplashScreen } from './SplashScreen';
+export { default as ThemeToggle } from './ThemeToggle';

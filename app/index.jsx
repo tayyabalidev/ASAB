@@ -6,11 +6,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useState, useEffect } from "react";
 
 import { images } from "../constants";
-import { CustomButton, Loader, SplashScreen } from "../components";
+import { CustomButton, Loader, SplashScreen, ThemeToggle } from "../components";
 import { useGlobalContext } from "../context/GlobalProvider";
 
 const Welcome = () => {
-  const { loading, isLogged } = useGlobalContext();
+  const { loading, isLogged, isDarkMode } = useGlobalContext();
   const [showSplash, setShowSplash] = useState(true);
 
   // Always show splash screen first, regardless of loading state
@@ -29,12 +29,17 @@ const Welcome = () => {
 
   return (
     <LinearGradient
-      colors={['#321E0A', '#1a1a2e', '#000000']}
+      colors={isDarkMode ? ['#321E0A', '#1a1a2e', '#000000'] : ['#FEF3E2', '#F0FDF4', '#FFFFFF']}
       locations={[0, 0.5, 1]}
       className="h-full"
     >
       <SafeAreaView className="h-full">
         <Loader isLoading={loading} />
+        
+        {/* Theme Toggle */}
+        <View className="absolute top-12 right-4 z-10">
+          <ThemeToggle />
+        </View>
 
         <ScrollView
           contentContainerStyle={{
@@ -51,21 +56,21 @@ const Welcome = () => {
           <View className="relative mt-1 items-center">
             {/* Main text */}
             <View className="items-center">
-              <Text className="text-3xl text-white font-bold text-center">
+              <Text className={`text-3xl font-bold text-center ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
                 Discover Endless
               </Text>
               
               {/* Second line: Possibilities with ASAB */}
               <View className="items-center">
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
-                  <Text className="text-3xl text-white font-bold">
+                  <Text className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
                     Possibilities with{" "}
                   </Text>
                   <View style={{ flexDirection: 'row' }}>
-                    <Text className="text-3xl font-bold" style={{ color: '#501478' }}>A</Text>
-                    <Text className="text-3xl font-bold" style={{ color: '#65287A' }}>S</Text>
-                    <Text className="text-3xl font-bold" style={{ color: '#7A4A3C' }}>A</Text>
-                    <Text className="text-3xl font-bold" style={{ color: '#965014' }}>B</Text>
+                    <Text className="text-3xl font-bold" style={{ color: isDarkMode ? '#501478' : '#FF9C01' }}>A</Text>
+                    <Text className="text-3xl font-bold" style={{ color: isDarkMode ? '#65287A' : '#FF9C01' }}>S</Text>
+                    <Text className="text-3xl font-bold" style={{ color: isDarkMode ? '#7A4A3C' : '#FF9C01' }}>A</Text>
+                    <Text className="text-3xl font-bold" style={{ color: isDarkMode ? '#965014' : '#FF9C01' }}>B</Text>
                   </View>
                 </View>
                 
@@ -75,7 +80,7 @@ const Welcome = () => {
                     marginTop: 8,
                     width: 100,
                     height: 4,
-                    backgroundColor: '#FF8E01',
+                    backgroundColor: isDarkMode ? '#FF8E01' : '#FF9C01',
                     borderRadius: 25,
                     alignSelf: 'end',
                   }}
@@ -90,7 +95,7 @@ const Welcome = () => {
             />
           </View>
 
-          <Text className="text-sm font-pregular text-gray-100 mt-5 text-center">
+          <Text className={`text-sm font-pregular mt-5 text-center ${isDarkMode ? 'text-gray-100' : 'text-gray-600'}`}>
             Where Creativity Meets Innovation: Embark on a Journey of Limitless
             Exploration with ASAB
           </Text>
@@ -103,7 +108,7 @@ const Welcome = () => {
         </View>
       </ScrollView>
 
-      <StatusBar backgroundColor="#321E0A" style="light" />
+      <StatusBar backgroundColor={isDarkMode ? "#321E0A" : "#FEF3E2"} style={isDarkMode ? "light" : "dark"} />
     </SafeAreaView>
     </LinearGradient>
   );

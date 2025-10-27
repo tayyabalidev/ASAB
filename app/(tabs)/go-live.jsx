@@ -118,7 +118,7 @@ const GoLive = () => {
         >
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <TouchableOpacity onPress={() => router.replace('/home')} style={styles.backButton}>
               <Text style={styles.backButtonText}>✕</Text>
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Go Live</Text>

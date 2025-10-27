@@ -10,6 +10,7 @@ const GlobalProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [followStatus, setFollowStatus] = useState({}); // Track follow status across the app
+  const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
 
   useEffect(() => {
     // Check if getCurrentUser is available
@@ -57,6 +58,8 @@ const GlobalProvider = ({ children }) => {
         loading,
         followStatus,
         updateFollowStatus,
+        isDarkMode,
+        setIsDarkMode,
       }}
     >
       {children}

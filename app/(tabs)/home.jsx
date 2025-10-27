@@ -16,7 +16,7 @@ import { appwriteConfig } from "../../lib/appwrite";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedTab, setSelectedTab, isHomeFocused }) => {
+const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused }) => {
   const { user, followStatus, updateFollowStatus } = useGlobalContext();
   const [play, setPlay] = useState(false);
   const [liked, setLiked] = useState(item.likes?.includes(user?.$id));
@@ -396,35 +396,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, selectedT
         )}
       </TouchableOpacity>
 
-      {/* Top Navigation Tabs over each video - TikTok style */}
-      <View style={{ position: 'absolute', top: 70, left: 0, right: 0, zIndex: 12 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'center', paddingHorizontal: 20 }}>
-          <TouchableOpacity 
-            onPress={() => setSelectedTab('forYou')}
-            style={{ 
-              backgroundColor: selectedTab === 'forYou' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)', 
-              paddingHorizontal: 20, 
-              paddingVertical: 8, 
-              borderRadius: 20, 
-              marginHorizontal: 5 
-            }}
-          >
-            <Text style={{ color: '#fff', fontWeight: selectedTab === 'forYou' ? '600' : '400' }}>For You</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            onPress={() => setSelectedTab('following')}
-            style={{ 
-              backgroundColor: selectedTab === 'following' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)', 
-              paddingHorizontal: 20, 
-              paddingVertical: 8, 
-              borderRadius: 20, 
-              marginHorizontal: 5 
-            }}
-          >
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: selectedTab === 'following' ? '600' : '400' }}>Following</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+
 
       {/* Right Side Interaction Buttons */}
       <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 20 }}>
@@ -788,11 +760,9 @@ const Home = () => {
       index={index}
       isVisible={index === currentVideoIndex}
       onVideoStateChange={() => {}} // Empty function since we're not using it anymore
-      selectedTab={selectedTab}
-      setSelectedTab={setSelectedTab}
       isHomeFocused={isHomeFocused}
     />
-  ), [currentVideoIndex, selectedTab, isHomeFocused]);
+  ), [currentVideoIndex, isHomeFocused]);
 
   // Render trending video item
   const renderTrendingItem = ({ item, index }) => {
@@ -928,6 +898,8 @@ const Home = () => {
             bottom: 0,
             backgroundColor: 'rgba(0, 0, 0, 0.3)'
           }} />
+
+
         {/* Combined Scrollable Content with Trending and Videos */}
         <FlatList
             data={displayPosts}
@@ -947,11 +919,12 @@ const Home = () => {
             contentContainerStyle={{ flexGrow: 1 }}
           getItemLayout={(data, index) => {
             // Calculate exact header height based on actual component heights
-            // Welcome section: ~120px, Search: ~80px, Trending: 470px + padding
+            // Welcome section: ~120px, Search: ~80px, Trending: 470px + padding, Tabs: 65px
             const welcomeHeight = 120; // Welcome back + username
             const searchHeight = 80;   // Search bar
             const trendingHeight = 470 + 40; // Trending section + padding
-            const totalHeaderHeight = welcomeHeight + searchHeight + trendingHeight;
+            const tabsHeight = 65; // Tabs section (15px top + 35px content + 15px bottom)
+            const totalHeaderHeight = welcomeHeight + searchHeight + trendingHeight + tabsHeight;
             
             return {
               length: SCREEN_HEIGHT,
@@ -1121,9 +1094,38 @@ const Home = () => {
                       />
                     ))}
                   </View>
-
-                                                      </View>
+                </View>
                ) : null}
+              
+              {/* For You / Following Tabs - TikTok Style */}
+              <View style={{ paddingVertical: 15, backgroundColor: '#000' }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
+                  <TouchableOpacity 
+                    onPress={() => setSelectedTab('forYou')}
+                    style={{ 
+                      backgroundColor: selectedTab === 'forYou' ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', 
+                      paddingHorizontal: 24, 
+                      paddingVertical: 10, 
+                      borderRadius: 20, 
+                      marginHorizontal: 5 
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: selectedTab === 'forYou' ? '700' : '400' }}>For You</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    onPress={() => setSelectedTab('following')}
+                    style={{ 
+                      backgroundColor: selectedTab === 'following' ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', 
+                      paddingHorizontal: 24, 
+                      paddingVertical: 10, 
+                      borderRadius: 20, 
+                      marginHorizontal: 5 
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: selectedTab === 'following' ? '700' : '400' }}>Following</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
         )}
         />

@@ -12,7 +12,7 @@ import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
 import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
-import { EmptyState, InfoBox, VideoCard } from "../../components";
+import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
 import { images } from "../../constants";
 
 // Component to display pending request with user details
@@ -1552,6 +1552,12 @@ const Profile = () => {
               <TouchableOpacity onPress={pickAvatarImage} style={{ backgroundColor: "#333", padding: 12, borderRadius: 8, marginBottom: 20, alignItems: "center" }}>
                 <Text style={{ color: "#fff" }}>{uploadingAvatar ? "Uploading..." : "Upload Avatar"}</Text>
               </TouchableOpacity>
+
+              {/* Theme Toggle */}
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingVertical: 8 }}>
+                <Text style={{ color: "#fff", fontSize: 16 }}>Theme</Text>
+                <ThemeToggle />
+              </View>
 
               {/* Re-enable privacy toggle */}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingVertical: 8 }}>

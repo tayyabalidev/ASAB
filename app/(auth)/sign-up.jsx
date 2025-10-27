@@ -6,11 +6,11 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { images } from "../../constants";
 import { createUser, signInWithGoogle } from "../../lib/appwrite";
-import { CustomButton, FormField, GoogleSignInButton } from "../../components";
+import { CustomButton, FormField, GoogleSignInButton, ThemeToggle } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const SignUp = () => {
-  const { setUser, setIsLogged } = useGlobalContext();
+  const { setUser, setIsLogged, isDarkMode } = useGlobalContext();
 
   const [isSubmitting, setSubmitting] = useState(false);
   const [isGoogleSubmitting, setGoogleSubmitting] = useState(false);
@@ -59,14 +59,19 @@ const SignUp = () => {
 
   return (
     <LinearGradient
-      colors={['#032727', '#000']}
+      colors={isDarkMode ? ['#032727', '#000'] : ['#F0FDF4', '#FFFFFF']}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
       className="h-full"
     >
       <SafeAreaView className="h-full">
+        {/* Theme Toggle */}
+        <View className="absolute top-12 right-4 z-10">
+          <ThemeToggle />
+        </View>
+        
         {/* Background Logo */}
-        <View className="absolute inset-0 justify-center items-center opacity-10">
+        <View className={`absolute inset-0 justify-center items-center ${isDarkMode ? 'opacity-10' : 'opacity-5'}`}>
           <Image
             source={images.logo}
             resizeMode="contain"
@@ -77,7 +82,7 @@ const SignUp = () => {
         <ScrollView>
           <View className="w-full justify-end min-h-[90vh] px-4 py-6">
 
-            <Text className="text-2xl font-bold text-white font-psemibold mb-8">
+            <Text className={`text-2xl font-bold font-psemibold mb-8 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
               Sign up
             </Text>
 
@@ -112,7 +117,7 @@ const SignUp = () => {
           />
 
           <View className="flex justify-center pt-5 items-center">
-            <Text className="text-gray-300">Already have an account? </Text>
+            <Text className={isDarkMode ? "text-gray-300" : "text-gray-600"}>Already have an account? </Text>
             <Link
               href="/sign-in"
               className="text-lg font-psemibold text-secondary"

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, Image } from "react-native";
 
 import { icons } from "../constants";
+import { useGlobalContext } from "../context/GlobalProvider";
 
 const FormField = ({
   title,
@@ -12,18 +13,23 @@ const FormField = ({
   ...props
 }) => {
   const [showPassword, setShowPassword] = useState(false);
+  const { isDarkMode } = useGlobalContext();
 
   return (
     <View className={`space-y-2 ${otherStyles}`}>
-      <Text className="text-base text-gray-100 font-pmedium">{title}</Text>
+      <Text className={`text-base font-pmedium ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>{title}</Text>
 
-      <View className="w-full h-16 px-4 bg-black-100 rounded-2xl border-2 border-purple-500 flex flex-row items-center"
-        style={{ borderColor: '#501478' }}>
+      <View 
+        className={`w-full h-16 px-4 rounded-2xl border-2 flex flex-row items-center ${
+          isDarkMode ? 'bg-black-100' : 'bg-gray-50'
+        }`}
+        style={{ borderColor: isDarkMode ? '#501478' : '#8B5CF6' }}
+      >
         <TextInput
-          className="flex-1 text-white font-psemibold text-base"
+          className={`flex-1 font-psemibold text-base ${isDarkMode ? 'text-white' : 'text-gray-900'}`}
           value={value}
           placeholder={placeholder}
-          placeholderTextColor="#7B7B8B"
+          placeholderTextColor={isDarkMode ? "#7B7B8B" : "#9CA3AF"}
           onChangeText={handleChangeText}
           secureTextEntry={title === "Password" && !showPassword}
           {...props}

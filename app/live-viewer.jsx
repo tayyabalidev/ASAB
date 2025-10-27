@@ -46,7 +46,7 @@ const LiveViewer = () => {
   }, [streamId]);
 
   const handleClose = () => {
-    router.back();
+    router.replace('/home');
   };
 
   const toggleChat = () => {
