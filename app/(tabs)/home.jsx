@@ -655,6 +655,10 @@ const Home = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchInputRef = useRef(null);
+  const [trendingModalVisible, setTrendingModalVisible] = useState(false);
+  const [trendingModalVideo, setTrendingModalVideo] = useState(null);
+  const [isTrendingVideoPlaying, setIsTrendingVideoPlaying] = useState(true);
+  const trendingVideoRef = useRef(null);
   
   // Get posts based on selected tab
   const { data: forYouPosts, refetch: refetchForYou } = useAppwrite(getAllPosts, []);
@@ -766,8 +770,6 @@ const Home = () => {
 
   // Render trending video item
   const renderTrendingItem = ({ item, index }) => {
-    const [isPlaying, setIsPlaying] = useState(false);
-    
     // Determine if this is the center video based on currentTrendingIndex
     const isCenterVideo = index === currentTrendingIndex;
     
@@ -793,9 +795,10 @@ const Home = () => {
         alignItems: 'center'
       }}
       onPress={() => {
-        // Toggle play/pause for the trending video
-        setIsPlaying(!isPlaying);
-        
+        // Open full screen modal instead of toggling play
+        setTrendingModalVideo(item);
+        setTrendingModalVisible(true);
+        setIsTrendingVideoPlaying(true);
       }}
     >
       <View style={{ 
@@ -821,9 +824,9 @@ const Home = () => {
               }}
               style={{ width: '100%', height: '100%' }}
               resizeMode="cover"
-              shouldPlay={isPlaying}
-              isMuted={false}
-              isLooping={true}
+              shouldPlay={false}
+              isMuted={true}
+              isLooping={false}
               useNativeControls={false}
               posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
               onError={(error) => {
@@ -839,12 +842,10 @@ const Home = () => {
               })}
             />
             
-            {/* Play/Pause Overlay - Same as home page */}
-            {!isPlaying && (
-              <View style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -24 }, { translateY: -24 }] }}>
-                <Image source={icons.play} style={{ width: 48, height: 48 }} resizeMode="contain" />
-              </View>
-            )}
+            {/* Play Icon Overlay */}
+            <View style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -24 }, { translateY: -24 }] }}>
+              <Image source={icons.play} style={{ width: 48, height: 48 }} resizeMode="contain" />
+            </View>
           </View>
         ) : (
           <View style={{ 
@@ -1131,6 +1132,105 @@ const Home = () => {
         />
         </View>
       </SafeAreaView>
+
+      {/* Full Screen Trending Video Modal */}
+      <Modal
+        visible={trendingModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setTrendingModalVisible(false)}
+        style={{ backgroundColor: '#000' }}
+      >
+        {trendingModalVideo && (
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
+              {/* Close Button */}
+              <TouchableOpacity 
+                onPress={() => setTrendingModalVisible(false)} 
+                style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}
+              >
+                <Text style={{ color: '#fff', fontSize: 28 }}>×</Text>
+              </TouchableOpacity>
+              
+              {/* Video */}
+              <View style={{ flex: 1, backgroundColor: '#000', position: 'relative' }}>
+                <Video
+                  ref={trendingVideoRef}
+                  source={{ 
+                    uri: getIOSCompatibleVideoUrl(trendingModalVideo.video) || trendingModalVideo.video
+                  }}
+                  style={{ flex: 1, width: '100%', height: '100%' }}
+                  resizeMode={ResizeMode.CONTAIN}
+                  shouldPlay={isTrendingVideoPlaying}
+                  isMuted={false}
+                  isLooping={true}
+                  useNativeControls={false}
+                  posterSource={trendingModalVideo.thumbnail ? { uri: trendingModalVideo.thumbnail } : undefined}
+                  {...(Platform.OS === 'ios' && {
+                    allowsExternalPlayback: false,
+                    playInSilentModeIOS: true,
+                    ignoreSilentSwitch: 'ignore'
+                  })}
+                  onError={(error) => {
+                    console.log('Trending modal video error:', error);
+                  }}
+                  onLoad={() => {
+                    console.log('Trending modal video loaded');
+                  }}
+                />
+                
+                {/* Play/Pause Button */}
+                <TouchableOpacity
+                  onPress={() => {
+                    if (isTrendingVideoPlaying) {
+                      trendingVideoRef.current?.pauseAsync();
+                      setIsTrendingVideoPlaying(false);
+                    } else {
+                      trendingVideoRef.current?.playAsync();
+                      setIsTrendingVideoPlaying(true);
+                    }
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: [{ translateX: -25 }, { translateY: -25 }],
+                    width: 50,
+                    height: 50,
+                    borderRadius: 25,
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    zIndex: 5
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 24 }}>
+                    {isTrendingVideoPlaying ? '❚❚' : '▶'}
+                  </Text>
+                </TouchableOpacity>
+                
+                {/* Video Info Overlay */}
+                <View style={{ 
+                  position: 'absolute', 
+                  bottom: 50, 
+                  left: 20, 
+                  right: 20,
+                  zIndex: 5
+                }}>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 5 }}>
+                    {trendingModalVideo.title || 'Untitled Video'}
+                  </Text>
+                  {trendingModalVideo.creator && (
+                    <Text style={{ color: '#ccc', fontSize: 14 }}>
+                      @{trendingModalVideo.creator.username}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            </SafeAreaView>
+          </GestureHandlerRootView>
+        )}
+      </Modal>
     </GestureHandlerRootView>
   );
 };

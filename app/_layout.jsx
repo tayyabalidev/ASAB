@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { Alert, AppState } from 'react-native';
 import { Stack, SplashScreen } from 'expo-router';
 import GlobalProvider, { useGlobalContext } from '../context/GlobalProvider';
 import { useFonts } from 'expo-font';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking'; // ✅ fix: use from expo-linking
-import { getCurrentUser, account, databases, ID, Query } from '../lib/appwrite';
+import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser, getOrCreateGoogleUser } from '../lib/appwrite';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -12,18 +13,91 @@ SplashScreen.preventAutoHideAsync();
 function OAuthHandler() {
   const router = useRouter();
   const { setUser, setIsLogged } = useGlobalContext();
+  const oauthProcessingRef = useRef(false);
 
   useEffect(() => {
     const handleDeepLink = async (url) => {
-      
+      console.log('🔗 Deep link received:', url);
 
-      if (url && url.includes('com.jsm.asabcorp://')) {
-        
+      if (url && (url.includes('com.jsm.asabcorp://') || url.includes('asabcorp://'))) {
+        console.log('✅ Valid deep link detected');
 
-        // Handle any deep link from OAuth
-        if (url.includes('com.jsm.asabcorp://')) {
+        // Handle Facebook OAuth success
+        if (url.includes('facebook-success') || url.includes('facebook') || url.includes('success')) {
+          console.log('📱 Handling Facebook OAuth success...');
+          oauthProcessingRef.current = true;
           
+          // Wait a bit for the session to be established
+          await new Promise(resolve => setTimeout(resolve, 2000));
           
+          try {
+            console.log('🔄 Attempting to get/create Facebook user...');
+            // getOrCreateFacebookUser() has built-in retry logic
+            const user = await getOrCreateFacebookUser();
+            if (user) {
+              console.log('✅ Facebook user created/logged in:', user);
+              setUser(user);
+              setIsLogged(true);
+              router.replace('/(tabs)/home');
+              oauthProcessingRef.current = false;
+            } else {
+              console.error('❌ No user returned from getOrCreateFacebookUser');
+              Alert.alert("Error", "Failed to create user account. Please try again.");
+              router.replace('/(auth)/sign-in');
+              oauthProcessingRef.current = false;
+            }
+          } catch (error) {
+            console.error('❌ Facebook OAuth error:', error);
+            Alert.alert("Error", error.message || "Failed to sign in with Facebook. Please try again.");
+            router.replace('/(auth)/sign-in');
+            oauthProcessingRef.current = false;
+          }
+        }
+        // Handle Facebook OAuth failure
+        else if (url.includes('facebook-failure')) {
+          console.log('❌ Facebook OAuth failure detected');
+          Alert.alert("Error", "Facebook login was cancelled or failed. Please try again.");
+          router.replace('/(auth)/sign-in');
+        }
+        // Handle Google OAuth success
+        else if (url.includes('google-success') || url.includes('google')) {
+          console.log('📱 Handling Google OAuth success...');
+          oauthProcessingRef.current = true;
+          
+          // Wait a bit for the session to be established
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          try {
+            console.log('🔄 Attempting to get/create Google user...');
+            // getOrCreateGoogleUser() has built-in retry logic
+            const user = await getOrCreateGoogleUser();
+            if (user) {
+              console.log('✅ Google user created/logged in:', user);
+              setUser(user);
+              setIsLogged(true);
+              router.replace('/(tabs)/home');
+              oauthProcessingRef.current = false;
+            } else {
+              console.error('❌ No user returned from getOrCreateGoogleUser');
+              Alert.alert("Error", "Failed to create user account. Please try again.");
+              router.replace('/(auth)/sign-in');
+              oauthProcessingRef.current = false;
+            }
+          } catch (error) {
+            console.error('❌ Google OAuth error:', error);
+            Alert.alert("Error", error.message || "Failed to sign in with Google. Please try again.");
+            router.replace('/(auth)/sign-in');
+            oauthProcessingRef.current = false;
+          }
+        }
+        // Handle Google OAuth failure
+        else if (url.includes('google-failure')) {
+          console.log('❌ Google OAuth failure detected');
+          Alert.alert("Error", "Google login was cancelled or failed. Please try again.");
+          router.replace('/(auth)/sign-in');
+        }
+        // Handle other OAuth
+        else if (url.includes('com.jsm.asabcorp://')) {
           // Wait a bit for the session to be established
           await new Promise(resolve => setTimeout(resolve, 2000));
           
@@ -84,23 +158,64 @@ function OAuthHandler() {
             router.replace('/(auth)/sign-in');
           }
         }
-        
-        // No need for separate failure handling - will be caught by error handling
       }
     };
 
     // ✅ Handle when app is opened from deep link
     Linking.getInitialURL().then((url) => {
-      if (url) handleDeepLink(url);
+      console.log('📱 Initial URL:', url);
+      if (url) {
+        console.log('🔗 Processing initial URL...');
+        handleDeepLink(url);
+      }
     });
 
     // ✅ Listen while app is open
-    const subscription = Linking.addEventListener('url', (event) => {
+    const linkingSubscription = Linking.addEventListener('url', (event) => {
+      console.log('🔗 URL event received:', event.url);
       handleDeepLink(event.url);
     });
 
+    // ✅ Listen for app state changes (when app comes back from browser)
+    const appStateSubscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active' && !oauthProcessingRef.current) {
+        console.log('📱 App became active - checking for OAuth session...');
+        
+        // Wait a bit for OAuth session to be established
+        setTimeout(async () => {
+          try {
+            // Check if we have a valid session (means OAuth might have completed)
+            const currentAccount = await account.get().catch(() => null);
+            if (currentAccount && currentAccount.$id) {
+              console.log('✅ OAuth session found, checking for user...');
+              oauthProcessingRef.current = true;
+              
+              try {
+                // Try to get or create user (works for both Facebook and Google)
+                const user = await getOrCreateFacebookUser().catch(() => getOrCreateGoogleUser());
+                if (user) {
+                  console.log('✅ User created/logged in via AppState check:', user);
+                  setUser(user);
+                  setIsLogged(true);
+                  router.replace('/(tabs)/home');
+                  oauthProcessingRef.current = false;
+                }
+              } catch (error) {
+                console.log('⚠️ Could not create/get user:', error.message);
+                oauthProcessingRef.current = false;
+              }
+            }
+          } catch (error) {
+            // No session yet, that's okay
+            console.log('ℹ️ No active session found');
+          }
+        }, 2000);
+      }
+    });
+
     return () => {
-      subscription.remove(); // clean up
+      linkingSubscription.remove();
+      appStateSubscription.remove();
     };
   }, [router, setUser, setIsLogged]);
 

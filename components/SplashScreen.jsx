@@ -15,6 +15,13 @@ const SplashScreen = ({ onComplete }) => {
     require('../assets/images/splash4.png'),
   ];
 
+  const splashQuotes = [
+    "Where memories live and connections grow.",
+    "Share your story, connect with hearts.",
+    "Your moments, our connections. Let's share!",
+    "Welcome to ASAB"
+  ];
+
   const handleSwipe = (event) => {
     if (event.nativeEvent.state === State.END) {
       const { translationX, velocityX } = event.nativeEvent;
@@ -54,6 +61,13 @@ const SplashScreen = ({ onComplete }) => {
               resizeMode="cover"
             />
             
+            {/* Quote Text */}
+            <View style={styles.quoteContainer}>
+              <Text style={styles.quoteText}>
+                {splashQuotes[currentImageIndex]}
+              </Text>
+            </View>
+
             {/* Progress indicator */}
             <View style={styles.progressContainer}>
               {splashImages.map((_, index) => (
@@ -100,6 +114,23 @@ const styles = StyleSheet.create({
     left: 0,
     // Ensure instant rendering without any transitions
     transform: [{ translateX: 0 }, { translateY: 0 }],
+  },
+  quoteContainer: {
+    position: 'absolute',
+    top: 100,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+  },
+  quoteText: {
+    color: '#FF9C01', // App accent color
+    fontSize: 22,
+    fontWeight: '600',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   progressContainer: {
     position: 'absolute',

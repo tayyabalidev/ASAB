@@ -66,9 +66,12 @@ const DonationPage = () => {
       // Simulate payment processing
       await new Promise(resolve => setTimeout(resolve, 2000));
       
+      const platformFee = finalAmount * 0.10;
+      const creatorReceives = finalAmount - platformFee;
+      
       Alert.alert(
         "Donation Successful! 🎉",
-        `Thank you for your generous donation of $${finalAmount.toFixed(2)}! Your support means the world to me.`,
+        `Thank you for your generous donation of $${finalAmount.toFixed(2)}!\n\nThe creator receives $${creatorReceives.toFixed(2)} (after 10% platform fee). Your support means the world!`,
         [
           {
             text: "Share",
@@ -258,25 +261,36 @@ const DonationPage = () => {
         </View>
 
         {/* Donation Summary */}
-        {getSelectedAmountValue() > 0 && (
-          <View className="mb-8 p-4 bg-gray-800 rounded-xl">
-            <Text className="text-white text-lg font-semibold mb-2">Donation Summary</Text>
-            <View className="flex-row justify-between items-center">
-              <Text className="text-gray-400">Amount:</Text>
-              <Text className="text-white text-xl font-bold">${getSelectedAmountValue().toFixed(2)}</Text>
-            </View>
-            <View className="flex-row justify-between items-center mt-2">
-              <Text className="text-gray-400">Processing Fee:</Text>
-              <Text className="text-gray-400">Free</Text>
-            </View>
-            <View className="border-t border-gray-600 mt-3 pt-3">
+        {getSelectedAmountValue() > 0 && (() => {
+          const donationAmount = getSelectedAmountValue();
+          const platformFee = donationAmount * 0.10; // 10% fee
+          const creatorReceives = donationAmount - platformFee;
+          const totalCharged = donationAmount;
+          
+          return (
+            <View className="mb-8 p-4 bg-gray-800 rounded-xl">
+              <Text className="text-white text-lg font-semibold mb-2">Donation Summary</Text>
               <View className="flex-row justify-between items-center">
-                <Text className="text-white text-lg font-bold">Total:</Text>
-                <Text className="text-green-400 text-xl font-bold">${getSelectedAmountValue().toFixed(2)}</Text>
+                <Text className="text-gray-400">Donation Amount:</Text>
+                <Text className="text-white text-xl font-bold">${donationAmount.toFixed(2)}</Text>
+              </View>
+              <View className="flex-row justify-between items-center mt-2">
+                <Text className="text-gray-400">Platform Fee (10%):</Text>
+                <Text className="text-orange-400">-${platformFee.toFixed(2)}</Text>
+              </View>
+              <View className="flex-row justify-between items-center mt-1">
+                <Text className="text-gray-400 text-sm">Creator Receives:</Text>
+                <Text className="text-green-400 font-semibold">${creatorReceives.toFixed(2)}</Text>
+              </View>
+              <View className="border-t border-gray-600 mt-3 pt-3">
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-white text-lg font-bold">Your Total Charge:</Text>
+                  <Text className="text-green-400 text-xl font-bold">${totalCharged.toFixed(2)}</Text>
+                </View>
               </View>
             </View>
-          </View>
-        )}
+          );
+        })()}
 
         {/* Donate Button */}
         <TouchableOpacity
@@ -324,7 +338,7 @@ const DonationPage = () => {
         {/* Trust Indicators */}
         <View className="mb-8">
           <Text className="text-gray-400 text-sm text-center mb-4">
-            🔒 Secure Payment • 💝 100% goes to creator • 🚫 No hidden fees
+            🔒 Secure Payment • 💝 90% goes to creator • ⚙️ 10% platform fee
           </Text>
         </View>
       </ScrollView>

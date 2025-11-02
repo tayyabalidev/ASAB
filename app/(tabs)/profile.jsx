@@ -795,7 +795,17 @@ const Profile = () => {
           {/* Action Buttons */}
           <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
             <TouchableOpacity 
-              onPress={() => router.push('/donation')}
+              onPress={() => {
+                const followerCount = followers?.length || 0;
+                if (followerCount < 1000) {
+                  Alert.alert(
+                    "Support Not Available",
+                    "You need at least 1,000 followers to enable the support feature. You currently have " + followerCount + " followers."
+                  );
+                } else {
+                  router.push('/donation');
+                }
+              }}
               style={{
                 borderRadius: 8,
                 shadowColor: '#32CD32',
@@ -803,7 +813,9 @@ const Profile = () => {
                 shadowOpacity: 0.3,
                 shadowRadius: 4,
                 elevation: 3,
+                opacity: (followers?.length || 0) < 1000 ? 0.5 : 1,
               }}
+              disabled={(followers?.length || 0) < 1000}
             >
               <LinearGradient
                 colors={['#32CD32', '#228B22']} // Lime green to emerald green
@@ -818,7 +830,9 @@ const Profile = () => {
                 }}
               >
                 
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Support</Text>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
+                  Support {(followers?.length || 0) < 1000 && `(${(followers?.length || 0)}/1000)`}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
             <TouchableOpacity 

@@ -23,7 +23,7 @@
         "NSPhotoLibraryUsageDescription": "This app needs access to photo library to select and upload videos",
         "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication",
         "UIStatusBarStyle": "UIStatusBarStyleLightContent",
-        "UIViewControllerBasedStatusBarAppearance": false
+        "UIViewControllerBasedStatusBarAppearance": false,
       }
     },
     "android": {
@@ -43,11 +43,12 @@
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.INTERNET"
       ],
-      "package": "com.anonymous.sora"
+      "package": "com.anonymous.sora",
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "scheme": "com.jsm.asabcorp",
     "plugins": [
       "expo-router",
       "expo-font",
