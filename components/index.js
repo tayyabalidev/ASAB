@@ -17,3 +17,4 @@ export { default as LiveReactions } from './LiveReactions';
 export { default as PictureInPicturePlayer } from './PictureInPicturePlayer';
 export { default as SplashScreen } from './SplashScreen';
 export { default as ThemeToggle } from './ThemeToggle';
+export { default as LanguageSelector } from './LanguageSelector';

@@ -2,49 +2,24 @@ import { StatusBar } from "expo-status-bar";
 import { Redirect, Tabs } from "expo-router";
 import { Text, View } from "react-native";
 import { Feather } from '@expo/vector-icons';
+import { useTranslation } from "react-i18next";
 
-import { icons } from "../../constants";
 import { Loader } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
-const TabIcon = ({ name, color, focused }) => {
-  let iconName;
-  let label;
-  switch (name) {
-    case 'Home':
-      iconName = 'home';
-      label = 'Home';
-      break;
-    case 'Live':
-      iconName = 'video';
-      label = 'Live';
-      break;
-    case 'Friends':
-      iconName = 'users';
-      label = 'Friends';
-      break;
-    case 'Create':
-      iconName = 'plus-circle';
-      label = 'Create';
-      break;
-    case 'Inbox':
-      iconName = 'message-circle';
-      label = 'Inbox';
-      break;
-    case 'Profile':
-      iconName = 'user';
-      label = 'Profile';
-      break;
-    default:
-      iconName = 'circle';
-      label = name;
-  }
+const TabIcon = ({ iconName, color, focused, label, isRTL }) => {
   return (
-    <View className="flex items-center justify-center" style={{gap: 2}}>
-          <Feather name={iconName} size={26} color={color} />
+    <View className="flex items-center justify-center" style={{ gap: 2 }}>
+      <Feather name={iconName} size={26} color={color} />
       <Text
         className={`${focused ? "font-psemibold" : "font-pregular"} text-xs text-center`}
-        style={{ color: color, marginTop: 2, lineHeight:16, minWidth: 48 }}
+        style={{
+          color,
+          marginTop: 2,
+          lineHeight: 16,
+          minWidth: 48,
+          textAlign: isRTL ? "right" : "center",
+        }}
       >
         {label}
       </Text>
@@ -53,7 +28,20 @@ const TabIcon = ({ name, color, focused }) => {
 };
 
 const TabLayout = () => {
-  const { loading, isLogged } = useGlobalContext();
+  const { loading, isLogged, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
+
+  const tabLabels = {
+    home: t("nav.home"),
+    liveStreams: t("nav.liveStreams"),
+    friends: t("nav.friends"),
+    create: t("nav.create"),
+    inbox: t("nav.inbox"),
+    profile: t("nav.profile"),
+    donation: t("nav.donations"),
+    goLive: t("nav.goLive"),
+    chat: t("nav.chat"),
+  };
 
   if (!loading && !isLogged) return <Redirect href="/sign-in" />;
 
@@ -81,13 +69,15 @@ const TabLayout = () => {
         <Tabs.Screen
           name="home"
           options={{
-            title: "Home",
+            title: tabLabels.home,
             headerShown: false,
             tabBarIcon: ({ color, focused }) => (
               <TabIcon
-                name="Home"
+                iconName="home"
+                label={tabLabels.home}
                 color={color}
                 focused={focused}
+                isRTL={isRTL}
               />
             ),
           }}
@@ -95,13 +85,15 @@ const TabLayout = () => {
         <Tabs.Screen
           name="friends"
           options={{
-            title: "Friends",
+            title: tabLabels.friends,
             headerShown: false,
             tabBarIcon: ({ color, focused }) => (
               <TabIcon
-                name="Friends"
+                iconName="users"
+                label={tabLabels.friends}
                 color={color}
                 focused={focused}
+                isRTL={isRTL}
               />
             ),
           }}
@@ -110,13 +102,15 @@ const TabLayout = () => {
         <Tabs.Screen
           name="create"
           options={{
-            title: "Create",
+            title: tabLabels.create,
             headerShown: false,
             tabBarIcon: ({ color, focused }) => (
               <TabIcon
-                name="Create"
+                iconName="plus-circle"
+                label={tabLabels.create}
                 color={color}
                 focused={focused}
+                isRTL={isRTL}
               />
             ),
           }}
@@ -124,7 +118,7 @@ const TabLayout = () => {
         <Tabs.Screen
           name="chat"
           options={{
-            title: "Chat",
+            title: tabLabels.chat,
             headerShown: false,
             href: null, // Hide from tab bar
           }}
@@ -132,13 +126,15 @@ const TabLayout = () => {
         <Tabs.Screen
           name="profile"
           options={{
-            title: "Profile",
+            title: tabLabels.profile,
             headerShown: false,
             tabBarIcon: ({ color, focused }) => (
               <TabIcon
-                name="Profile"
+                iconName="user"
+                label={tabLabels.profile}
                 color={color}
                 focused={focused}
+                isRTL={isRTL}
               />
             ),
           }}
@@ -146,7 +142,7 @@ const TabLayout = () => {
         <Tabs.Screen
           name="donation"
           options={{
-            title: "Donation",
+            title: tabLabels.donation,
             headerShown: false,
             href: null, // Hide from tab bar
           }}
@@ -154,7 +150,7 @@ const TabLayout = () => {
         <Tabs.Screen
           name="go-live"
           options={{
-            title: "Go Live",
+            title: tabLabels.goLive,
             headerShown: false,
             href: null, // Hide from tab bar
           }}
@@ -162,7 +158,7 @@ const TabLayout = () => {
         <Tabs.Screen
           name="live-streams"
           options={{
-            title: "Live Streams",
+            title: tabLabels.liveStreams,
             headerShown: false,
             href: null, // Hide from tab bar
           }}

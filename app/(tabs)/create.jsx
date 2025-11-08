@@ -12,6 +12,7 @@ import {
   ScrollView,
 } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTranslation } from "react-i18next";
 
 import { icons } from "../../constants";
 import { createVideoPost } from "../../lib/appwrite";
@@ -19,7 +20,8 @@ import { CustomButton, FormField } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const Create = () => {
-  const { user } = useGlobalContext();
+  const { user, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({
     title: "",
@@ -33,7 +35,7 @@ const Create = () => {
       // Request permissions
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission required', 'Gallery permission is required to select media.');
+        Alert.alert(t('alerts.permissionRequiredTitle'), t('alerts.permissionRequiredMessage'));
         return;
       }
 
@@ -87,8 +89,7 @@ const Create = () => {
         }
       }
     } catch (error) {
-      
-      Alert.alert("Error", "Failed to select media from gallery");
+      Alert.alert(t("common.error"), t("alerts.mediaSelectError"));
     }
   };
 
@@ -96,11 +97,11 @@ const Create = () => {
     
     
     if (!form.prompt || form.prompt.trim() === "") {
-      return Alert.alert("Error", "Please provide AI prompt");
+      return Alert.alert(t("common.error"), t("alerts.promptRequired"));
     }
     
     if (!form.title || form.title.trim() === "") {
-      return Alert.alert("Error", "Please provide video title");
+      return Alert.alert(t("common.error"), t("alerts.titleRequired"));
     }
     
     // Removed thumbnail validation since we're hiding it
@@ -109,11 +110,11 @@ const Create = () => {
     // }
     
     if (!form.video) {
-      return Alert.alert("Error", "Please select a video");
+      return Alert.alert(t("common.error"), t("alerts.videoRequired"));
     }
 
     if (!user || !user.$id) {
-      return Alert.alert("Error", "Please login to upload video");
+      return Alert.alert(t("common.error"), t("alerts.loginToUpload"));
     }
 
     setUploading(true);
@@ -125,11 +126,11 @@ const Create = () => {
         userId: user.$id,
       });
 
-      Alert.alert("Success", "Post uploaded successfully");
+      Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
       router.push("/home");
     } catch (error) {
       
-      Alert.alert("Error", error.message || "Failed to upload video");
+      Alert.alert(t("common.error"), error.message || t("alerts.uploadFailed"));
     } finally {
       setForm({
         title: "",
@@ -151,19 +152,27 @@ const Create = () => {
         style={{ flex: 1 }}
       >
         <ScrollView className="px-4 my-6">
-        <Text className="text-2xl text-white font-psemibold">Upload Video</Text>
+        <Text
+          className="text-2xl text-white font-psemibold"
+          style={{ textAlign: isRTL ? 'right' : 'left' }}
+        >
+          {t("create.screenTitle")}
+        </Text>
 
         <FormField
-          title="Video Title"
+          title={t("create.videoTitleLabel")}
           value={form.title}
-          placeholder="Give your video a catchy title..."
+          placeholder={t("create.videoTitlePlaceholder")}
           handleChangeText={(e) => setForm({ ...form, title: e })}
           otherStyles="mt-10"
         />
 
         <View className="mt-7 space-y-2">
-          <Text className="text-base text-gray-100 font-pmedium">
-            Upload Video
+          <Text
+            className="text-base text-gray-100 font-pmedium"
+            style={{ textAlign: isRTL ? 'right' : 'left' }}
+          >
+            {t("create.uploadVideoLabel")}
           </Text>
 
           <TouchableOpacity onPress={() => openPicker("video")}>
@@ -220,15 +229,15 @@ const Create = () => {
         </View> */}
 
         <FormField
-          title="AI Prompt"
+          title={t("create.aiPromptLabel")}
           value={form.prompt}
-          placeholder="The AI prompt of your video...."
+          placeholder={t("create.aiPromptPlaceholder")}
           handleChangeText={(e) => setForm({ ...form, prompt: e })}
           otherStyles="mt-7"
         />
 
         <CustomButton
-          title="Submit & Publish"
+          title={t("create.submitButton")}
           handlePress={submit}
           containerStyles="mt-7"
           isLoading={uploading}

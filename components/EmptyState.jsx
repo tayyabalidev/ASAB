@@ -1,10 +1,13 @@
 import { router } from "expo-router";
 import { View, Text, Image } from "react-native";
+import { useTranslation } from "react-i18next";
 
 import { images } from "../constants";
 import CustomButton from "./CustomButton";
 
 const EmptyState = ({ title, subtitle }) => {
+  const { t } = useTranslation();
+
   return (
     <View className="flex justify-center items-center px-4">
       <Image
@@ -19,7 +22,7 @@ const EmptyState = ({ title, subtitle }) => {
       </Text>
 
       <CustomButton
-        title="Back to Explore"
+        title={t('common.backToExplore')}
         handlePress={() => router.push("/home")}
         containerStyles="w-full my-5"
       />
@@ -28,3 +31,4 @@ const EmptyState = ({ title, subtitle }) => {
 };
 
 export default EmptyState;
+

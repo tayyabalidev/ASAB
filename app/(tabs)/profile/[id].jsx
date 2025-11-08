@@ -7,6 +7,7 @@ import { Query } from 'react-native-appwrite';
 import { Video, ResizeMode } from "expo-av";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTranslation } from "react-i18next";
 
 import { icons } from "../../../constants";
 import useAppwrite from "../../../lib/useAppwrite";
@@ -18,6 +19,7 @@ import { images } from "../../../constants";
 
 const UserProfile = () => {
   const { id } = useLocalSearchParams();
+  const { t } = useTranslation();
   const { user: currentUser, followStatus, updateFollowStatus } = useGlobalContext();
   const [profileUser, setProfileUser] = useState(null);
   // Re-enable privacy states
@@ -102,7 +104,7 @@ const UserProfile = () => {
         
       } catch (error) {
         console.error("Error fetching profile user:", error);
-        Alert.alert("Error", "Failed to load profile");
+        Alert.alert(t('common.error'), t('profile.alerts.loadProfileError'));
         router.replace('/home');
       } finally {
         setLoading(false);
@@ -147,7 +149,7 @@ const UserProfile = () => {
                 const u = await databases.getDocument(appwriteConfig.databaseId, appwriteConfig.userCollectionId, uid);
                 return { $id: u.$id, username: u.username, avatar: u.avatar };
               } catch {
-                return { $id: uid, username: 'Unknown', avatar: images.profile };
+                return { $id: uid, username: t('profile.general.unknownUser'), avatar: images.profile };
               }
             })
           );
@@ -175,10 +177,10 @@ const UserProfile = () => {
         }
       );
       
-      Alert.alert("Request Sent", "Your request to view this profile has been sent.");
+      Alert.alert(t('profile.alerts.requestSentTitle'), t('profile.alerts.requestSentMessage'));
     } catch (error) {
       console.error("Error requesting access:", error);
-      Alert.alert("Error", "Failed to send request");
+      Alert.alert(t('common.error'), t('profile.alerts.requestError'));
     }
   };
 
@@ -200,7 +202,7 @@ const UserProfile = () => {
       setIsFollowing(!newFollowState);
       setFollowersCount((prev) => !newFollowState ? prev + 1 : prev - 1);
       updateFollowStatus(id, !newFollowState);
-      Alert.alert("Error", error.message || "Failed to update follow status");
+      Alert.alert(t('common.error'), error.message || t('profile.alerts.followError'));
       console.error("Follow error:", error);
     }
   };
@@ -221,7 +223,7 @@ const UserProfile = () => {
 
   const handleBookmark = async () => {
     if (!currentUser?.$id || !modalVideo) {
-      Alert.alert("Error", "Please login to bookmark videos");
+      Alert.alert(t('common.error'), t('profile.alerts.bookmarkLogin'));
       return;
     }
 
@@ -239,7 +241,7 @@ const UserProfile = () => {
       setBookmarked(newBookmarkStatus);
     } catch (error) {
       console.error("Error toggling bookmark:", error);
-      Alert.alert("Error", "Failed to bookmark video");
+      Alert.alert(t('common.error'), t('profile.alerts.bookmarkError'));
     }
   };
 
@@ -248,7 +250,11 @@ const UserProfile = () => {
     
     try {
       const result = await Share.share({
-        message: `Check out this video: ${modalVideo.title} by ${modalVideo.creator.username}\n${modalVideo.video}`,
+        message: t('profile.share.message', {
+          title: modalVideo.title,
+          username: modalVideo.creator.username,
+          video: modalVideo.video,
+        }),
         title: modalVideo.title,
       });
       
@@ -260,7 +266,7 @@ const UserProfile = () => {
       }
     } catch (error) {
       console.error("Error sharing video:", error);
-      Alert.alert("Error", "Failed to share video");
+      Alert.alert(t('common.error'), t('profile.alerts.shareError'));
     }
   };
 
@@ -418,7 +424,7 @@ const UserProfile = () => {
               backgroundColor: 'rgba(0, 0, 0, 0.4)'
             }} />
             <View className="flex-1 justify-center items-center">
-              <Text className="text-white text-lg">Loading profile...</Text>
+              <Text className="text-white text-lg">{t('profile.other.loading')}</Text>
             </View>
           </View>
         </SafeAreaView>
@@ -468,7 +474,7 @@ const UserProfile = () => {
                   className="w-6 h-6"
                 />
               </TouchableOpacity>
-              <Text className="text-white text-lg font-psemibold">Profile</Text>
+              <Text className="text-white text-lg font-psemibold">{t('profile.other.privateHeader')}</Text>
               <View className="w-6" />
             </View>
 
@@ -486,14 +492,14 @@ const UserProfile = () => {
               </Text>
               
               <Text className="text-gray-300 text-center mb-8">
-                This profile is private. Only approved users can view this content.
+                {t('profile.other.privateMessage')}
               </Text>
               
               <TouchableOpacity
                 onPress={requestAccess}
                 className="bg-secondary px-6 py-3 rounded-lg"
               >
-                <Text className="text-white font-psemibold">Request Access</Text>
+                <Text className="text-white font-psemibold">{t('profile.other.requestAccess')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -556,8 +562,8 @@ const UserProfile = () => {
             )}
             ListEmptyComponent={() => (
               <EmptyState
-                title="No Videos Found"
-                subtitle="No videos found for this profile"
+                title={t('profile.other.emptyTitle')}
+                subtitle={t('profile.other.emptySubtitle')}
               />
             )}
             ListHeaderComponent={() => (
@@ -571,21 +577,21 @@ const UserProfile = () => {
                   />
                 </View>
                 {/* Username and handle */}
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 22 }}>{profileUser?.username}</Text>
-                <Text style={{ color: '#aaa', fontSize: 15, marginBottom: 8 }}>@{profileUser?.username}</Text>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 22 }}>{profileUser?.username || t('profile.general.userPlaceholder')}</Text>
+                <Text style={{ color: '#aaa', fontSize: 15, marginBottom: 8 }}>@{profileUser?.username || t('profile.general.handlePlaceholder')}</Text>
                 {/* Stats Row */}
                 <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
                   <View style={{ alignItems: 'center', marginHorizontal: 18 }}>
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>{profileUser?.following?.length || 0}</Text>
-                    <Text style={{ color: '#aaa', fontSize: 13 }}>Following</Text>
+                    <Text style={{ color: '#aaa', fontSize: 13 }}>{t('profile.stats.following')}</Text>
                   </View>
                   <View style={{ alignItems: 'center', marginHorizontal: 18 }}>
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>{followersCount}</Text>
-                    <Text style={{ color: '#aaa', fontSize: 13 }}>Followers</Text>
+                    <Text style={{ color: '#aaa', fontSize: 13 }}>{t('profile.stats.followers')}</Text>
                   </View>
                   <View style={{ alignItems: 'center', marginHorizontal: 18 }}>
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>{likesCount}</Text>
-                    <Text style={{ color: '#aaa', fontSize: 13 }}>Likes</Text>
+                    <Text style={{ color: '#aaa', fontSize: 13 }}>{t('profile.stats.likes')}</Text>
                   </View>
                 </View>
                 {/* Buttons Row */}
@@ -614,7 +620,9 @@ const UserProfile = () => {
                             borderRadius: 8,
                           }}
                         >
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{isFollowing ? 'Unfollow' : 'Follow'}</Text>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
+                            {isFollowing ? t('profile.actions.unfollow') : t('profile.actions.follow')}
+                          </Text>
                         </LinearGradient>
                       </TouchableOpacity>
                       <TouchableOpacity
@@ -639,32 +647,32 @@ const UserProfile = () => {
                             borderRadius: 8,
                           }}
                         >
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Message</Text>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{t('profile.actions.message')}</Text>
                         </LinearGradient>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={{ backgroundColor: '#222', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10, marginHorizontal: 6 }}
                         onPress={() => {
                           Alert.alert(
-                            "Profile Options",
-                            "What would you like to do?",
+                            t('profile.actions.profileOptionsTitle'),
+                            t('profile.actions.profileOptionsMessage'),
                             [
                               {
-                                text: "Report Profile",
+                                text: t('profile.actions.reportProfile'),
                                 onPress: () => {
-                                  Alert.alert("Report", "Profile reported successfully!");
+                                  Alert.alert(t('profile.actions.reportSuccessTitle'), t('profile.actions.reportSuccessMessage'));
                                 },
                                 style: "destructive",
                               },
                               {
-                                text: "Block User",
+                                text: t('profile.actions.blockUser'),
                                 onPress: () => {
-                                  Alert.alert("Block", "User blocked successfully!");
+                                  Alert.alert(t('profile.actions.blockSuccessTitle'), t('profile.actions.blockSuccessMessage'));
                                 },
                                 style: "destructive",
                               },
                               {
-                                text: "Cancel",
+                                text: t('profile.actions.cancel'),
                                 style: "cancel",
                               },
                             ]
@@ -700,7 +708,7 @@ const UserProfile = () => {
                           }}
                         >
                           <Text style={{ color: '#fff', fontWeight: 'bold', marginRight: 6 }}>💰</Text>
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Support Creator</Text>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{t('profile.actions.supportCreator')}</Text>
                         </LinearGradient>
                       </TouchableOpacity>
                     </View>
@@ -920,7 +928,9 @@ const UserProfile = () => {
                        resizeMode="contain" 
                      />
                    </View>
-                   <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{bookmarked ? 'Saved' : 'Save'}</Text>
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                    {bookmarked ? t('profile.general.saved') : t('profile.general.save')}
+                  </Text>
                  </TouchableOpacity>
                  
                  {/* Share Button */}
@@ -953,14 +963,16 @@ const UserProfile = () => {
                    
                  </View>
                  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 8, lineHeight: 18 }}>
-                   {modalVideo.title || 'Untitled'} ♫ ✨
+                   {t('profile.general.videoTitle', { title: modalVideo.title || t('profile.general.untitled') })}
                  </Text>
                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                    <Text style={{ color: '#fff', fontSize: 12, marginRight: 5 }}>♫</Text>
-                   <Text style={{ color: '#fff', fontSize: 12 }}>Original Sound - {modalVideo.creator?.username || profileUser?.username}</Text>
+                   <Text style={{ color: '#fff', fontSize: 12 }}>
+                     {t('profile.general.originalSound', { username: modalVideo.creator?.username || profileUser?.username })}
+                   </Text>
                  </View>
                  <Text style={{ color: '#fff', fontSize: 12, opacity: 0.8 }}>
-                   #trending #viral #fyp
+                   {t('profile.general.trendingTags')}
                  </Text>
                </View>
                
@@ -978,7 +990,7 @@ const UserProfile = () => {
                    <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '80%', paddingBottom: 0 }}>
                      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
                        <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-                       <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Comments</Text>
+                       <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.commentsTitle')}</Text>
                      </View>
                      {loadingComments ? (
                        <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
@@ -1005,7 +1017,7 @@ const UserProfile = () => {
                        <TextInput
                          value={newComment}
                          onChangeText={setNewComment}
-                         placeholder="Add a comment..."
+                         placeholder={t('profile.modals.addCommentPlaceholder')}
                          placeholderTextColor="#aaa"
                          style={{ flex: 1, backgroundColor: '#333', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
                          editable={!posting}
@@ -1015,11 +1027,13 @@ const UserProfile = () => {
                          disabled={posting || !newComment.trim()}
                          style={{ marginLeft: 8, backgroundColor: posting ? '#888' : '#a77df8', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12 }}
                        >
-                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{posting ? '...' : 'Post'}</Text>
+                         <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
+                           {posting ? t('profile.modals.posting') : t('profile.modals.post')}
+                         </Text>
                        </TouchableOpacity>
                      </View>
                      <TouchableOpacity onPress={() => setCommentsModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Close</Text>
+                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t('profile.modals.close')}</Text>
                      </TouchableOpacity>
                    </View>
                  </KeyboardAvoidingView>
@@ -1039,12 +1053,12 @@ const UserProfile = () => {
                    <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '70%' }}>
                      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
                        <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-                       <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Likes</Text>
+                       <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.likesTitle')}</Text>
                      </View>
                      {loadingLikes ? (
                        <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
                      ) : likesList.length === 0 ? (
-                       <Text style={{ color: '#fff', textAlign: 'center', marginVertical: 24 }}>No likes yet.</Text>
+                       <Text style={{ color: '#fff', textAlign: 'center', marginVertical: 24 }}>{t('profile.modals.noLikes')}</Text>
                      ) : (
                        <FlatList
                          data={likesList}
@@ -1060,7 +1074,7 @@ const UserProfile = () => {
                        />
                      )}
                      <TouchableOpacity onPress={() => setLikesModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Close</Text>
+                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t('profile.modals.close')}</Text>
                      </TouchableOpacity>
                    </View>
                  </KeyboardAvoidingView>

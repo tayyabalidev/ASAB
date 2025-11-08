@@ -8,9 +8,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { icons } from "../../constants";
 import { databases, appwriteConfig, getCurrentUser } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
+import { useTranslation } from "react-i18next";
 
 const Friends = () => {
-  const { user: currentUser } = useGlobalContext();
+  const { user: currentUser, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [users, setUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -65,8 +67,8 @@ const Friends = () => {
         <Text className="text-white font-psemibold text-lg">
           {item.username}
         </Text>
-        <Text className="text-gray-300 text-sm">
-          {item.isPrivate ? "🔒 Private Profile" : "🌐 Public Profile"}
+        <Text className="text-gray-300 text-sm" style={{ textAlign: isRTL ? 'right' : 'left' }}>
+          {item.isPrivate ? t("community.privateProfile") : t("community.publicProfile")}
         </Text>
       </View>
       
@@ -87,7 +89,9 @@ const Friends = () => {
         style={{ flex: 1 }}
       >
         <View className="px-4 py-6">
-        <Text className="text-2xl text-white font-psemibold mb-6">Discover Users</Text>
+        <Text className="text-2xl text-white font-psemibold mb-6" style={{ textAlign: isRTL ? 'right' : 'left' }}>
+          {t("community.discoverTitle")}
+        </Text>
         
         {/* Search Input */}
         <View className="flex-row items-center bg-black rounded-lg px-4 py-3 mb-6">
@@ -97,17 +101,18 @@ const Friends = () => {
             resizeMode="contain"
           />
           <TextInput
-            placeholder="Search users..."
+            placeholder={t("community.searchPlaceholder")}
             placeholderTextColor="#666"
             value={searchQuery}
             onChangeText={setSearchQuery}
             className="flex-1 text-white text-base"
+            style={{ textAlign: isRTL ? 'right' : 'left' }}
           />
         </View>
 
         {loading ? (
           <View className="flex-1 justify-center items-center">
-            <Text className="text-white text-lg">Loading users...</Text>
+            <Text className="text-white text-lg">{t("community.loading")}</Text>
           </View>
         ) : (
           <FlatList
@@ -118,7 +123,9 @@ const Friends = () => {
             ListEmptyComponent={() => (
               <View className="flex-1 justify-center items-center py-20">
                 <Text className="text-gray-300 text-lg text-center">
-                  {searchQuery ? "No users found matching your search" : "No users found"}
+                  {searchQuery
+                    ? t("community.emptySearch")
+                    : t("community.emptyAll")}
                 </Text>
               </View>
             )}

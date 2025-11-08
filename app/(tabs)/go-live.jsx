@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import { useGlobalContext } from '../../context/GlobalProvider';
 import { createLiveStream } from '../../lib/livestream';
 import { CustomButton } from '../../components';
+import { useTranslation } from 'react-i18next';
 
 const CATEGORIES = [
   'Gaming',
@@ -28,7 +29,8 @@ const QUALITY_OPTIONS = [
 ];
 
 const GoLive = () => {
-  const { user } = useGlobalContext();
+  const { user, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('General');
@@ -41,12 +43,12 @@ const GoLive = () => {
 
   const handlePreviewPress = () => {
     if (!title.trim()) {
-      Alert.alert('Error', 'Please enter a title for your live stream');
+      Alert.alert(t('common.error'), t('liveGo.titleRequired'));
       return;
     }
 
     if (!user?.$id) {
-      Alert.alert('Error', 'Please login to go live');
+      Alert.alert(t('common.error'), t('alerts.loginRequired'));
       return;
     }
 
@@ -58,11 +60,11 @@ const GoLive = () => {
 
     if (!permission.granted) {
       Alert.alert(
-        'Camera Permission Required',
-        'Please grant camera permission to preview and go live',
+        t('liveGo.cameraPermissionTitle'),
+        t('liveGo.cameraPermissionMessage'),
         [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Grant Permission', onPress: requestPermission }
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('liveGo.cameraPermissionGrant'), onPress: requestPermission }
         ]
       );
       return;
@@ -96,7 +98,7 @@ const GoLive = () => {
       });
     } catch (error) {
       console.error('Error starting live stream:', error);
-      Alert.alert('Error', 'Failed to start live stream. Please try again.');
+      Alert.alert(t('common.error'), t('liveGo.startError'));
     } finally {
       setLoading(false);
     }
@@ -119,9 +121,11 @@ const GoLive = () => {
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity onPress={() => router.replace('/home')} style={styles.backButton}>
-              <Text style={styles.backButtonText}>✕</Text>
+            <Text style={styles.backButtonText}>✕</Text>
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Go Live</Text>
+          <Text style={[styles.headerTitle, { textAlign: isRTL ? 'right' : 'left' }]}>
+            {t('liveGo.headerTitle')}
+          </Text>
             <View style={styles.placeholder} />
           </View>
 
@@ -129,45 +133,62 @@ const GoLive = () => {
           <View style={styles.previewCard}>
             <View style={styles.liveIndicator}>
               <View style={styles.liveDot} />
-              <Text style={styles.liveText}>LIVE</Text>
+              <Text style={styles.liveText}>{t('live.badge')}</Text>
             </View>
-            <Text style={styles.previewTitle}>You're about to go live!</Text>
-            <Text style={styles.previewSubtitle}>Share your moment with the world</Text>
+            <Text style={[styles.previewTitle, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('liveGo.previewTitle')}
+            </Text>
+            <Text style={[styles.previewSubtitle, { textAlign: isRTL ? 'right' : 'center' }]}>
+              {t('liveGo.previewSubtitle')}
+            </Text>
           </View>
 
           {/* Stream Title */}
           <View style={styles.inputSection}>
-            <Text style={styles.label}>Stream Title *</Text>
+            <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('liveGo.streamTitleLabel')} *
+            </Text>
             <TextInput
               style={styles.input}
-              placeholder="What are you streaming today?"
+              placeholder={t('liveGo.streamTitlePlaceholder')}
               placeholderTextColor="#888"
               value={title}
               onChangeText={setTitle}
               maxLength={100}
+              textAlign={isRTL ? 'right' : 'left'}
             />
-            <Text style={styles.charCount}>{title.length}/100</Text>
+            <Text style={[styles.charCount, { textAlign: isRTL ? 'left' : 'right' }]}>
+              {t('liveGo.charCount', { count: title.length, max: 100 })}
+            </Text>
           </View>
 
           {/* Description */}
           <View style={styles.inputSection}>
-            <Text style={styles.label}>Description</Text>
+            <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('liveGo.descriptionLabel')}
+            </Text>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Tell viewers what this stream is about..."
+              placeholder={t('liveGo.descriptionPlaceholder')}
               placeholderTextColor="#888"
               value={description}
               onChangeText={setDescription}
               maxLength={300}
               multiline
               numberOfLines={4}
+              textAlignVertical="top"
+              textAlign={isRTL ? 'right' : 'left'}
             />
-            <Text style={styles.charCount}>{description.length}/300</Text>
+            <Text style={[styles.charCount, { textAlign: isRTL ? 'left' : 'right' }]}>
+              {t('liveGo.charCount', { count: description.length, max: 300 })}
+            </Text>
           </View>
 
           {/* Category Selection */}
           <View style={styles.inputSection}>
-            <Text style={styles.label}>Category</Text>
+            <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('liveGo.categoryLabel')}
+            </Text>
             <ScrollView 
               horizontal 
               showsHorizontalScrollIndicator={false}
@@ -188,7 +209,7 @@ const GoLive = () => {
                       selectedCategory === category && styles.categoryTextSelected
                     ]}
                   >
-                    {category}
+                    {t(`liveGo.categories.${category}`, category)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -197,7 +218,9 @@ const GoLive = () => {
 
           {/* Stream Quality Selection */}
           <View style={styles.inputSection}>
-            <Text style={styles.label}>Stream Quality</Text>
+            <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('liveGo.streamQualityLabel')}
+            </Text>
             <View style={styles.qualityContainer}>
               {QUALITY_OPTIONS.map((option) => (
                 <TouchableOpacity
@@ -214,7 +237,7 @@ const GoLive = () => {
                       selectedQuality === option.value && styles.qualityLabelSelected
                     ]}
                   >
-                    {option.label}
+                    {t(`liveGo.quality.${option.value}.label`)}
                   </Text>
                   <Text
                     style={[
@@ -222,7 +245,7 @@ const GoLive = () => {
                       selectedQuality === option.value && styles.qualityDescriptionSelected
                     ]}
                   >
-                    {option.description}
+                    {t(`liveGo.quality.${option.value}.description`)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -231,16 +254,19 @@ const GoLive = () => {
 
           {/* Tips Card */}
           <View style={styles.tipsCard}>
-            <Text style={styles.tipsTitle}>💡 Live Streaming Tips</Text>
-            <Text style={styles.tipItem}>• Choose a well-lit area</Text>
-            <Text style={styles.tipItem}>• Check your internet connection</Text>
-            <Text style={styles.tipItem}>• Engage with your viewers</Text>
-            <Text style={styles.tipItem}>• Be authentic and have fun!</Text>
+            <Text style={[styles.tipsTitle, { textAlign: isRTL ? 'right' : 'left' }]}>
+              💡 {t('liveGo.tipsTitle')}
+            </Text>
+            {t('liveGo.tips', { returnObjects: true }).map((tip, index) => (
+              <Text key={index} style={[styles.tipItem, { textAlign: isRTL ? 'right' : 'left' }]}>
+                • {tip}
+              </Text>
+            ))}
           </View>
 
           {/* Go Live Button */}
           <CustomButton
-            title="Preview & Go Live"
+            title={t('liveGo.previewButton')}
             handlePress={handlePreviewPress}
             containerStyles={styles.goLiveButton}
             isLoading={loading}
@@ -277,7 +303,9 @@ const GoLive = () => {
                     <Text style={styles.previewTitle} numberOfLines={1}>
                       {title}
                     </Text>
-                    <Text style={styles.previewQuality}>{selectedQuality}</Text>
+                    <Text style={styles.previewQuality}>
+                      {t(`liveGo.quality.${selectedQuality}.label`, selectedQuality)}
+                    </Text>
                   </View>
 
                   <TouchableOpacity 
@@ -291,13 +319,13 @@ const GoLive = () => {
                 {/* Bottom Bar */}
                 <View style={styles.previewBottomBar}>
                   <View style={styles.previewTipsContainer}>
-                    <Text style={styles.previewTip}>✓ Check lighting</Text>
-                    <Text style={styles.previewTip}>✓ Frame yourself well</Text>
-                    <Text style={styles.previewTip}>✓ Test audio</Text>
+                    {t('liveGo.previewTips', { returnObjects: true }).map((tip, index) => (
+                      <Text key={index} style={styles.previewTip}>✓ {tip}</Text>
+                    ))}
                   </View>
                   
                   <CustomButton
-                    title={loading ? "Starting..." : "🔴 Go Live Now"}
+                    title={loading ? t('liveGo.starting') : t('liveGo.goLiveNow')}
                     handlePress={handleGoLive}
                     containerStyles={styles.goLiveNowButton}
                     isLoading={loading}

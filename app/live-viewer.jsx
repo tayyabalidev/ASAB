@@ -5,6 +5,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { LiveStreamPlayer, LiveChatPanel, LiveReactions } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { getLiveStreamById } from '../lib/livestream';
+import { useTranslation } from 'react-i18next';
 
 const { width, height } = Dimensions.get('window');
 
@@ -15,6 +16,7 @@ const LiveViewer = () => {
   const [loading, setLoading] = useState(true);
   const [showChat, setShowChat] = useState(true);
   const [isPiP, setIsPiP] = useState(false);
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (!streamId) {
@@ -27,7 +29,7 @@ const LiveViewer = () => {
         const streamData = await getLiveStreamById(streamId);
         
         if (!streamData.isLive) {
-          Alert.alert('Stream Ended', 'This live stream has ended.');
+          Alert.alert(t('liveViewer.streamEndedTitle'), t('liveViewer.streamEndedMessage'));
           router.replace('/live-streams');
           return;
         }
@@ -35,7 +37,7 @@ const LiveViewer = () => {
         setStream(streamData);
       } catch (error) {
         console.error('Error loading stream:', error);
-        Alert.alert('Error', 'Failed to load live stream.');
+        Alert.alert(t('common.error'), t('liveViewer.loadError'));
         router.replace('/live-streams');
       } finally {
         setLoading(false);
@@ -56,16 +58,16 @@ const LiveViewer = () => {
   const handlePiPToggle = () => {
     setIsPiP(prev => !prev);
     Alert.alert(
-      'Picture-in-Picture',
-      isPiP ? 'Exited PiP mode' : 'Entered PiP mode - Minimize to continue watching while browsing',
-      [{ text: 'OK' }]
+      t('liveViewer.pip.title'),
+      isPiP ? t('liveViewer.pip.exit') : t('liveViewer.pip.enter'),
+      [{ text: t('common.ok') }]
     );
   };
 
   if (loading || !stream) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading stream...</Text>
+        <Text style={styles.loadingText}>{t('liveViewer.loading')}</Text>
       </View>
     );
   }

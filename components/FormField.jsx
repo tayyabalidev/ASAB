@@ -10,10 +10,11 @@ const FormField = ({
   placeholder,
   handleChangeText,
   otherStyles,
+  isPassword = false,
   ...props
 }) => {
   const [showPassword, setShowPassword] = useState(false);
-  const { isDarkMode } = useGlobalContext();
+  const { isDarkMode, isRTL } = useGlobalContext();
 
   return (
     <View className={`space-y-2 ${otherStyles}`}>
@@ -31,11 +32,12 @@ const FormField = ({
           placeholder={placeholder}
           placeholderTextColor={isDarkMode ? "#7B7B8B" : "#9CA3AF"}
           onChangeText={handleChangeText}
-          secureTextEntry={title === "Password" && !showPassword}
+          secureTextEntry={isPassword && !showPassword}
+          textAlign={isRTL ? 'right' : 'left'}
           {...props}
         />
 
-        {title === "Password" && (
+        {isPassword && (
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
             <Image
               source={!showPassword ? icons.eye : icons.eyeHide}

@@ -6,9 +6,11 @@ import { getFollowers } from "../../lib/appwrite";
 import { databases, appwriteConfig } from "../../lib/appwrite";
 import { images } from "../../constants";
 import { router } from "expo-router";
+import { useTranslation } from "react-i18next";
 
 const Followers = () => {
-  const { user } = useGlobalContext();
+  const { user, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [followers, setFollowers] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -45,11 +47,15 @@ const Followers = () => {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#162219ff' }}>
       <View style={{ padding: 20 }}>
-        <Text style={{ color: '#fff', fontSize: 22, fontWeight: 'bold', marginBottom: 18 }}>Followers</Text>
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: 'bold', marginBottom: 18, textAlign: isRTL ? 'right' : 'left' }}>
+          {t("community.followersTitle")}
+        </Text>
         {loading ? (
           <ActivityIndicator color="#a77df8" size="large" style={{ marginTop: 40 }} />
         ) : followers.length === 0 ? (
-          <Text style={{ color: '#aaa', fontSize: 16, textAlign: 'center', marginTop: 40 }}>No followers yet.</Text>
+          <Text style={{ color: '#aaa', fontSize: 16, textAlign: 'center', marginTop: 40 }}>
+            {t("community.followersEmpty")}
+          </Text>
         ) : (
           <FlatList
             data={followers}

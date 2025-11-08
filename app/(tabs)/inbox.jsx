@@ -8,6 +8,7 @@ import { icons } from "../../constants";
 import { databases, appwriteConfig, getNotifications } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { images } from "../../constants/images";
+import { useTranslation } from "react-i18next";
 
 // Helper function to get proper avatar URL
 const getAvatarUrl = (avatarField) => {
@@ -28,6 +29,7 @@ const getAvatarUrl = (avatarField) => {
 };
 
 const Inbox = () => {
+  const { t } = useTranslation();
   const { user: currentUser } = useGlobalContext();
   const [notifications, setNotifications] = useState([]);
   const [recentMessages, setRecentMessages] = useState([]);
@@ -111,11 +113,11 @@ const Inbox = () => {
     const diffInHours = (now - time) / (1000 * 60 * 60);
 
     if (diffInHours < 1) {
-      return 'Just now';
+      return t('inbox.time.justNow');
     } else if (diffInHours < 24) {
-      return `${Math.floor(diffInHours)}h ago`;
+      return t('inbox.time.hoursAgo', { count: Math.floor(diffInHours) });
     } else {
-      return `${Math.floor(diffInHours / 24)}d ago`;
+      return t('inbox.time.daysAgo', { count: Math.floor(diffInHours / 24) });
     }
   };
 
@@ -123,6 +125,11 @@ const Inbox = () => {
     const isFollow = item.type === 'follow';
     const isLike = item.type === 'like';
     const isComment = item.type === 'comment';
+    const messageKey = isFollow
+      ? 'inbox.notifications.follow'
+      : isLike
+        ? 'inbox.notifications.like'
+        : 'inbox.notifications.comment';
 
     return (
       <TouchableOpacity
@@ -150,9 +157,7 @@ const Inbox = () => {
             {item.fromUsername}
           </Text>
           <Text style={{ color: '#aaa', fontSize: 14 }}>
-            {isFollow && 'started following you'}
-            {isLike && 'liked your video'}
-            {isComment && 'commented on your video'}
+            {t(messageKey)}
           </Text>
           <Text style={{ color: '#666', fontSize: 12, marginTop: 2 }}>
             {formatTime(item.createdAt)}
@@ -170,7 +175,7 @@ const Inbox = () => {
             }}
           >
             <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
-              Follow back
+              {t('inbox.actions.followBack')}
             </Text>
           </TouchableOpacity>
         )}
@@ -273,7 +278,7 @@ const Inbox = () => {
     return (
       <SafeAreaView className="bg-primary h-full">
         <View className="flex-1 justify-center items-center">
-          <Text className="text-white text-lg">Loading...</Text>
+          <Text className="text-white text-lg">{t('common.loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -292,7 +297,7 @@ const Inbox = () => {
         borderBottomColor: '#333'
       }}>
           <Text style={{ color: '#fff', fontSize: 24, fontWeight: 'bold' }}>
-            Inbox
+            {t('nav.inbox')}
           </Text>
         <TouchableOpacity>
           <Image
@@ -306,11 +311,11 @@ const Inbox = () => {
       {/* Content */}
       <FlatList
         data={[
-          { type: 'header', title: 'New followers', count: notifications.filter(n => n.type === 'follow' && !n.isRead).length },
+          { type: 'header', title: t('inbox.sections.newFollowers'), count: notifications.filter(n => n.type === 'follow' && !n.isRead).length },
           ...notifications.filter(n => n.type === 'follow'),
-          { type: 'header', title: 'Activity', count: notifications.filter(n => (n.type === 'like' || n.type === 'comment') && !n.isRead).length },
+          { type: 'header', title: t('inbox.sections.activity'), count: notifications.filter(n => (n.type === 'like' || n.type === 'comment') && !n.isRead).length },
           ...notifications.filter(n => n.type === 'like' || n.type === 'comment'),
-          { type: 'header', title: 'Recent messages', count: recentMessages.length },
+          { type: 'header', title: t('inbox.sections.recentMessages'), count: recentMessages.length },
           ...recentMessages
         ]}
         keyExtractor={(item, index) => item.type === 'header' ? `header-${index}` : item.$id || `item-${index}`}

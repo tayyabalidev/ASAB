@@ -1,6 +1,7 @@
 import { ActivityIndicator, Text, TouchableOpacity } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useGlobalContext } from "../context/GlobalProvider";
+import { useTranslation } from "react-i18next";
 
 const CustomButton = ({
   title,
@@ -9,13 +10,13 @@ const CustomButton = ({
   textStyles,
   isLoading,
 }) => {
-  const { isDarkMode } = useGlobalContext();
+  const { isDarkMode, isRTL } = useGlobalContext();
   return (
     <TouchableOpacity
       onPress={handlePress}
       activeOpacity={0.7}
       disabled={isLoading}
-      className={containerStyles}
+      className={containerStyles || ""}
     >
       <LinearGradient
         colors={isDarkMode ? ['#501478', '#965014'] : ['#8B5CF6', '#D97706']}
@@ -24,6 +25,7 @@ const CustomButton = ({
         className={`rounded-xl min-h-[62px] flex flex-row justify-center items-center ${
           isLoading ? "opacity-50" : ""
         }`}
+        style={{ flexDirection: isRTL ? 'row-reverse' : 'row' }}
       >
         <Text className={`text-white font-psemibold text-lg ${textStyles}`}>
           {title}
@@ -34,7 +36,7 @@ const CustomButton = ({
             animating={isLoading}
             color="#fff"
             size="small"
-            className="ml-2"
+            className={isRTL ? "mr-2" : "ml-2"}
           />
         )}
       </LinearGradient>
@@ -47,27 +49,47 @@ const GoogleSignInButton = ({
   onPress,
   containerStyles,
   isLoading = false,
+  label,
+  loadingLabel,
 }) => {
+  const { t } = useTranslation();
+  const { isDarkMode, isRTL } = useGlobalContext();
+
+  const defaultLabel = label || t("auth.continueWithGoogle");
+  const defaultLoadingLabel = loadingLabel || t("auth.signingIn");
+  const textColor = isDarkMode ? "#FFFFFF" : "#000000";
+  const backgroundColor = isDarkMode ? "#1F2937" : "#FFFFFF";
+
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.7}
-      className={`bg-white rounded-xl min-h-[62px] flex flex-row justify-center items-center ${containerStyles} ${
+      className={`rounded-xl min-h-[62px] px-4 items-center ${containerStyles} ${
         isLoading ? "opacity-50" : ""
       }`}
       disabled={isLoading}
+      style={{
+        backgroundColor,
+        flexDirection: isRTL ? "row-reverse" : "row",
+        justifyContent: "center",
+      }}
     >
-      <Text className="text-black font-psemibold text-lg mr-2">🔑</Text>
-      <Text className="text-black font-psemibold text-lg">
-        {isLoading ? "Signing in..." : "Continue with Google"}
+      <Text
+        className={`font-psemibold text-lg ${isRTL ? "ml-2" : "mr-2"}`}
+        style={{ color: textColor }}
+      >
+        🔑
+      </Text>
+      <Text className="font-psemibold text-lg" style={{ color: textColor }}>
+        {isLoading ? defaultLoadingLabel : defaultLabel}
       </Text>
 
       {isLoading && (
         <ActivityIndicator
           animating={isLoading}
-          color="#000"
+          color={textColor}
           size="small"
-          className="ml-2"
+          className={isRTL ? "mr-2" : "ml-2"}
         />
       )}
     </TouchableOpacity>

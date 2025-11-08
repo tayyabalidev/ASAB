@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Dimensions, Modal } from 'react-native';
+import { View, StyleSheet, Dimensions, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { LiveStreamBroadcaster, LiveChatPanel, LiveReactions } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
+import { useTranslation } from 'react-i18next';
 
 const { width, height } = Dimensions.get('window');
 
@@ -11,13 +12,21 @@ const LiveBroadcast = () => {
   const { streamId } = useLocalSearchParams();
   const { user } = useGlobalContext();
   const [showChat, setShowChat] = useState(false);
+  const { t } = useTranslation();
 
   const handleStreamEnd = () => {
+    Alert.alert(t('liveBroadcast.endedTitle'), t('liveBroadcast.endedMessage'));
     router.replace('/home');
   };
 
+  useEffect(() => {
+    if (!streamId) {
+      Alert.alert(t('common.error'), t('liveBroadcast.missingStream'));
+      router.replace('/home');
+    }
+  }, [streamId, t]);
+
   if (!streamId) {
-    router.replace('/home');
     return null;
   }
 

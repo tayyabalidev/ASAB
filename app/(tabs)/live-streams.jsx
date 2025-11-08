@@ -1,23 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Image, RefreshControl, Alert } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Image, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { useGlobalContext } from '../../context/GlobalProvider';
-import { getActiveLiveStreams, testDatabaseConnection } from '../../lib/livestream';
+import { getActiveLiveStreams } from '../../lib/livestream';
 import { EmptyState } from '../../components';
 
-const LiveStreamCard = ({ stream, onPress }) => {
+const LiveStreamCard = ({ stream, onPress, t, isRTL }) => {
   const getDuration = () => {
     const startTime = new Date(stream.startTime).getTime();
     const now = Date.now();
     const diff = Math.floor((now - startTime) / 1000);
     
     const minutes = Math.floor(diff / 60);
-    if (minutes < 1) return 'Just started';
-    if (minutes < 60) return `${minutes}m`;
+    if (minutes < 1) return t('live.justStarted');
+    if (minutes < 60) return t('live.minutes', { count: minutes });
     
     const hours = Math.floor(minutes / 60);
-    return `${hours}h ${minutes % 60}m`;
+    const remainingMinutes = minutes % 60;
+    return t('live.hoursMinutes', { hours, minutes: remainingMinutes });
   };
 
   return (
@@ -31,7 +33,7 @@ const LiveStreamCard = ({ stream, onPress }) => {
         {/* Live Indicator */}
         <View style={styles.liveIndicator}>
           <View style={styles.liveDot} />
-          <Text style={styles.liveText}>LIVE</Text>
+          <Text style={styles.liveText}>{t('live.badge')}</Text>
         </View>
 
         {/* Viewer Count */}
@@ -48,13 +50,15 @@ const LiveStreamCard = ({ stream, onPress }) => {
             style={styles.hostAvatar}
           />
           <View style={styles.hostDetails}>
-            <Text style={styles.streamTitle} numberOfLines={2}>
+            <Text style={[styles.streamTitle, { textAlign: isRTL ? 'right' : 'left' }]} numberOfLines={2}>
               {stream.title}
             </Text>
-            <Text style={styles.hostName}>{stream.hostUsername}</Text>
-            <View style={styles.metaInfo}>
-              <Text style={styles.category}>{stream.category}</Text>
-              <Text style={styles.duration}>• {getDuration()}</Text>
+            <Text style={[styles.hostName, { textAlign: isRTL ? 'right' : 'left' }]}>{stream.hostUsername}</Text>
+            <View style={[styles.metaInfo, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+              <Text style={[styles.category, { textAlign: isRTL ? 'right' : 'left' }]}>{stream.category}</Text>
+              <Text style={[styles.duration, { marginLeft: isRTL ? 0 : 4, marginRight: isRTL ? 4 : 0, textAlign: isRTL ? 'right' : 'left' }]}>
+                • {getDuration()}
+              </Text>
             </View>
           </View>
         </View>
@@ -64,7 +68,8 @@ const LiveStreamCard = ({ stream, onPress }) => {
 };
 
 const LiveStreams = () => {
-  const { user } = useGlobalContext();
+  const { isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [streams, setStreams] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -113,12 +118,14 @@ const LiveStreams = () => {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Live Streams</Text>
+        <Text style={[styles.headerTitle, { textAlign: isRTL ? 'right' : 'left' }]}>
+          {t('live.headerTitle')}
+        </Text>
         <View style={styles.headerButtons}>
          
           <TouchableOpacity style={styles.goLiveButton} onPress={handleGoLive}>
             <Text style={styles.goLiveIcon}>📹</Text>
-            <Text style={styles.goLiveText}>Go Live</Text>
+            <Text style={styles.goLiveText}>{t('live.goLive')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -126,19 +133,24 @@ const LiveStreams = () => {
       {/* Live Streams List */}
       {loading ? (
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading live streams...</Text>
+          <Text style={styles.loadingText}>{t('live.loading')}</Text>
         </View>
       ) : streams.length === 0 ? (
         <EmptyState
-          title="No Live Streams"
-          subtitle="Be the first to go live!"
+          title={t('live.emptyTitle')}
+          subtitle={t('live.emptySubtitle')}
         />
       ) : (
         <FlatList
           data={streams}
           keyExtractor={(item) => item.$id}
           renderItem={({ item }) => (
-            <LiveStreamCard stream={item} onPress={() => handleStreamPress(item)} />
+            <LiveStreamCard
+              stream={item}
+              onPress={() => handleStreamPress(item)}
+              t={t}
+              isRTL={isRTL}
+            />
           )}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}

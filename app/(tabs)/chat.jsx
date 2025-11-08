@@ -3,7 +3,7 @@ import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View, Modal as RNModal, Pressable } from "react-native";
 import { Query } from 'react-native-appwrite';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -17,6 +17,8 @@ import * as Location from 'expo-location';
 import { Video } from 'expo-av';
 // ZegoCloud calling functionality has been removed
 import CallInterface from '../../components/CallInterface';
+import { useTranslation } from "react-i18next";
+import { useGlobalContext } from "../../context/GlobalProvider";
 
 const Chat = () => {
   const navigation = useNavigation();
@@ -61,6 +63,17 @@ const Chat = () => {
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
   const [zegoInitialized, setZegoInitialized] = useState(false);
+  const { t } = useTranslation();
+  const { isRTL } = useGlobalContext();
+
+  const tabOptions = useMemo(() => ['all', 'unread', 'favourites', 'groups', 'users'], []);
+  const tabLabels = useMemo(() => ({
+    all: t('chat.tabs.all'),
+    unread: t('chat.tabs.unread'),
+    favourites: t('chat.tabs.favourites'),
+    groups: t('chat.tabs.groups'),
+    users: t('chat.tabs.users'),
+  }), [t]);
 
   // Add this function at the top level of the component
   // Update fetchMessagesForChat to only append new messages
@@ -113,7 +126,7 @@ const Chat = () => {
         // Check for session first
         const session = await account.getSession('current');
         if (!session) {
-          Alert.alert('Please sign in first');
+          Alert.alert(t('common.error'), t('chat.authRequired'));
           router.replace('/sign-in');
           return;
         }
@@ -188,7 +201,7 @@ const Chat = () => {
         setChatReads(chatReadRes.documents);
 
       } catch (e) {
-        Alert.alert('Error', e.message);
+        Alert.alert(t('common.error'), e.message || t('chat.generalError'));
       } finally {
         setLoading(false);
       }
@@ -344,7 +357,7 @@ const Chat = () => {
       );
       // Real-time subscription will update the list with the real message
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
       // Remove optimistic message if sending fails
       setMessages(prev => prev.filter(m => !m.optimistic));
       setAllMessages(prev => prev.filter(m => !m.optimistic));
@@ -364,7 +377,7 @@ const Chat = () => {
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission required', 'Camera permission is required to take photos or record videos.');
+        Alert.alert(t('chat.cameraPermissionTitle'), t('chat.permission.cameraRequired'));
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -392,7 +405,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -401,7 +414,7 @@ const Chat = () => {
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission required', 'Camera permission is required to record videos.');
+        Alert.alert(t('chat.cameraPermissionTitle'), t('chat.permission.cameraRequired'));
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -435,7 +448,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -449,7 +462,7 @@ const Chat = () => {
     try {
       const { status } = await Contacts.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Contacts permission is required to share contacts.');
+        Alert.alert(t('chat.cameraPermissionTitle'), t('chat.permission.contactsRequired'));
         return;
       }
       const contact = await Contacts.presentContactPickerAsync();
@@ -467,7 +480,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -477,7 +490,7 @@ const Chat = () => {
       // Request permissions
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission required', 'Gallery permission is required to select media.');
+        Alert.alert(t('chat.cameraPermissionTitle'), t('chat.permission.galleryRequired'));
         return;
       }
 
@@ -521,7 +534,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -530,7 +543,7 @@ const Chat = () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Location permission is required to share your location.');
+        Alert.alert(t('chat.cameraPermissionTitle'), t('chat.permission.locationRequired'));
         return;
       }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -552,7 +565,7 @@ const Chat = () => {
       });
       setShowAttachmentOptions(false);
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -584,7 +597,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -775,7 +788,7 @@ const Chat = () => {
         }
         return;
       } catch (e) {
-        Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
         return;
       }
     }
@@ -795,7 +808,7 @@ const Chat = () => {
         prev.map(g => (g.$id === item.$id ? { ...g, isFavourite: isFavourite } : g))
       );
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -836,7 +849,7 @@ const Chat = () => {
       setRecording(recording);
       setIsRecording(true);
     } catch (err) {
-      Alert.alert('Error', 'Failed to start recording: ' + err.message);
+      Alert.alert(t('common.error'), t('chat.recordingError', { message: err.message || '' }));
     }
   };
 
@@ -868,7 +881,7 @@ const Chat = () => {
         });
       }
     } catch (err) {
-      Alert.alert('Error', 'Failed to save recording: ' + err.message);
+      Alert.alert(t('common.error'), t('chat.recordingSaveError', { message: err.message || '' }));
     }
   };
 
@@ -903,7 +916,7 @@ const Chat = () => {
         }
       });
     } catch (err) {
-      Alert.alert('Error', 'Failed to play audio: ' + err.message);
+      Alert.alert(t('common.error'), t('chat.audioPlaybackError', { message: err.message || '' }));
     }
   };
 
@@ -918,7 +931,7 @@ const Chat = () => {
   const handleAudioCall = async () => {
     try {
       if (!selectedUser || !selectedUser.$id) {
-        Alert.alert('Error', 'No user selected for call');
+        Alert.alert(t('common.error'), t('chat.noUserSelected'));
         return;
       }
       
@@ -929,31 +942,31 @@ const Chat = () => {
           startCall();
         } catch (callError) {
          
-          Alert.alert('Call Error', 'Failed to start call function');
+          Alert.alert(t('common.error'), t('chat.callError'));
         }
       }, 100);
       
     } catch (error) {
      
-      Alert.alert('Error', 'Failed to start audio call: ' + error.message);
+      Alert.alert(t('common.error'), t('chat.audioCallError', { message: error.message || '' }));
     }
   };
 
   const handleVideoCall = async () => {
     try {
       if (!selectedUser || !selectedUser.$id) {
-        Alert.alert('Error', 'No user selected for call');
+        Alert.alert(t('common.error'), t('chat.noUserSelected'));
         return;
       }
       
 
       
       // Video calling functionality has been removed
-      Alert.alert('Feature Unavailable', 'Video calling features have been disabled.');
+      Alert.alert(t('common.info'), t('chat.videoCallUnavailable'));
       
     } catch (error) {
       
-      Alert.alert('Error', 'Failed to start video call: ' + error.message);
+      Alert.alert(t('common.error'), t('chat.videoCallError', { message: error.message || '' }));
     }
   };
 
@@ -1057,8 +1070,8 @@ const Chat = () => {
               <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 24, paddingHorizontal: 16, height: 44, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8 }}>
                 <MaterialCommunityIcons name="magnify" size={22} color="#888" />
                 <TextInput
-                  style={{ flex: 1, marginLeft: 8, color: '#222', fontSize: 16 }}
-                  placeholder="Search"
+                  style={{ flex: 1, marginLeft: 8, color: '#222', fontSize: 16, textAlign: isRTL ? 'right' : 'left' }}
+                  placeholder={t('chat.searchPlaceholder')}
                   placeholderTextColor="#aaa"
                   value={search}
                   onChangeText={setSearch}
@@ -1089,7 +1102,7 @@ const Chat = () => {
   contentContainerStyle={{ paddingHorizontal: 10, marginTop: 10, marginBottom: 4 }}
 
            style={{ flexDirection: 'row', marginTop: 10, marginBottom: 4, marginHorizontal: 10 }}>
-            {['all', 'unread', 'favourites', 'groups', 'users'].map(tab => (
+            {tabOptions.map(tab => (
               <TouchableOpacity
                 key={tab}
                 onPress={() => setSelectedTab(tab)}
@@ -1108,11 +1121,11 @@ const Chat = () => {
                   fontWeight: selectedTab === tab ? 'bold' : 'normal',
                   fontSize: 15
                 }}>
-                  {tab === 'all' && 'All'}
-                  {tab === 'unread' && `Unread${totalUnread > 0 ? ' ' + totalUnread : ''}`}
-                  {tab === 'favourites' && 'Favourites'}
-                  {tab === 'groups' && `Groups${groupCount > 0 ? ' ' + groupCount : ''}`}
-                  {tab === 'users' && 'User Chats'}
+                  {tab === 'all' && tabLabels.all}
+                  {tab === 'unread' && `${tabLabels.unread}${totalUnread > 0 ? ` ${totalUnread}` : ''}`}
+                  {tab === 'favourites' && tabLabels.favourites}
+                  {tab === 'groups' && `${tabLabels.groups}${groupCount > 0 ? ` ${groupCount}` : ''}`}
+                  {tab === 'users' && tabLabels.users}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -1162,7 +1175,7 @@ const Chat = () => {
                                     : lastMsg.type === 'contact'
                                       ? '👤 Contact'
                                       : lastMsg.content
-                          : 'No messages yet'}
+                          : t('chat.messages.empty')}
                       </Text>
                     </View>
                     <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
@@ -1227,7 +1240,7 @@ const Chat = () => {
                                     : lastMsg.type === 'contact'
                                       ? '👤 Contact'
                                       : lastMsg.content
-                          : 'No messages yet'}
+                          : t('chat.messages.empty')}
                       </Text>
                     </View>
                     <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
@@ -1300,7 +1313,9 @@ const Chat = () => {
                   width: '100%',
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>+ Create Group</Text>
+                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
+                  {t('chat.createGroupButton')}
+                </Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1521,44 +1536,56 @@ const Chat = () => {
                       <TouchableOpacity onPress={handleCameraPress}>
                         <MaterialCommunityIcons name="camera" size={32} color="#a259f7" />
                       </TouchableOpacity>
-                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>Camera</Text>
+                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>
+                        {t('chat.attachment.camera')}
+                      </Text>
                     </View>
                     <View style={{ alignItems: 'center', width: 80, marginRight: 16 }}>
                       <TouchableOpacity onPress={handleRecordPress}>
                         <MaterialCommunityIcons name="microphone" size={32} color="#a259f7" />
                       </TouchableOpacity>
-                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>Audio</Text>
+                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>
+                        {t('chat.attachment.audio')}
+                      </Text>
                     </View>
                     <View style={{ alignItems: 'center', width: 80, marginRight: 16 }}>
                       <TouchableOpacity onPress={handleContactPress}>
                         <MaterialCommunityIcons name="account-box" size={32} color="#a259f7" />
                       </TouchableOpacity>
-                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>Contact</Text>
+                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>
+                        {t('chat.attachment.contact')}
+                      </Text>
                     </View>
                     <View style={{ alignItems: 'center', width: 80, marginRight: 16 }}>
                       <TouchableOpacity onPress={handleGalleryPress}>
                         <MaterialCommunityIcons name="image" size={32} color="#a259f7" />
                       </TouchableOpacity>
-                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>Gallery</Text>
+                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>
+                        {t('chat.attachment.gallery')}
+                      </Text>
                     </View>
                     <View style={{ alignItems: 'center', width: 80, marginRight: 16 }}>
                       <TouchableOpacity onPress={handleLocationPress}>
                         <MaterialCommunityIcons name="map-marker" size={32} color="#a259f7" />
                       </TouchableOpacity>
-                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>Location</Text>
+                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>
+                        {t('chat.attachment.location')}
+                      </Text>
                     </View>
                     <View style={{ alignItems: 'center', width: 80, marginRight: 16 }}>
                       <TouchableOpacity onPress={handleDocumentPress}>
                         <MaterialCommunityIcons name="file-document" size={32} color="#a259f7" />
                       </TouchableOpacity>
-                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>Document</Text>
+                      <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>
+                        {t('chat.attachment.document')}
+                      </Text>
                     </View>
                   </ScrollView>
                 </View>
               )}
               <TextInput
-                style={{ flex: 1, backgroundColor: '#181A20', color: '#fff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16, marginRight: 8 }}
-                placeholder="Type a message..."
+                style={{ flex: 1, backgroundColor: '#181A20', color: '#fff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16, marginRight: 8, textAlign: isRTL ? 'right' : 'left' }}
+                placeholder={t('chat.messageInputPlaceholder')}
                 placeholderTextColor="#aaa"
                 value={messageText}
                 onChangeText={setMessageText}
@@ -1579,12 +1606,14 @@ const Chat = () => {
           <View style={{ backgroundColor: '#232533', borderRadius: 16, padding: 24, width: '100%', height: '100%' }}>
             {/* Cancel button in top right */}
             <TouchableOpacity onPress={() => setShowUserSearch(false)} style={{ position: 'absolute', top: 24, right: 24, zIndex: 10 }}>
-              <Text style={{ color: '#7f5af0', fontSize: 18 }}>Cancel</Text>
+              <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('common.cancel')}</Text>
             </TouchableOpacity>
-            <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, marginTop: 24, textAlign: 'center' }}>Start New Chat</Text>
+            <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, marginTop: 24, textAlign: 'center' }}>
+              {t('chat.startNewChat')}
+            </Text>
             <TextInput
-              style={{ backgroundColor: '#181A20', color: '#fff', borderRadius: 8, padding: 8, marginBottom: 12 }}
-              placeholder="Search users..."
+              style={{ backgroundColor: '#181A20', color: '#fff', borderRadius: 8, padding: 8, marginBottom: 12, textAlign: isRTL ? 'right' : 'left' }}
+              placeholder={t('chat.searchUsersPlaceholder')}
               placeholderTextColor="#aaa"
               value={search}
               onChangeText={setSearch}
@@ -1599,7 +1628,7 @@ const Chat = () => {
                   setShowUserSearch(false);
                 }} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
                   <Image source={{ uri: item.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(item.username || item.email || 'User') }} style={{ width: 32, height: 32, borderRadius: 16, marginRight: 12 }} />
-                  <Text style={{ color: '#fff', fontSize: 16 }}>{item.username || item.email}</Text>
+                <Text style={{ color: '#fff', fontSize: 16, textAlign: isRTL ? 'right' : 'left' }}>{item.username || item.email}</Text>
                 </TouchableOpacity>
               )}
               style={{ maxHeight: 300 }}
@@ -1630,17 +1659,21 @@ const Chat = () => {
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }}>
           <View style={{ backgroundColor: '#232533', borderRadius: 16, padding: 24, width: '100%', height: '100%' }}>
             <TouchableOpacity onPress={() => setShowCreateGroup(false)} style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
-              <Text style={{ color: '#7f5af0', fontSize: 18 }}>Cancel</Text>
+              <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('common.cancel')}</Text>
             </TouchableOpacity>
-            <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, marginTop: 8, textAlign: 'center' }}>Create Group</Text>
+            <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, marginTop: 8, textAlign: 'center' }}>
+              {t('chat.createGroupTitle')}
+            </Text>
             <TextInput
-              style={{ backgroundColor: '#181A20', color: '#fff', borderRadius: 8, padding: 8, marginBottom: 12 }}
-              placeholder="Group name..."
+              style={{ backgroundColor: '#181A20', color: '#fff', borderRadius: 8, padding: 8, marginBottom: 12, textAlign: isRTL ? 'right' : 'left' }}
+              placeholder={t('chat.groupNamePlaceholder')}
               placeholderTextColor="#aaa"
               value={groupName}
               onChangeText={setGroupName}
             />
-            <Text style={{ color: '#fff', marginBottom: 8 }}>Add members:</Text>
+            <Text style={{ color: '#fff', marginBottom: 8, textAlign: isRTL ? 'right' : 'left' }}>
+              {t('chat.addMembersLabel')}
+            </Text>
             <ScrollView style={{ maxHeight: 200, marginBottom: 12 }}>
               {users.filter(u => u.$id !== currentUser?.$id).map(u => (
                 <TouchableOpacity key={u.$id} onPress={() => {
@@ -1659,7 +1692,7 @@ const Chat = () => {
               <TouchableOpacity
                 onPress={async () => {
                   if (!groupName.trim() || groupMembers.length === 0) {
-                    Alert.alert('Please enter a group name and select members.');
+                    Alert.alert(t('common.error'), t('chat.groupNameRequired'));
                     return;
                   }
                   setCreatingGroup(true);
@@ -1682,7 +1715,7 @@ const Chat = () => {
                     setSelectedUser(newGroup);
                     fetchMessagesForChat(newGroup);
                   } catch (e) {
-                    Alert.alert('Error', e.message);
+                    Alert.alert(t('common.error'), e.message || t('chat.generalError'));
                   } finally {
                     setCreatingGroup(false);
                   }
@@ -1690,7 +1723,9 @@ const Chat = () => {
                 style={{ backgroundColor: '#7f5af0', borderRadius: 8, padding: 16, alignItems: 'center', width: '100%', opacity: creatingGroup ? 0.5 : 1 }}
                 disabled={creatingGroup}
               >
-                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>{creatingGroup ? 'Creating...' : '+ Create Group'}</Text>
+                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
+                  {creatingGroup ? t('chat.creating') : t('chat.createGroupButton')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

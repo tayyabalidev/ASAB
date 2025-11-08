@@ -1,16 +1,19 @@
 import React, { useState } from "react";
 import { Link, router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Text, ScrollView, Dimensions, Alert, Image, TouchableOpacity, AppState } from "react-native";
+import { View, Text, ScrollView, Alert, Image, TouchableOpacity, AppState } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+
+import { useTranslation } from "react-i18next";
 
 import { images } from "../../constants";
 import { createUser, signInWithGoogle, signInWithFacebook, appwriteConfig, getAccount, getOrCreateFacebookUser, getOrCreateGoogleUser } from "../../lib/appwrite";
-import { CustomButton, FormField, GoogleSignInButton, ThemeToggle } from "../../components";
+import { CustomButton, FormField, GoogleSignInButton, ThemeToggle, LanguageSelector } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const SignUp = () => {
-  const { setUser, setIsLogged, isDarkMode, user } = useGlobalContext();
+  const { setUser, setIsLogged, isDarkMode, user, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
 
   const [isSubmitting, setSubmitting] = useState(false);
   const [isGoogleSubmitting, setGoogleSubmitting] = useState(false);
@@ -68,11 +71,11 @@ const SignUp = () => {
 
   const submit = async () => {
     if (form.username === "" || form.email === "" || form.password === "") {
-      Alert.alert("Error", "Please fill in all fields");
+      Alert.alert(t("common.error"), t("auth.fillAllFieldsSignup"));
       return;
     }
     if (!form.email.includes('@') || !form.email.includes('.')) {
-      Alert.alert("Error", "Please enter a valid email address");
+      Alert.alert(t("common.error"), t("auth.enterValidEmail"));
       return;
     }
     setSubmitting(true);
@@ -82,7 +85,7 @@ const SignUp = () => {
       setIsLogged(true);
       router.replace("/(tabs)/home");
     } catch (error) {
-      Alert.alert("Error", error.message);
+      Alert.alert(t("common.error"), error.message || t("auth.oauthFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -104,16 +107,16 @@ const SignUp = () => {
       
       // Show instructions
       Alert.alert(
-        "Google Sign Up",
-        "Browser me Google login complete karein:\n\n1. Browser me login complete karein\n2. Browser close karke app me wapas aayein\n3. Login automatically ho jayega",
-        [{ text: "OK" }]
+        t("auth.googleSignupTitle"),
+        t("auth.browserSteps"),
+        [{ text: t("common.ok") }]
       );
       
       // Start polling for session
       startGoogleSessionPolling();
     } catch (error) {
       console.error('❌ Google sign up error:', error);
-      Alert.alert("Error", error.message || "Google sign up failed. Please check Appwrite configuration.");
+      Alert.alert(t("common.error"), error.message || t("auth.oauthFailed"));
       setGoogleSubmitting(false);
     }
   };
@@ -128,11 +131,17 @@ const SignUp = () => {
         `${appwriteConfig.platform}://auth/facebook-success`,
         `${appwriteConfig.platform}://auth/facebook-failure`
       );
+
+      Alert.alert(
+        t("auth.facebookSignupTitle"),
+        t("auth.browserSteps"),
+        [{ text: t("common.ok") }]
+      );
       
       // Start polling for session after OAuth
       startSessionPolling();
     } catch (error) {
-      Alert.alert("Error", error.message || "Facebook sign up failed");
+      Alert.alert(t("common.error"), error.message || t("auth.oauthFailed"));
       setIsFacebookLoading(false);
     }
   };
@@ -166,7 +175,7 @@ const SignUp = () => {
           } catch (error) {
             console.error('❌ Google: Error creating user:', error);
             setGoogleSubmitting(false);
-            Alert.alert("Error", "Failed to create user. Please try again.");
+            Alert.alert(t("common.error"), t("auth.createUserFailed"));
           }
         }
       } catch (error) {
@@ -185,13 +194,13 @@ const SignUp = () => {
           // Show more helpful error message
           if (error.message && error.message.includes('missing scopes')) {
             Alert.alert(
-              "OAuth Issue", 
-              "Google OAuth session not established. Please:\n\n1. Appwrite me Google OAuth configured hai\n2. Google Cloud Console me redirect URI add kiya hua hai\n3. Browser me Google login complete ho gaya hai"
+              t("auth.oauthIssueTitle"), 
+              t("auth.oauthConfigCheck", { provider: "Google" })
             );
           } else {
             Alert.alert(
-              "Info", 
-              "Google sign up complete nahi hui. Please:\n\n1. Browser me Google login complete karein\n2. Browser band karke app me wapas aayein\n3. Phir se try karein"
+              t("common.info"), 
+              t("auth.oauthIncomplete")
             );
           }
         }
@@ -228,7 +237,7 @@ const SignUp = () => {
           } catch (error) {
             console.error('❌ Error creating user:', error);
             setIsFacebookLoading(false);
-            Alert.alert("Error", "Failed to create user. Please try again.");
+            Alert.alert(t("common.error"), t("auth.createUserFailed"));
           }
         }
       } catch (error) {
@@ -237,7 +246,7 @@ const SignUp = () => {
           console.log('⏰ Polling timeout - no session found');
           clearInterval(pollInterval);
           setIsFacebookLoading(false);
-          Alert.alert("Info", "Please complete the Facebook sign up in the browser and return to the app. If you've already signed up, please try again.");
+          Alert.alert(t("common.info"), t("auth.oauthIncomplete"));
         }
       }
     }, 1000); // Poll every 1 second
@@ -251,9 +260,12 @@ const SignUp = () => {
       className="h-full"
     >
       <SafeAreaView className="h-full">
-        {/* Theme Toggle */}
+        {/* Theme & Language Controls */}
         <View className="absolute top-12 right-4 z-10">
-          <ThemeToggle />
+          <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', gap: 8 }}>
+            <LanguageSelector />
+            <ThemeToggle />
+          </View>
         </View>
         
         {/* Background Logo */}
@@ -269,34 +281,38 @@ const SignUp = () => {
           <View className="w-full justify-end min-h-[90vh] px-4 py-6">
 
             <Text className={`text-2xl font-bold font-psemibold mb-8 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
-              Sign up
+              {t('auth.signUpTitle')}
             </Text>
 
           <FormField
-            title="Username"
+            title={t('auth.usernameLabel')}
             value={form.username}
             handleChangeText={(e) => setForm({ ...form, username: e })}
-            placeholder="Your unique username"
+            placeholder={t('auth.usernamePlaceholder')}
             otherStyles="mt-6"
           />
 
           <FormField
-            title="Email"
+            title={t('auth.emailLabel')}
             value={form.email}
             handleChangeText={(e) => setForm({ ...form, email: e })}
             otherStyles="mt-7"
             keyboardType="email-address"
+            autoCapitalize="none"
+            placeholder={t('auth.emailPlaceholder')}
           />
 
           <FormField
-            title="Password"
+            title={t('auth.passwordLabel')}
             value={form.password}
             handleChangeText={(e) => setForm({ ...form, password: e })}
             otherStyles="mt-7"
+            placeholder={t('auth.passwordPlaceholder')}
+            isPassword
           />
 
           <CustomButton
-            title="Sign Up"
+            title={t('auth.signUpButton')}
             handlePress={submit}
             containerStyles="mt-7"
             isLoading={isSubmitting}
@@ -305,7 +321,9 @@ const SignUp = () => {
           {/* Divider */}
           <View className="flex-row items-center mt-6">
             <View className={`flex-1 h-px ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-            <Text className={`mx-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>OR</Text>
+            <Text className={`mx-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+              {t('auth.orDivider')}
+            </Text>
             <View className={`flex-1 h-px ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
           </View>
 
@@ -314,6 +332,7 @@ const SignUp = () => {
             onPress={handleGoogleSignIn}
             containerStyles="mt-6"
             isLoading={isGoogleSubmitting}
+            loadingLabel={t('auth.signingUp')}
           />
 
           {/* Facebook Sign Up Button */}
@@ -323,24 +342,25 @@ const SignUp = () => {
             className={`mt-4 flex-row items-center justify-center py-4 px-6 rounded-xl ${
               isDarkMode ? 'bg-[#1877F2]' : 'bg-[#1877F2]'
             } ${isFacebookLoading ? 'opacity-50' : ''}`}
+            style={{ flexDirection: isRTL ? 'row-reverse' : 'row' }}
           >
             <Image
               source={{ uri: 'https://cdn-icons-png.flaticon.com/512/124/124010.png' }}
-              className="w-6 h-6 mr-3"
+              className={`w-6 h-6 ${isRTL ? 'ml-3' : 'mr-3'}`}
               resizeMode="contain"
             />
-            <Text className="text-white font-semibold text-base">
-              {isFacebookLoading ? 'Signing up...' : 'Sign up with Facebook'}
+            <Text className="text-white font-semibold text-base" style={{ textAlign: 'center' }}>
+              {isFacebookLoading ? t('auth.signingUp') : t('auth.signUpWithFacebook')}
             </Text>
           </TouchableOpacity>
 
           <View className="flex justify-center pt-5 items-center">
-            <Text className={isDarkMode ? "text-gray-300" : "text-gray-600"}>Already have an account? </Text>
+            <Text className={isDarkMode ? "text-gray-300" : "text-gray-600"}>{t('auth.haveAccount')} </Text>
             <Link
               href="/sign-in"
               className="text-lg font-psemibold text-secondary"
             >
-              Login
+              {t('auth.goToSignIn')}
             </Link>
           </View>
           

@@ -6,9 +6,11 @@ import { getFollowing } from "../../lib/appwrite";
 import { databases, appwriteConfig } from "../../lib/appwrite";
 import { images } from "../../constants";
 import { router } from "expo-router";
+import { useTranslation } from "react-i18next";
 
 const Following = () => {
-  const { user } = useGlobalContext();
+  const { user, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [following, setFollowing] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -45,11 +47,15 @@ const Following = () => {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#161622' }}>
       <View style={{ padding: 20 }}>
-        <Text style={{ color: '#fff', fontSize: 22, fontWeight: 'bold', marginBottom: 18 }}>Following</Text>
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: 'bold', marginBottom: 18, textAlign: isRTL ? 'right' : 'left' }}>
+          {t("community.followingTitle")}
+        </Text>
         {loading ? (
           <ActivityIndicator color="#a77df8" size="large" style={{ marginTop: 40 }} />
         ) : following.length === 0 ? (
-          <Text style={{ color: '#aaa', fontSize: 16, textAlign: 'center', marginTop: 40 }}>Not following anyone yet.</Text>
+          <Text style={{ color: '#aaa', fontSize: 16, textAlign: 'center', marginTop: 40 }}>
+            {t("community.followingEmpty")}
+          </Text>
         ) : (
           <FlatList
             data={following}

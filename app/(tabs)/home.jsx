@@ -4,6 +4,7 @@ import { Platform } from "react-native";
 import { FlatList, Image, RefreshControl, Text, View, TouchableOpacity, Dimensions, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Share, Alert, ScrollView } from "react-native";
 import { ResizeMode, Video } from "expo-av";
 import { router, useFocusEffect } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { GestureHandlerRootView, PanGestureHandler, State, Gesture } from "react-native-gesture-handler";
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -17,7 +18,8 @@ import { appwriteConfig } from "../../lib/appwrite";
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused }) => {
-  const { user, followStatus, updateFollowStatus } = useGlobalContext();
+  const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [play, setPlay] = useState(false);
   const [liked, setLiked] = useState(item.likes?.includes(user?.$id));
   const [likesCount, setLikesCount] = useState(item.likes ? item.likes.length : 0);
@@ -174,7 +176,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
 
   const handleBookmark = async () => {
     if (!user?.$id) {
-      Alert.alert("Error", "Please login to bookmark videos");
+      Alert.alert(t("common.error"), t("alerts.loginToBookmark"));
       return;
     }
 
@@ -192,7 +194,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       setBookmarked(newBookmarkStatus);
     } catch (error) {
       
-      Alert.alert("Error", "Failed to bookmark video");
+      Alert.alert(t("common.error"), t("alerts.bookmarkFailed"));
     }
   };
 
@@ -211,7 +213,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       }
     } catch (error) {
       
-      Alert.alert("Error", "Failed to share video");
+      Alert.alert(t("common.error"), t("alerts.shareFailed"));
     }
   };
 
@@ -256,7 +258,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       
     } catch (error) {
       
-      Alert.alert("Error", "Failed to follow/unfollow user");
+      Alert.alert(t("common.error"), t("alerts.followFailed"));
       // Revert the state change on error
       setIsFollowing(!newFollowState);
       updateFollowStatus(item.creator.$id, !newFollowState);
@@ -386,7 +388,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         />
         ) : (
           <View style={{ width: '100%', height: '100%', backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontSize: 16 }}>No video available</Text>
+            <Text style={{ color: '#fff', fontSize: 16 }}>{t("home.noVideoAvailable")}</Text>
           </View>
         )}
         {!play && item.video && (
@@ -498,7 +500,9 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               resizeMode="contain" 
             />
           </View>
-          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{bookmarked ? 'Saved' : 'Save'}</Text>
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+            {bookmarked ? t("home.saved") : t("home.save")}
+          </Text>
         </TouchableOpacity>
 
         {/* Share Button */}
@@ -531,11 +535,13 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           {item.title} ♫ ✨
         </Text>
         <Text style={{ color: '#fff', fontSize: 12, marginBottom: 4 }}>
-          ...more
+          …
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Text style={{ color: '#fff', fontSize: 12, marginRight: 5 }}>♫</Text>
-          <Text style={{ color: '#fff', fontSize: 12 }}>Contains: {item.title}...</Text>
+          <Text style={{ color: '#fff', fontSize: 12 }}>
+            {t("home.containsLabel", { title: item.title })}
+          </Text>
         </View>
       </View>
 
@@ -553,7 +559,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '80%', paddingBottom: 0 }}>
             <View style={{ alignItems: 'center', paddingVertical: 8 }}>
               <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-              <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Comments</Text>
+              <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t("home.commentsTitle")}</Text>
             </View>
             {loadingComments ? (
               <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
@@ -580,9 +586,9 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               <TextInput
                 value={newComment}
                 onChangeText={setNewComment}
-                placeholder="Add a comment..."
+                placeholder={t("home.commentPlaceholder")}
                 placeholderTextColor="#aaa"
-                style={{ flex: 1, backgroundColor: '#333', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
+                style={{ flex: 1, backgroundColor: '#333', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, textAlign: isRTL ? 'right' : 'left' }}
                 editable={!posting}
               />
               <TouchableOpacity
@@ -590,11 +596,11 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 disabled={posting || !newComment.trim()}
                 style={{ marginLeft: 8, backgroundColor: posting ? '#888' : '#a77df8', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12 }}
               >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{posting ? '...' : 'Post'}</Text>
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{posting ? '...' : t("home.post")}</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity onPress={() => setCommentsModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Close</Text>
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t("home.close")}</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -614,12 +620,12 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '70%' }}>
             <View style={{ alignItems: 'center', paddingVertical: 8 }}>
               <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-              <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Likes</Text>
+              <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t("home.likesTitle")}</Text>
             </View>
             {loadingLikes ? (
               <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
             ) : likesList.length === 0 ? (
-              <Text style={{ color: '#fff', textAlign: 'center', marginVertical: 24 }}>No likes yet.</Text>
+              <Text style={{ color: '#fff', textAlign: 'center', marginVertical: 24 }}>{t("home.likesEmpty")}</Text>
             ) : (
               <FlatList
                 data={likesList}
@@ -635,7 +641,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               />
             )}
             <TouchableOpacity onPress={() => setLikesModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Close</Text>
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t("home.close")}</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -645,7 +651,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
 };
 
 const Home = () => {
-  const { user } = useGlobalContext();
+  const { user, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [selectedTab, setSelectedTab] = useState('forYou'); // 'forYou' or 'following'
   const [refreshing, setRefreshing] = useState(false);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
@@ -856,7 +863,7 @@ const Home = () => {
             alignItems: 'center' 
           }}>
             <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center' }}>
-              {item.title || 'No video'}
+              {item.title || t("home.noVideo")}
             </Text>
           </View>
         )}
@@ -973,14 +980,16 @@ const Home = () => {
                   <Text style={{ 
                     color: '#ccc', 
                     fontSize: 14, 
-                    marginBottom: 5 
+                    marginBottom: 5,
+                    textAlign: isRTL ? 'right' : 'left',
                   }}>
-                    Welcome Back
+                    {t("home.welcomeBack")}
                   </Text>
                   <Text style={{ 
                     color: '#fff', 
                     fontSize: 24, 
-                    fontWeight: 'bold' 
+                    fontWeight: 'bold',
+                    textAlign: isRTL ? 'right' : 'left',
                   }}>
                     {user?.username || 'jsmastery'}
                   </Text>
@@ -1000,13 +1009,14 @@ const Home = () => {
                 }}>
                   <TextInput
                     ref={searchInputRef}
-                    placeholder="Search for a video topic"
+                    placeholder={t("home.searchPlaceholder")}
                     placeholderTextColor="rgba(255,255,255,0.6)"
                     style={{
                       flex: 1,
                       color: '#fff',
                       fontSize: 16,
-                      marginRight: 10
+                      marginRight: 10,
+                      textAlign: isRTL ? 'right' : 'left',
                     }}
                     value={searchQuery}
                     onChangeText={handleSearch}
@@ -1030,7 +1040,7 @@ const Home = () => {
                       setIsSearching(false);
                     }
                   }}>
-                    <Text style={{ color: '#fff', fontSize: 18 }}>
+                  <Text style={{ color: '#fff', fontSize: 18 }}>
                       {searchQuery.trim() ? '✕' : '🔍'}
                     </Text>
                   </TouchableOpacity>
@@ -1044,8 +1054,8 @@ const Home = () => {
                 <View style={{ paddingHorizontal: 20, marginBottom: 20 }}>
                   <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center' }}>
                     {searchResults.length > 0 
-                      ? `Found ${searchResults.length} video${searchResults.length === 1 ? '' : 's'} for "${searchQuery}"`
-                      : `No videos found for "${searchQuery}"`
+                      ? t("home.searchResults", { count: searchResults.length, query: searchQuery })
+                      : t("home.searchNoResults", { query: searchQuery })
                     }
                   </Text>
                 </View>
@@ -1064,9 +1074,10 @@ const Home = () => {
                     fontSize: 20, 
                     fontWeight: 'bold', 
                     marginBottom: 15, 
-                    paddingHorizontal: 20 
+                    paddingHorizontal: 20,
+                    textAlign: isRTL ? 'right' : 'left',
                   }}>
-                    Trending Videos
+                    {t("home.trendingTitle")}
               </Text>
                   
                   <ScrollView 
@@ -1111,7 +1122,9 @@ const Home = () => {
                       marginHorizontal: 5 
                     }}
                   >
-                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: selectedTab === 'forYou' ? '700' : '400' }}>For You</Text>
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: selectedTab === 'forYou' ? '700' : '400' }}>
+                      {t("home.tabForYou")}
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity 
                     onPress={() => setSelectedTab('following')}
@@ -1123,7 +1136,9 @@ const Home = () => {
                       marginHorizontal: 5 
                     }}
                   >
-                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: selectedTab === 'following' ? '700' : '400' }}>Following</Text>
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: selectedTab === 'following' ? '700' : '400' }}>
+                      {t("home.tabFollowing")}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1218,7 +1233,7 @@ const Home = () => {
                   zIndex: 5
                 }}>
                   <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 5 }}>
-                    {trendingModalVideo.title || 'Untitled Video'}
+                    {trendingModalVideo.title || t("home.untitledVideo")}
                   </Text>
                   {trendingModalVideo.creator && (
                     <Text style={{ color: '#ccc', fontSize: 14 }}>

@@ -1,23 +1,40 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Text, TouchableOpacity, TextInput, Alert, Modal, ScrollView, Image } from "react-native";
+import { View, Text, TouchableOpacity, TextInput, Alert, ScrollView, Image } from "react-native";
+import { useTranslation } from "react-i18next";
 import { icons } from "../../constants";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const DonationPage = () => {
-  const { user } = useGlobalContext();
+  const { user, isRTL } = useGlobalContext();
+  const { t } = useTranslation();
   const [selectedAmount, setSelectedAmount] = useState(null);
   const [customAmount, setCustomAmount] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [donationMessage, setDonationMessage] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const presetAmounts = [
-    { amount: 1, label: "$1", description: "Support my content" },
-    { amount: 5, label: "$5", description: "Help keep me going" },
-    { amount: 10, label: "$10", description: "Amazing support!" }
-  ];
+  const presetAmounts = useMemo(
+    () => [
+      {
+        amount: 1,
+        label: t("donation.preset.1.label"),
+        description: t("donation.preset.1.description"),
+      },
+      {
+        amount: 5,
+        label: t("donation.preset.5.label"),
+        description: t("donation.preset.5.description"),
+      },
+      {
+        amount: 10,
+        label: t("donation.preset.10.label"),
+        description: t("donation.preset.10.description"),
+      },
+    ],
+    [t]
+  );
 
   const handleAmountSelect = (amount) => {
     if (selectedAmount === amount) {
@@ -49,14 +66,14 @@ const DonationPage = () => {
 
   const handleDonate = async () => {
     if (!selectedAmount && !customAmount) {
-      Alert.alert("Error", "Please select an amount to donate");
+      Alert.alert(t("common.error"), t("donation.errors.selectAmount"));
       return;
     }
 
     const finalAmount = selectedAmount || parseFloat(customAmount);
     
     if (isNaN(finalAmount) || finalAmount <= 0) {
-      Alert.alert("Error", "Please enter a valid amount");
+      Alert.alert(t("common.error"), t("donation.errors.invalidAmount"));
       return;
     }
 
@@ -70,20 +87,22 @@ const DonationPage = () => {
       const creatorReceives = finalAmount - platformFee;
       
       Alert.alert(
-        "Donation Successful! 🎉",
-        `Thank you for your generous donation of $${finalAmount.toFixed(2)}!\n\nThe creator receives $${creatorReceives.toFixed(2)} (after 10% platform fee). Your support means the world!`,
+        t("donation.successTitle"),
+        t("donation.successMessage", {
+          amount: finalAmount.toFixed(2),
+          creator: creatorReceives.toFixed(2),
+        }),
         [
           {
-            text: "Share",
+            text: t("donation.shareButton"),
             onPress: () => {
-              // In a real app, this would share the donation
-              Alert.alert("Shared!", "Thanks for sharing the love!");
+              Alert.alert(t("donation.shareThanksTitle"), t("donation.shareThanksMessage"));
               // Reset form after sharing
               resetForm();
             }
           },
           {
-            text: "Done",
+            text: t("donation.doneButton"),
             onPress: () => {
               // Reset form before going back
               resetForm();
@@ -93,7 +112,7 @@ const DonationPage = () => {
         ]
       );
     } catch (error) {
-      Alert.alert("Error", "Failed to process donation. Please try again.");
+      Alert.alert(t("common.error"), t("donation.errors.processFailed"));
     } finally {
       setIsProcessing(false);
     }
@@ -114,7 +133,9 @@ const DonationPage = () => {
             className="w-6 h-6"
           />
         </TouchableOpacity>
-        <Text className="text-white text-lg font-bold">Support Creator</Text>
+        <Text className="text-white text-lg font-bold" style={{ textAlign: isRTL ? "right" : "center" }}>
+          {t("donation.headerTitle")}
+        </Text>
         <View className="w-6" />
       </View>
 
@@ -137,20 +158,24 @@ const DonationPage = () => {
           <Text className="text-white text-xl font-bold mb-1">
             {user?.username || "Creator"}
           </Text>
-          <Text className="text-gray-400 text-center mb-4">
-            Help support my content creation journey! Every donation helps me continue making amazing videos.
+          <Text className="text-gray-400 text-center mb-4" style={{ textAlign: isRTL ? "right" : "center" }}>
+            {t("donation.supportMessage")}
           </Text>
           
           {/* Progress Bar */}
           <View className="w-full bg-gray-700 rounded-full h-2 mb-2">
             <View className="bg-green-400 h-2 rounded-full" style={{ width: '65%' }} />
           </View>
-          <Text className="text-gray-400 text-sm">$1,250 raised of $2,000 goal</Text>
+          <Text className="text-gray-400 text-sm" style={{ textAlign: isRTL ? "right" : "center" }}>
+            {t("donation.progressLabel", { raised: "1,250", goal: "2,000" })}
+          </Text>
         </View>
 
         {/* Donation Amounts */}
         <View className="mb-8">
-          <Text className="text-white text-lg font-semibold mb-4">Choose Amount</Text>
+          <Text className="text-white text-lg font-semibold mb-4" style={{ textAlign: isRTL ? "right" : "left" }}>
+            {t("donation.chooseAmount")}
+          </Text>
           
           {/* Preset Amounts */}
           <View className="space-y-3 mb-4">
@@ -173,7 +198,7 @@ const DonationPage = () => {
                     </Text>
                     <Text className={`text-sm ${
                       selectedAmount === preset.amount ? 'text-white font-medium' : 'text-gray-400'
-                    }`}>
+                  }`} style={{ textAlign: isRTL ? "right" : "left" }}>
                       {preset.description}
                     </Text>
                   </View>
@@ -206,13 +231,13 @@ const DonationPage = () => {
               <View className="flex-1">
                 <Text className={`text-lg font-bold ${
                   showCustomInput ? 'text-white' : 'text-white'
-                }`}>
-                  Custom Amount
+                }`} style={{ textAlign: isRTL ? "right" : "left" }}>
+                  {t("donation.customTitle")}
                 </Text>
                 <Text className={`text-sm ${
                   showCustomInput ? 'text-white font-medium' : 'text-gray-400'
-                }`}>
-                  Enter your own amount
+                }`} style={{ textAlign: isRTL ? "right" : "left" }}>
+                  {t("donation.customSubtitle")}
                 </Text>
               </View>
               <View className={`w-6 h-6 rounded-full border-2 ${
@@ -232,7 +257,9 @@ const DonationPage = () => {
           {/* Custom Amount Input */}
           {showCustomInput && (
             <View className="mt-4 p-4 bg-gray-800 rounded-xl">
-              <Text className="text-white text-sm mb-2">Enter Amount (USD)</Text>
+              <Text className="text-white text-sm mb-2" style={{ textAlign: isRTL ? "right" : "left" }}>
+                {t("donation.customLabel")}
+              </Text>
               <TextInput
                 value={customAmount}
                 onChangeText={setCustomAmount}
@@ -240,6 +267,7 @@ const DonationPage = () => {
                 placeholderTextColor="#666"
                 keyboardType="numeric"
                 className="bg-gray-700 text-white p-3 rounded-lg text-lg font-semibold"
+                style={{ textAlign: isRTL ? "right" : "left" }}
               />
             </View>
           )}
@@ -247,16 +275,18 @@ const DonationPage = () => {
 
         {/* Optional Message */}
         <View className="mb-8">
-          <Text className="text-white text-lg font-semibold mb-4">Leave a Message (Optional)</Text>
+          <Text className="text-white text-lg font-semibold mb-4" style={{ textAlign: isRTL ? "right" : "left" }}>
+            {t("donation.messageTitle")}
+          </Text>
           <TextInput
             value={donationMessage}
             onChangeText={setDonationMessage}
-            placeholder="Say something nice..."
+            placeholder={t("donation.messagePlaceholder")}
             placeholderTextColor="#666"
             multiline
             numberOfLines={3}
             className="bg-gray-800 text-white p-4 rounded-xl text-base"
-            style={{ textAlignVertical: 'top' }}
+            style={{ textAlignVertical: 'top', textAlign: isRTL ? "right" : "left" }}
           />
         </View>
 
@@ -269,23 +299,35 @@ const DonationPage = () => {
           
           return (
             <View className="mb-8 p-4 bg-gray-800 rounded-xl">
-              <Text className="text-white text-lg font-semibold mb-2">Donation Summary</Text>
+              <Text className="text-white text-lg font-semibold mb-2" style={{ textAlign: isRTL ? "right" : "left" }}>
+                {t("donation.summaryTitle")}
+              </Text>
               <View className="flex-row justify-between items-center">
-                <Text className="text-gray-400">Donation Amount:</Text>
-                <Text className="text-white text-xl font-bold">${donationAmount.toFixed(2)}</Text>
+                <Text className="text-gray-400">{t("donation.summaryDonation")}</Text>
+                <Text className="text-white text-xl font-bold">
+                  ${donationAmount.toFixed(2)}
+                </Text>
               </View>
               <View className="flex-row justify-between items-center mt-2">
-                <Text className="text-gray-400">Platform Fee (10%):</Text>
-                <Text className="text-orange-400">-${platformFee.toFixed(2)}</Text>
+                <Text className="text-gray-400">{t("donation.summaryFee")}</Text>
+                <Text className="text-orange-400">
+                  -${platformFee.toFixed(2)}
+                </Text>
               </View>
               <View className="flex-row justify-between items-center mt-1">
-                <Text className="text-gray-400 text-sm">Creator Receives:</Text>
-                <Text className="text-green-400 font-semibold">${creatorReceives.toFixed(2)}</Text>
+                <Text className="text-gray-400 text-sm">{t("donation.summaryCreator")}</Text>
+                <Text className="text-green-400 font-semibold">
+                  ${creatorReceives.toFixed(2)}
+                </Text>
               </View>
               <View className="border-t border-gray-600 mt-3 pt-3">
                 <View className="flex-row justify-between items-center">
-                  <Text className="text-white text-lg font-bold">Your Total Charge:</Text>
-                  <Text className="text-green-400 text-xl font-bold">${totalCharged.toFixed(2)}</Text>
+                  <Text className="text-white text-lg font-bold">
+                    {t("donation.summaryTotal")}
+                  </Text>
+                  <Text className="text-green-400 text-xl font-bold">
+                    ${totalCharged.toFixed(2)}
+                  </Text>
                 </View>
               </View>
             </View>
@@ -303,20 +345,23 @@ const DonationPage = () => {
           }`}
         >
           <Text className="text-white text-center text-lg font-bold">
-            {isProcessing ? 'Processing...' : `Donate $${getSelectedAmountValue().toFixed(2)}`}
+            {isProcessing
+              ? t("donation.processing")
+              : getSelectedAmountValue()
+                ? t("donation.donateButton", {
+                    amount: getSelectedAmountValue().toFixed(2),
+                  })
+                : t("donation.donateDisabled")}
           </Text>
         </TouchableOpacity>
 
         {/* Recent Donations */}
         <View className="mb-8">
-          <Text className="text-white text-lg font-semibold mb-4">Recent Supporters</Text>
+          <Text className="text-white text-lg font-semibold mb-4" style={{ textAlign: isRTL ? "right" : "left" }}>
+            {t("donation.supportersTitle")}
+          </Text>
           <View className="space-y-2">
-            {[
-              { name: "Alex M.", amount: "$10", time: "2 hours ago" },
-              { name: "Sarah K.", amount: "$5", time: "4 hours ago" },
-              { name: "Mike R.", amount: "$25", time: "6 hours ago" },
-              { name: "Emma L.", amount: "$1", time: "1 day ago" }
-            ].map((donation, index) => (
+            {t("donation.recent", { returnObjects: true }).map((donation, index) => (
               <View key={index} className="flex-row items-center justify-between bg-gray-800 p-3 rounded-lg">
                 <View className="flex-row items-center">
                   <View className="w-8 h-8 bg-green-400 rounded-full items-center justify-center mr-3">
@@ -337,8 +382,8 @@ const DonationPage = () => {
 
         {/* Trust Indicators */}
         <View className="mb-8">
-          <Text className="text-gray-400 text-sm text-center mb-4">
-            🔒 Secure Payment • 💝 90% goes to creator • ⚙️ 10% platform fee
+          <Text className="text-gray-400 text-sm text-center mb-4" style={{ textAlign: isRTL ? "right" : "center" }}>
+            {t("donation.trustIndicators")}
           </Text>
         </View>
       </ScrollView>
