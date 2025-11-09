@@ -2702,7 +2702,7 @@ export const resources = {
         followingTitle: "المتابَعون",
         followingEmpty: "لا تتابع أي حساب بعد.",
       },
-      profile: profileBase,
+      profile: profileTranslations.ar,
       live: {
         headerTitle: "البثوث المباشرة",
         goLive: "ابدأ البث",
@@ -2851,7 +2851,7 @@ export const resources = {
         followingTitle: "Подписки",
         followingEmpty: "Вы ещё ни на кого не подписаны.",
       },
-      profile: profileBase,
+      profile: profileTranslations.ru,
       live: {
         headerTitle: "Прямые эфиры",
         goLive: "Начать эфир",
@@ -3000,7 +3000,7 @@ export const resources = {
         followingTitle: "Gefolgt",
         followingEmpty: "Du folgst noch niemandem.",
       },
-      profile: profileBase,
+      profile: profileTranslations.de,
       live: {
         headerTitle: "Livestreams",
         goLive: "Live gehen",
@@ -3149,7 +3149,7 @@ export const resources = {
         followingTitle: "फ़ॉलोइंग",
         followingEmpty: "आपने अभी तक किसी को फ़ॉलो नहीं किया है।",
       },
-      profile: profileBase,
+      profile: profileTranslations.hi,
       live: {
         headerTitle: "लाइव स्ट्रीम्स",
         goLive: "लाइव शुरू करें",
@@ -3298,7 +3298,7 @@ export const resources = {
         followingTitle: "অনুসরণ করছে",
         followingEmpty: "আপনি এখনও কাউকে অনুসরণ করেননি।",
       },
-      profile: profileBase,
+      profile: profileTranslations.bn,
       live: {
         headerTitle: "লাইভ স্ট্রিম",
         goLive: "লাইভ শুরু করুন",
@@ -3596,7 +3596,7 @@ export const resources = {
         followingTitle: "Đang theo dõi",
         followingEmpty: "Bạn vẫn chưa theo dõi ai.",
       },
-      profile: profileBase,
+      profile: profileTranslations.vi,
       live: {
         headerTitle: "Phát trực tiếp",
         goLive: "Bắt đầu live",
@@ -3745,7 +3745,7 @@ export const resources = {
         followingTitle: "Takip edilenler",
         followingEmpty: "Henüz kimseyi takip etmiyorsun.",
       },
-      profile: profileBase,
+      profile: profileTranslations.tr,
       live: {
         headerTitle: "Canlı yayınlar",
         goLive: "Canlı yayına başla",

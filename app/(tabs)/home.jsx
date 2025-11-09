@@ -677,6 +677,65 @@ const Home = () => {
   // Get latest posts for trending section
   const { data: latestPosts } = useAppwrite(getLatestPosts, []);
   
+  const [trendingCreators, setTrendingCreators] = useState({});
+  const fetchedTrendingCreatorIds = useRef(new Set());
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchCreators = async () => {
+      if (!latestPosts || latestPosts.length === 0) return;
+      const missingIds = latestPosts
+        .map((post) => {
+          if (!post?.creator) return null;
+          if (typeof post.creator === "object" && post.creator !== null) return null;
+          if (fetchedTrendingCreatorIds.current.has(post.creator)) return null;
+          return post.creator;
+        })
+        .filter(Boolean);
+
+      if (missingIds.length === 0) return;
+
+      missingIds.forEach((id) => fetchedTrendingCreatorIds.current.add(id));
+
+      try {
+        const results = await Promise.all(
+          missingIds.map(async (creatorId) => {
+            try {
+              const userDoc = await databases.getDocument(
+                appwriteConfig.databaseId,
+                appwriteConfig.userCollectionId,
+                creatorId
+              );
+              return { creatorId, data: userDoc };
+            } catch (error) {
+              console.log("Failed to fetch creator for trending post:", creatorId, error);
+              return { creatorId, data: null };
+            }
+          })
+        );
+
+        if (!isMounted) return;
+
+        setTrendingCreators((prev) => {
+          const updated = { ...prev };
+          results.forEach(({ creatorId, data }) => {
+            if (creatorId) {
+              updated[creatorId] = data;
+            }
+          });
+          return updated;
+        });
+      } catch (error) {
+        console.log("Failed to fetch trending creators:", error);
+      }
+    };
+
+    fetchCreators();
+    return () => {
+      isMounted = false;
+    };
+  }, [latestPosts]);
+
  
   
   const posts = selectedTab === 'forYou' ? forYouPosts : followingPosts;
@@ -779,97 +838,218 @@ const Home = () => {
   const renderTrendingItem = ({ item, index }) => {
     // Determine if this is the center video based on currentTrendingIndex
     const isCenterVideo = index === currentTrendingIndex;
-    
+
     // Get video dimensions - center video is larger, side videos are smaller
     // Making videos taller and narrower to match the second image
     const getVideoWidth = () => {
       return isCenterVideo ? 130 : 110; // Center video wider but narrower than before
     };
-    
+
     const getVideoHeight = () => {
       return isCenterVideo ? 260 : 220; // Center video taller to match aspect ratio
     };
-    
+
     // Minimal spacing between videos
     const getMarginHorizontal = () => {
       return 8; // Very small margins for minimal spacing
     };
+
+    const videoWidth = getVideoWidth();
+    const videoHeight = getVideoHeight();
+    const marginHorizontal = getMarginHorizontal();
+    const creatorObject =
+      (typeof item.creator === "object" && item.creator !== null ? item.creator : null) ||
+      (item.creator && trendingCreators[item.creator]) ||
+      {};
+    const creatorId =
+      (typeof item.creator === "object" && item.creator !== null ? item.creator.$id : null) ||
+      (typeof item.creator === "string" ? item.creator : null) ||
+      creatorObject.$id;
+    const creator = creatorObject || {};
+    const displayName =
+      creator.fullname ||
+      creator.displayName ||
+      creator.name ||
+      creator.username ||
+      "";
+    const rawHandle = creator.handle || creator.username || "";
+    const handleLabel = rawHandle ? (rawHandle.startsWith("@") ? rawHandle : `@${rawHandle}`) : "";
+    const hasAvatar = Boolean(creator.avatar);
+    const avatarSource = hasAvatar ? { uri: creator.avatar } : null;
+
+    const handleCreatorPress = () => {
+      if (creatorId) {
+        setTrendingModalVisible(false);
+        router.push(`/profile/${creatorId}`);
+      }
+    };
+
     return (
-    <TouchableOpacity 
-      key={item.$id}
-      style={{ 
-        marginHorizontal: getMarginHorizontal(),
-        alignItems: 'center'
-      }}
-      onPress={() => {
-        // Open full screen modal instead of toggling play
-        setTrendingModalVideo(item);
-        setTrendingModalVisible(true);
-        setIsTrendingVideoPlaying(true);
-      }}
-    >
-      <View style={{ 
-        width: getVideoWidth(), 
-        height: getVideoHeight(), 
-        borderRadius: 16, 
-        marginTop: 18, 
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.4,
-        shadowRadius: 8,
-        elevation: 8,
-        justifyContent: 'center',
-        alignItems: 'center'
-      }}>
-        {item.video ? (
-          <View style={{ width: '100%', height: '100%', position: 'relative' }}>
-            <Video
-              source={{ 
-                uri: getIOSCompatibleVideoUrl(item.video) || item.video
-              }}
-              style={{ width: '100%', height: '100%' }}
-              resizeMode="cover"
-              shouldPlay={false}
-              isMuted={true}
-              isLooping={false}
-              useNativeControls={false}
-              posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
-              onError={(error) => {
-                console.log('Trending video error:', error);
-              }}
-              onLoad={() => {
-                console.log('Trending video loaded');
-              }}
-              {...(Platform.OS === 'ios' && {
-                allowsExternalPlayback: false,
-                playInSilentModeIOS: true,
-                ignoreSilentSwitch: 'ignore'
-              })}
-            />
-            
+      <View
+        key={item.$id}
+        style={{
+          marginHorizontal,
+          alignItems: 'center',
+          width: videoWidth,
+        }}
+      >
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={{ width: '100%' }}
+          onPress={() => {
+            setTrendingModalVideo(item);
+            setTrendingModalVisible(true);
+            setIsTrendingVideoPlaying(true);
+          }}
+        >
+          <View
+            style={{
+              width: videoWidth,
+              height: videoHeight,
+              borderRadius: 24,
+              marginTop: 18,
+              backgroundColor: 'rgba(255,255,255,0.06)',
+              overflow: 'hidden',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 6 },
+              shadowOpacity: 0.45,
+              shadowRadius: 10,
+              elevation: 10,
+              justifyContent: 'center',
+              alignItems: 'center',
+              position: 'relative',
+            }}
+          >
+            {item.video ? (
+              <Video
+                source={{
+                  uri: getIOSCompatibleVideoUrl(item.video) || item.video,
+                }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+                shouldPlay={false}
+                isMuted={true}
+                isLooping={false}
+                useNativeControls={false}
+                posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
+                onError={(error) => {
+                  console.log('Trending video error:', error);
+                }}
+                onLoad={() => {
+                  console.log('Trending video loaded');
+                }}
+                {...(Platform.OS === 'ios' && {
+                  allowsExternalPlayback: false,
+                  playInSilentModeIOS: true,
+                  ignoreSilentSwitch: 'ignore',
+                })}
+              />
+            ) : (
+              <View
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  backgroundColor: 'rgba(0,0,0,0.35)',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center' }}>
+                  {item.title || t("home.noVideo")}
+                </Text>
+              </View>
+            )}
+
             {/* Play Icon Overlay */}
-            <View style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -24 }, { translateY: -24 }] }}>
-              <Image source={icons.play} style={{ width: 48, height: 48 }} resizeMode="contain" />
-            </View>
+            {item.video && (
+              <View style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -24 }, { translateY: -24 }] }}>
+                <Image source={icons.play} style={{ width: 48, height: 48 }} resizeMode="contain" />
+              </View>
+            )}
+
+            {/* Avatar Badge */}
+            {hasAvatar && (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleCreatorPress}
+                style={{
+                  position: 'absolute',
+                  top: 14,
+                  left: 14,
+                  width: 50,
+                  height: 50,
+                  borderRadius: 25,
+                  borderWidth: 3,
+                  borderColor: '#fff',
+                  overflow: 'hidden',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 6,
+                  elevation: 6,
+                  backgroundColor: '#fff',
+                }}
+              >
+                <Image
+                  source={avatarSource}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            )}
+
+            {/* Name Banner */}
+            {(displayName || handleLabel) && (
+              <LinearGradient
+                colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.75)']}
+                locations={[0, 1]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  paddingHorizontal: 16,
+                  paddingVertical: 18,
+                }}
+              >
+                {!!displayName && (
+                  <Text
+                    style={{
+                      color: '#fff',
+                      fontSize: 18,
+                      fontWeight: '700',
+                      textAlign: 'center',
+                      textShadowColor: 'rgba(0,0,0,0.35)',
+                      textShadowOffset: { width: 0, height: 2 },
+                      textShadowRadius: 6,
+                    }}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {displayName}
+                  </Text>
+                )}
+                {!!handleLabel && (
+                  <Text
+                    style={{
+                      color: 'rgba(255,255,255,0.8)',
+                      fontSize: 13,
+                      textAlign: 'center',
+                      marginTop: displayName ? 4 : 0,
+                    }}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {handleLabel}
+                  </Text>
+                )}
+              </LinearGradient>
+            )}
           </View>
-        ) : (
-          <View style={{ 
-            width: '100%', 
-            height: '100%', 
-            backgroundColor: 'rgba(0,0,0,0.3)', 
-            justifyContent: 'center', 
-            alignItems: 'center' 
-          }}>
-            <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center' }}>
-              {item.title || t("home.noVideo")}
-            </Text>
-          </View>
-        )}
+        </TouchableOpacity>
       </View>
-      {/* Creator name hidden as requested */}
-    </TouchableOpacity>
     );
   };
 
