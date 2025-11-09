@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { View, Image, FlatList, TouchableOpacity, Modal, Text, TextInput, Alert, Platform, ScrollView, ActivityIndicator, KeyboardAvoidingView, Share } from "react-native";
@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next";
 // Component to display pending request with user details
 const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
   const { t } = useTranslation();
+  const { theme, isDarkMode } = useGlobalContext();
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -47,55 +48,92 @@ const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
   }, [requestingUserId]);
 
   return (
-    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#333", padding: 12, borderRadius: 8, marginBottom: 8 }}>
+    <View
+      style={{
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        backgroundColor: theme.surface,
+        padding: 12,
+        borderRadius: 12,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: theme.border,
+        shadowColor: isDarkMode ? "rgba(0,0,0,0.35)" : "rgba(15,23,42,0.12)",
+        shadowOpacity: 0.2,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 4,
+      }}
+    >
       <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
         {/* User Avatar */}
-        <View style={{ 
-          width: 32, 
-          height: 32, 
-          borderRadius: 16, 
-          backgroundColor: "#4CAF50", 
-          alignItems: "center", 
-          justifyContent: "center",
-          marginRight: 12,
-          overflow: "hidden"
-        }}>
+        <View
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: theme.accentSoft,
+            alignItems: "center",
+            justifyContent: "center",
+            marginRight: 12,
+            overflow: "hidden",
+            borderWidth: 1,
+            borderColor: theme.border,
+          }}
+        >
           {userData?.avatar ? (
             <Image
               source={{ uri: userData.avatar }}
-              style={{ width: 32, height: 32, borderRadius: 16 }}
+              style={{ width: 40, height: 40, borderRadius: 20 }}
               resizeMode="cover"
             />
           ) : (
-            <Text style={{ color: "#000", fontSize: 14, fontWeight: "bold" }}>
+            <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "bold" }}>
               {userData?.username ? userData.username.charAt(0).toUpperCase() : t('profile.general.defaultInitial')}
             </Text>
           )}
         </View>
-        
+
         {/* User Info */}
         <View style={{ flex: 1 }}>
           {loading ? (
-            <Text style={{ color: "#fff", fontSize: 14 }}>{t('common.loading')}</Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 14 }}>{t('common.loading')}</Text>
           ) : (
             <>
-              <Text style={{ color: "#fff", fontSize: 14, fontWeight: "bold" }}>
+              <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "bold" }}>
                 {userData?.username || t('profile.general.unknownUser')}
               </Text>
-              <Text style={{ color: "#ccc", fontSize: 12 }}>
+              <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
                 @{userData?.username || t('profile.general.unknownHandle')}
               </Text>
             </>
           )}
         </View>
       </View>
-      
+
       {/* Action Buttons */}
       <View style={{ flexDirection: "row", gap: 8 }}>
-        <TouchableOpacity onPress={onApprove} style={{ backgroundColor: "#4CAF50", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}>
+        <TouchableOpacity
+          onPress={onApprove}
+          style={{
+            backgroundColor: theme.success,
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            borderRadius: 8,
+          }}
+        >
           <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>{t('profile.pending.approve')}</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={onDeny} style={{ backgroundColor: "#f44336", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}>
+        <TouchableOpacity
+          onPress={onDeny}
+          style={{
+            backgroundColor: theme.danger,
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            borderRadius: 8,
+          }}
+        >
           <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>{t('profile.pending.deny')}</Text>
         </TouchableOpacity>
       </View>
@@ -105,7 +143,7 @@ const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
 
 const Profile = () => {
   const { t } = useTranslation();
-  const { user, setUser, setIsLogged } = useGlobalContext();
+  const { user, setUser, setIsLogged, theme, isDarkMode } = useGlobalContext();
   const SUPPORT_REQUIREMENT = 1000;
   const { data: posts } = useAppwrite(() => getUserPosts(user.$id), [user?.$id]);
   const { data: followers } = useAppwrite(() => getFollowers(user?.$id), [user?.$id]);
@@ -708,33 +746,55 @@ const Profile = () => {
     setFollowModalData([]);
   };
 
+  const themedColor = useCallback(
+    (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
+    [isDarkMode]
+  );
+
+  const supportGradient = useMemo(
+    () => (isDarkMode ? ["#34D399", "#059669"] : ["#4ADE80", "#22C55E"]),
+    [isDarkMode]
+  );
+
+  const goLiveGradient = useMemo(
+    () => (isDarkMode ? ["#F97316", "#EA580C"] : ["#FB923C", "#F97316"]),
+    [isDarkMode]
+  );
+
+  const liveStreamsGradient = useMemo(
+    () => (isDarkMode ? ["#8B5CF6", "#6366F1"] : ["#A855F7", "#6366F1"]),
+    [isDarkMode]
+  );
+
   return (
-    <SafeAreaView style={{ backgroundColor: '#000', flex: 1 }}>
-      <ScrollView style={{ flex: 1, backgroundColor: '#000' }}>
+    <SafeAreaView style={{ backgroundColor: theme.background, flex: 1 }}>
+      <ScrollView style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Profile Section with Background Image */}
         <View style={{ flex: 1, position: 'relative' }}>
-          {/* Background Image */}
-          <Image
-            source={images.backgroundImage}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              width: '100%',
-              height: '100%',
-              resizeMode: 'cover'
-            }}
-          />
-          {/* Dark overlay for better text readability */}
+          {/* Background Image (dark mode only) */}
+          {isDarkMode && (
+            <Image
+              source={images.backgroundImage}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100%',
+                height: '100%',
+                resizeMode: 'cover'
+              }}
+            />
+          )}
+          {/* Overlay for better text readability */}
           <View style={{
             position: 'absolute',
             top: 0,
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.4)'
+            backgroundColor: themedColor('rgba(0, 0, 0, 0.45)', 'rgba(255, 255, 255, 0.85)')
           }} />
           {/* Header with logout and menu */}
           <View className="flex-row justify-between items-center px-4 pt-4 pb-6">
@@ -755,54 +815,94 @@ const Profile = () => {
           </View>
 
          {/* Profile Section */}
-          <View className="items-center px-4 mb-8 mt-6">
-          {/* Profile Picture */}
-          <View className="w-20 h-20 border border-secondary items-center justify-center mb-4 rounded-lg">
-            {user?.avatar ? (
-              <Image
-                source={{ uri: user.avatar }}
-                className="w-[90%] h-[90%]"
-                resizeMode="cover"
-              />
-            ) : (
-              <Text className="text-black text-xl font-bold">
-                {getUserInitials(user?.username)}
-              </Text>
-            )}
-          </View>
-
-          {/* Username and Handle */}
-          <Text className="text-white text-xl font-bold mb-1">
-            {user?.username || t('profile.general.userPlaceholder')}
-          </Text>
-          <Text className="text-gray-400 text-sm mb-6">
-            @{user?.username || t('profile.general.handlePlaceholder')}
-          </Text>
-
-          {/* Statistics */}
-          <View className="flex-row space-x-8 mb-6">
-            <TouchableOpacity 
-              className="items-center"
-              onPress={() => openFollowModal('following')}
+          <View style={{ alignItems: 'center', paddingHorizontal: 16, marginBottom: 32, marginTop: 24 }}>
+            {/* Profile Picture */}
+            <View
+              style={{
+                width: 96,
+                height: 96,
+                borderRadius: 24,
+                borderWidth: 2,
+                borderColor: theme.accent,
+                backgroundColor: theme.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 16,
+                overflow: 'hidden',
+              }}
             >
-              <Text className="text-white text-lg font-bold">{following?.length || 0}</Text>
-              <Text className="text-gray-400 text-sm">{t('profile.stats.following')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              className="items-center"
-              onPress={() => openFollowModal('followers')}
+              {user?.avatar ? (
+                <Image
+                  source={{ uri: user.avatar }}
+                  style={{ width: '92%', height: '92%', borderRadius: 18 }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Text style={{ color: theme.textPrimary, fontSize: 24, fontWeight: '700' }}>
+                  {getUserInitials(user?.username)}
+                </Text>
+              )}
+            </View>
+
+            {/* Username and Handle */}
+            <Text
+              style={{
+                color: theme.textPrimary,
+                fontSize: 22,
+                fontWeight: '700',
+                marginBottom: 6,
+                textAlign: 'center',
+              }}
             >
-              <Text className="text-white text-lg font-bold">{followers?.length || 0}</Text>
-              <Text className="text-gray-400 text-sm">{t('profile.stats.followers')}</Text>
-            </TouchableOpacity>
-            <View className="items-center">
-              <Text className="text-white text-lg font-bold">{totalLikes}</Text>
-              <Text className="text-gray-400 text-sm">{t('profile.stats.likes')}</Text>
+              {user?.username || t('profile.general.userPlaceholder')}
+            </Text>
+            <Text
+              style={{
+                color: theme.textSecondary,
+                fontSize: 14,
+                marginBottom: 20,
+              }}
+            >
+              @{user?.username || t('profile.general.handlePlaceholder')}
+            </Text>
+
+            {/* Statistics */}
+            <View style={{ flexDirection: 'row', gap: 28, marginBottom: 24 }}>
+              <TouchableOpacity
+                style={{ alignItems: 'center' }}
+                onPress={() => openFollowModal('following')}
+              >
+                <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '700' }}>
+                  {following?.length || 0}
+                </Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+                  {t('profile.stats.following')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ alignItems: 'center' }}
+                onPress={() => openFollowModal('followers')}
+              >
+                <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '700' }}>
+                  {followers?.length || 0}
+                </Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+                  {t('profile.stats.followers')}
+                </Text>
+              </TouchableOpacity>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '700' }}>
+                  {totalLikes}
+                </Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+                  {t('profile.stats.likes')}
+                </Text>
+              </View>
             </View>
           </View>
 
           {/* Action Buttons */}
-          <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16, paddingHorizontal: 16 }}>
             <TouchableOpacity 
               onPress={() => {
                 const followerCount = followers?.length || 0;
@@ -817,7 +917,7 @@ const Profile = () => {
               }}
               style={{
                 borderRadius: 8,
-                shadowColor: '#32CD32',
+                shadowColor: themedColor("rgba(52,211,153,0.35)", "rgba(34,197,94,0.35)"),
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: 0.3,
                 shadowRadius: 4,
@@ -827,7 +927,7 @@ const Profile = () => {
               disabled={(followers?.length || 0) < SUPPORT_REQUIREMENT}
             >
               <LinearGradient
-                colors={['#32CD32', '#228B22']} // Lime green to emerald green
+                colors={supportGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={{
@@ -838,7 +938,6 @@ const Profile = () => {
                   alignItems: 'center',
                 }}
               >
-                
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
                   {(followers?.length || 0) < SUPPORT_REQUIREMENT
                     ? t('profile.actions.supportWithProgress', { current: followers?.length || 0, required: SUPPORT_REQUIREMENT })
@@ -850,7 +949,7 @@ const Profile = () => {
               onPress={() => router.push('/go-live')}
               style={{
                 borderRadius: 8,
-                shadowColor: '#FF0000',
+                shadowColor: themedColor("rgba(239,68,68,0.35)", "rgba(220,38,38,0.35)"),
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: 0.3,
                 shadowRadius: 4,
@@ -858,7 +957,7 @@ const Profile = () => {
               }}
             >
               <LinearGradient
-                colors={['#FF0000', '#8B0000']} // Bright red to maroon red
+                colors={goLiveGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={{
@@ -869,7 +968,6 @@ const Profile = () => {
                   alignItems: 'center',
                 }}
               >
-                
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{t('profile.actions.goLive')}</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -877,7 +975,7 @@ const Profile = () => {
               onPress={() => router.push('/live-streams')}
               style={{
                 borderRadius: 8,
-                shadowColor: '#8A2BE2',
+                shadowColor: themedColor("rgba(139,92,246,0.35)", "rgba(99,102,241,0.35)"),
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: 0.3,
                 shadowRadius: 4,
@@ -885,7 +983,7 @@ const Profile = () => {
               }}
             >
               <LinearGradient
-                colors={['#8A2BE2', '#4B0082']} // Bright purple to deep indigo
+                colors={liveStreamsGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={{
@@ -896,7 +994,6 @@ const Profile = () => {
                   alignItems: 'center',
                 }}
               >
-                
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{t('profile.actions.liveStreams')}</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -904,49 +1001,98 @@ const Profile = () => {
         </View>
 
           {/* Section Tabs */}
-          <View className="px-4 mb-4">
-            <View style={{ backgroundColor: '#04302F' }} className="flex-row rounded-lg p-1">
-              <TouchableOpacity 
-                className={`flex-1 py-2 px-4 rounded-lg ${activeSection === 'videos' ? 'bg-primary' : 'bg-transparent'}`}
+          <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                borderRadius: 14,
+                padding: 4,
+                backgroundColor: themedColor('rgba(15,23,42,0.6)', theme.surface),
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}
+            >
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  paddingHorizontal: 16,
+                  borderRadius: 10,
+                  backgroundColor: activeSection === 'videos' ? theme.accentSoft : 'transparent',
+                }}
                 onPress={() => handleSectionChange('videos')}
               >
-                <Text className={`text-center font-medium ${activeSection === 'videos' ? 'text-white' : 'text-gray-400'}`}>
+                <Text
+                  style={{
+                    textAlign: 'center',
+                    fontFamily: 'Poppins-Medium',
+                    color: activeSection === 'videos' ? theme.textPrimary : theme.textSecondary,
+                  }}
+                >
                   {t('profile.sections.videos')}
                 </Text>
               </TouchableOpacity>
- 
-              <TouchableOpacity 
-                className={`flex-1 py-2 px-4 rounded-lg ${activeSection === 'bookmarks' ? 'bg-primary' : 'bg-transparent'}`}
+
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  paddingHorizontal: 16,
+                  borderRadius: 10,
+                  backgroundColor: activeSection === 'bookmarks' ? theme.accentSoft : 'transparent',
+                }}
                 onPress={() => handleSectionChange('bookmarks')}
               >
-                <Text className={`text-center font-medium ${activeSection === 'bookmarks' ? 'text-white' : 'text-gray-400'}`}>
+                <Text
+                  style={{
+                    textAlign: 'center',
+                    fontFamily: 'Poppins-Medium',
+                    color: activeSection === 'bookmarks' ? theme.textPrimary : theme.textSecondary,
+                  }}
+                >
                   {t('profile.sections.bookmarks')}
                 </Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
 
-        {/* Content Sections with Black Background */}
-        <View style={{ backgroundColor: '#000', flex: 1 }}>
+        {/* Content Sections */}
+        <View style={{ backgroundColor: theme.background, flex: 1 }}>
           {/* Videos Section */}
           {activeSection === 'videos' && (
-            <View className="px-4 mb-8">
-              <Text className="text-white text-lg font-semibold mb-4">{t('profile.sections.yourVideos')}</Text>
+            <View style={{ paddingHorizontal: 16, marginBottom: 32 }}>
+              <Text
+                style={{
+                  color: theme.textPrimary,
+                  fontSize: 18,
+                  fontFamily: 'Poppins-SemiBold',
+                  marginBottom: 16,
+                }}
+              >
+                {t('profile.sections.yourVideos')}
+              </Text>
               {posts && posts.length > 0 ? (
-                <View className="flex-row flex-wrap justify-between gap-1">
-                 
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
                   {posts.map((post, index) => (
-                                         <TouchableOpacity 
-                       key={post.$id}
-                       className="w-[48%] aspect-square bg-gray-800 rounded-lg mb-3 overflow-hidden"
-                       onPress={() => openVideoModal(post, index)}
-                     >
-                      <View className="relative w-full h-full">
+                    <TouchableOpacity
+                      key={post.$id}
+                      style={{
+                        width: '48%',
+                        aspectRatio: 1,
+                        backgroundColor: theme.surface,
+                        borderRadius: 16,
+                        marginBottom: 12,
+                        overflow: 'hidden',
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                      }}
+                      onPress={() => openVideoModal(post, index)}
+                    >
+                      <View style={{ width: '100%', height: '100%' }}>
                         {post.video ? (
                           <Video
                             source={{ uri: post.video }}
-                            className="w-full h-full"
+                            style={{ width: '100%', height: '100%' }}
                             resizeMode="cover"
                             shouldPlay={false}
                             isMuted={true}
@@ -956,7 +1102,7 @@ const Profile = () => {
                         ) : (
                           <Image
                             source={{ uri: post.thumbnail || 'https://via.placeholder.com/300x300' }}
-                            className="w-full h-full"
+                            style={{ width: '100%', height: '100%' }}
                             resizeMode="cover"
                           />
                         )}
@@ -966,9 +1112,13 @@ const Profile = () => {
                   ))}
                 </View>
               ) : (
-                <View className="items-center py-8">
-                  <Text className="text-gray-400 text-center">{t('profile.sections.noVideosTitle')}</Text>
-                  <Text className="text-gray-500 text-sm text-center mt-2">{t('profile.sections.noVideosSubtitle')}</Text>
+                <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                  <Text style={{ color: theme.textSecondary, textAlign: 'center', fontSize: 16 }}>
+                    {t('profile.sections.noVideosTitle')}
+                  </Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>
+                    {t('profile.sections.noVideosSubtitle')}
+                  </Text>
                 </View>
               )}
             </View>
@@ -976,23 +1126,32 @@ const Profile = () => {
 
           {/* Bookmarks Section */}
           {activeSection === 'bookmarks' && (
-            <View className="px-4 mb-8">
-              <Text className="text-white text-lg font-semibold mb-4">{t('profile.sections.yourBookmarks')}</Text>
+            <View style={{ paddingHorizontal: 16, marginBottom: 32 }}>
+              <Text
+                style={{
+                  color: theme.textPrimary,
+                  fontSize: 18,
+                  fontFamily: 'Poppins-SemiBold',
+                  marginBottom: 16,
+                }}
+              >
+                {t('profile.sections.yourBookmarks')}
+              </Text>
             
-                           {bookmarksLoading || isRefreshingBookmarks ? (
-                <View className="items-center py-8">
-                  <Text className="text-gray-400 text-center">
+              {bookmarksLoading || isRefreshingBookmarks ? (
+                <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                  <Text style={{ color: theme.textSecondary, textAlign: 'center' }}>
                     {isRefreshingBookmarks ? t('profile.sections.bookmarksRefreshing') : t('profile.sections.bookmarksLoading')}
                   </Text>
                 </View>
               ) : bookmarksError ? (
-               <View className="items-center py-8">
-                 <Text className="text-gray-400 text-center">{t('profile.sections.bookmarksError')}</Text>
-                 <Text className="text-gray-500 text-sm text-center mt-2">{bookmarksError.message}</Text>
+               <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                 <Text style={{ color: theme.textSecondary, textAlign: 'center' }}>{t('profile.sections.bookmarksError')}</Text>
+                 <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>{bookmarksError.message}</Text>
                </View>
              ) : bookmarks && bookmarks.length > 0 ? (
-               <View className="flex-row flex-wrap justify-between">
-                                   {bookmarks.map((bookmark, index) => {
+               <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
+                 {bookmarks.map((bookmark, index) => {
                     // Get the fetched video data for this bookmark
                     const videoData = bookmarkVideos[bookmark.$id] || {
                       title: t('common.loading'),
@@ -1002,9 +1161,18 @@ const Profile = () => {
                     };
                     
                     return (
-                                             <TouchableOpacity 
+                      <TouchableOpacity 
                          key={bookmark.$id}
-                         className="w-[48%] aspect-square bg-gray-800 rounded-lg mb-3 overflow-hidden"
+                        style={{
+                          width: '48%',
+                          aspectRatio: 1,
+                          backgroundColor: theme.surface,
+                          borderRadius: 16,
+                          marginBottom: 12,
+                          overflow: 'hidden',
+                          borderWidth: 1,
+                          borderColor: theme.border,
+                        }}
                          onPress={() => {
                            // For bookmarks, we need to fetch the actual video data first
                            if (bookmark.postId) {
@@ -1029,11 +1197,11 @@ const Profile = () => {
                            }
                          }}
                        >
-                        <View className="relative w-full h-full">
+                        <View style={{ width: '100%', height: '100%' }}>
                           {!bookmarkVideosLoading && videoData.video ? (
                             <Video
                               source={{ uri: videoData.video }}
-                              className="w-full h-full"
+                              style={{ width: '100%', height: '100%' }}
                               resizeMode="cover"
                               shouldPlay={false}
                               isMuted={true}
@@ -1043,13 +1211,23 @@ const Profile = () => {
                           ) : (
                             <Image
                               source={{ uri: videoData.thumbnail || 'https://via.placeholder.com/300x300' }}
-                              className="w-full h-full"
+                              style={{ width: '100%', height: '100%' }}
                               resizeMode="cover"
                             />
                           )}
                           {/* Bookmark Icon */}
-                          <View className="absolute top-2 right-2 bg-black bg-opacity-50 rounded-full p-1">
-                            <Text className="text-white text-xs">🔖</Text>
+                          <View
+                            style={{
+                              position: 'absolute',
+                              top: 8,
+                              right: 8,
+                              backgroundColor: themedColor('rgba(0,0,0,0.5)', 'rgba(255,255,255,0.65)'),
+                              borderRadius: 12,
+                              paddingHorizontal: 6,
+                              paddingVertical: 4,
+                            }}
+                          >
+                            <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 12 }}>🔖</Text>
                           </View>
                                                     {/* Video Title Overlay */}
                         
@@ -1059,9 +1237,9 @@ const Profile = () => {
                   })}
                </View>
              ) : (
-               <View className="items-center py-8">
-                 <Text className="text-gray-400 text-center">{t('profile.sections.noBookmarksTitle')}</Text>
-                 <Text className="text-gray-500 text-sm text-center mt-2">{t('profile.sections.noBookmarksSubtitle')}</Text>
+               <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                 <Text style={{ color: theme.textSecondary, textAlign: 'center' }}>{t('profile.sections.noBookmarksTitle')}</Text>
+                 <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>{t('profile.sections.noBookmarksSubtitle')}</Text>
                </View>
              )}
             </View>
@@ -1070,13 +1248,40 @@ const Profile = () => {
 
         {/* Pending Requests Section */}
         {isPrivate && pendingRequests && pendingRequests.length > 0 && (
-          <View style={{ backgroundColor: '#000' }}>
-            <View className="mx-4 mb-8 bg-secondary px-4 py-3 rounded-lg">
-            <Text className="text-white font-semibold mb-2">{t('profile.pending.bannerTitle', { count: pendingRequests.length })}</Text>
-            <Text className="text-gray-300 text-sm">{t('profile.pending.bannerSubtitle')}</Text>
-            <TouchableOpacity onPress={() => setEditModalVisible(true)} className="mt-2 bg-primary px-4 py-2 rounded-lg self-start">
-              <Text className="text-white font-medium text-sm">{t('profile.pending.manage')}</Text>
-            </TouchableOpacity>
+          <View style={{ backgroundColor: theme.background }}>
+            <View
+              style={{
+                marginHorizontal: 16,
+                marginBottom: 32,
+                backgroundColor: theme.surface,
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                borderRadius: 14,
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}
+            >
+              <Text style={{ color: theme.textPrimary, fontWeight: '600', marginBottom: 8 }}>
+                {t('profile.pending.bannerTitle', { count: pendingRequests.length })}
+              </Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+                {t('profile.pending.bannerSubtitle')}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setEditModalVisible(true)}
+                style={{
+                  marginTop: 12,
+                  backgroundColor: theme.accent,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 10,
+                  alignSelf: 'flex-start',
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
+                  {t('profile.pending.manage')}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -1087,7 +1292,7 @@ const Profile = () => {
           animationType="slide"
           transparent={false}
           onRequestClose={() => setModalVisible(false)}
-          style={{ backgroundColor: '#000' }}
+          style={{ backgroundColor: theme.background }}
         >
           {modalVideo && (
             <GestureHandlerRootView style={{ flex: 1 }}>
@@ -1099,14 +1304,14 @@ const Profile = () => {
                   }
                 }}
               >
-                <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
+                <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
                   {/* Close Button */}
                   <TouchableOpacity onPress={() => setModalVisible(false)} style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}>
-                    <Text style={{ color: '#fff', fontSize: 28 }}>×</Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 28 }}>×</Text>
                   </TouchableOpacity>
                   
                   {/* Video */}
-                  <View style={{ flex: 1, backgroundColor: '#000', position: 'relative' }}>
+                  <View style={{ flex: 1, backgroundColor: theme.background, position: 'relative' }}>
                     <Video
                       ref={modalVideoRef}
                       source={{ uri: modalVideo.video }}
@@ -1178,13 +1383,13 @@ const Profile = () => {
                         width: 50,
                         height: 50,
                         borderRadius: 25,
-                        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                        backgroundColor: themedColor('rgba(255, 255, 255, 0.2)', 'rgba(15,23,42,0.2)'),
                         justifyContent: 'center',
                         alignItems: 'center',
                         zIndex: 5
                       }}
                     >
-                      <Text style={{ color: '#fff', fontSize: 24 }}>
+                      <Text style={{ color: theme.textPrimary, fontSize: 24 }}>
                         {isVideoPlaying ? '❚❚' : '▶'}
                       </Text>
                     </TouchableOpacity>
@@ -1213,10 +1418,28 @@ const Profile = () => {
                       <View style={{ position: 'relative' }}>
                         <Image
                           source={{ uri: modalVideo.creator?.avatar || user?.avatar }}
-                          style={{ width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: '#fff' }}
+                          style={{
+                            width: 50,
+                            height: 50,
+                            borderRadius: 25,
+                            borderWidth: 2,
+                            borderColor: themedColor('#fff', theme.border),
+                          }}
                           resizeMode="cover"
                         />
-                        <View style={{ position: 'absolute', bottom: -2, right: -2, backgroundColor: '#007AFF', width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center' }}>
+                        <View
+                          style={{
+                            position: 'absolute',
+                            bottom: -2,
+                            right: -2,
+                            backgroundColor: theme.accent,
+                            width: 20,
+                            height: 20,
+                            borderRadius: 10,
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                          }}
+                        >
                           <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>+</Text>
                         </View>
                       </View>
@@ -1228,7 +1451,9 @@ const Profile = () => {
                         width: 40,
                         height: 40,
                         borderRadius: 20,
-                        backgroundColor: liked ? 'rgba(255, 71, 87, 0.2)' : 'rgba(255, 255, 255, 0.1)',
+                        backgroundColor: liked
+                          ? themedColor('rgba(255, 71, 87, 0.2)', 'rgba(248,113,113,0.18)')
+                          : themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
                         justifyContent: 'center',
                         alignItems: 'center',
                         marginBottom: 5
@@ -1240,7 +1465,7 @@ const Profile = () => {
                         />
                       </View>
                       <TouchableOpacity onPress={handleOpenLikesModal}>
-                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
+                        <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
                       </TouchableOpacity>
                     </TouchableOpacity>
                     
@@ -1250,7 +1475,7 @@ const Profile = () => {
                         width: 40,
                         height: 40,
                         borderRadius: 20,
-                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                        backgroundColor: themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
                         justifyContent: 'center',
                         alignItems: 'center',
                         marginBottom: 5
@@ -1261,7 +1486,7 @@ const Profile = () => {
                           resizeMode="contain" 
                         />
                       </View>
-                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(commentsCount)}</Text>
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(commentsCount)}</Text>
                     </TouchableOpacity>
                     
                     {/* Bookmark Button */}
@@ -1270,7 +1495,9 @@ const Profile = () => {
                         width: 40,
                         height: 40,
                         borderRadius: 20,
-                        backgroundColor: bookmarked ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 255, 255, 0.1)',
+                        backgroundColor: bookmarked
+                          ? themedColor('rgba(255, 193, 7, 0.2)', theme.accentSoft)
+                          : themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
                         justifyContent: 'center',
                         alignItems: 'center',
                         marginBottom: 5
@@ -1281,7 +1508,9 @@ const Profile = () => {
                           resizeMode="contain" 
                         />
                       </View>
-                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{bookmarked ? t('profile.general.saved') : t('profile.general.save')}</Text>
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                        {bookmarked ? t('profile.general.saved') : t('profile.general.save')}
+                      </Text>
                     </TouchableOpacity>
                     
                     {/* Share Button */}
@@ -1290,7 +1519,7 @@ const Profile = () => {
                         width: 40,
                         height: 40,
                         borderRadius: 20,
-                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                        backgroundColor: themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
                         justifyContent: 'center',
                         alignItems: 'center',
                         marginBottom: 5
@@ -1301,25 +1530,29 @@ const Profile = () => {
                           resizeMode="contain" 
                         />
                       </View>
-                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(shareCount)}</Text>
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                        {formatCount(shareCount)}
+                      </Text>
                     </TouchableOpacity>
                   </View>
 
                   {/* Bottom Left Video Information - TikTok Style */}
                   <View style={{ position: 'absolute', bottom: 120, left: 15, right: 80, zIndex: 10 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                      <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600', marginRight: 8 }}>
+                      <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600', marginRight: 8 }}>
                         @{modalVideo.creator?.username || user?.username}
                       </Text>
                     </View>
-                    <Text style={{ color: '#fff', fontSize: 14, marginBottom: 8, lineHeight: 18 }}>
+                    <Text style={{ color: theme.textPrimary, fontSize: 14, marginBottom: 8, lineHeight: 18 }}>
                       {t('profile.general.videoTitle', { title: modalVideo.title || t('profile.general.untitled') })}
                     </Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                      <Text style={{ color: '#fff', fontSize: 12, marginRight: 5 }}>♫</Text>
-                      <Text style={{ color: '#fff', fontSize: 12 }}>{t('profile.general.originalSound', { username: modalVideo.creator?.username || user?.username })}</Text>
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, marginRight: 5 }}>♫</Text>
+                      <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                        {t('profile.general.originalSound', { username: modalVideo.creator?.username || user?.username })}
+                      </Text>
                     </View>
-                    <Text style={{ color: '#fff', fontSize: 12, opacity: 0.8 }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 12, opacity: 0.8 }}>
                       {t('profile.general.trendingTags')}
                     </Text>
                   </View>
@@ -1335,13 +1568,34 @@ const Profile = () => {
                       style={{ flex: 1, justifyContent: 'flex-end' }}
                       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                     >
-                      <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '80%', paddingBottom: 0 }}>
+                      <View
+                        style={{
+                          backgroundColor: theme.surface,
+                          borderTopLeftRadius: 18,
+                          borderTopRightRadius: 18,
+                          width: '100%',
+                          maxHeight: '80%',
+                          paddingBottom: 0,
+                          borderWidth: 1,
+                          borderColor: theme.border,
+                        }}
+                      >
                         <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-                          <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-                          <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.commentsTitle')}</Text>
+                          <View
+                            style={{
+                              width: 40,
+                              height: 4,
+                              backgroundColor: theme.border,
+                              borderRadius: 2,
+                              marginBottom: 4,
+                            }}
+                          />
+                          <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>
+                            {t('profile.modals.commentsTitle')}
+                          </Text>
                         </View>
                         {loadingComments ? (
-                          <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
+                          <ActivityIndicator color={theme.accent} size="large" style={{ marginVertical: 24 }} />
                         ) : (
                           <FlatList
                             data={[...comments].reverse()} // Newest at bottom
@@ -1350,9 +1604,9 @@ const Profile = () => {
                               <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 14, paddingHorizontal: 16 }}>
                                 <Image source={{ uri: c.avatar || images.profile }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
                                 <View style={{ flex: 1 }}>
-                                  <Text style={{ color: '#a77df8', fontWeight: 'bold', fontSize: 15 }}>{c.username || c.userId}</Text>
-                                  <Text style={{ color: '#fff', fontSize: 16 }}>{c.content}</Text>
-                                  <Text style={{ color: '#aaa', fontSize: 11, marginTop: 2 }}>{new Date(c.createdAt).toLocaleString()}</Text>
+                                  <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 15 }}>{c.username || c.userId}</Text>
+                                  <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{c.content}</Text>
+                                  <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{new Date(c.createdAt).toLocaleString()}</Text>
                                 </View>
                               </View>
                             )}
@@ -1361,25 +1615,66 @@ const Profile = () => {
                             inverted // So newest is at the bottom
                           />
                         )}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 12, backgroundColor: '#22223b' }}>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            paddingHorizontal: 12,
+                            paddingBottom: 12,
+                            backgroundColor: theme.surface,
+                            borderTopWidth: 1,
+                            borderColor: theme.border,
+                          }}
+                        >
                           <TextInput
                             value={newComment}
                             onChangeText={setNewComment}
                             placeholder={t('profile.modals.addCommentPlaceholder')}
-                            placeholderTextColor="#aaa"
-                            style={{ flex: 1, backgroundColor: '#333', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
+                            placeholderTextColor={theme.inputPlaceholder}
+                            style={{
+                              flex: 1,
+                              backgroundColor: themedColor('#333', theme.inputBackground),
+                              color: theme.textPrimary,
+                              borderRadius: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 10,
+                              fontSize: 16,
+                              borderWidth: 1,
+                              borderColor: theme.border,
+                            }}
                             editable={!posting}
                           />
                           <TouchableOpacity
                             onPress={handleAddComment}
                             disabled={posting || !newComment.trim()}
-                            style={{ marginLeft: 8, backgroundColor: posting ? '#888' : '#a77df8', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12 }}
+                            style={{
+                              marginLeft: 8,
+                              backgroundColor: posting ? theme.border : theme.accent,
+                              borderRadius: 8,
+                              paddingHorizontal: 18,
+                              paddingVertical: 12,
+                            }}
                           >
-                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{posting ? t('profile.modals.posting') : t('profile.modals.post')}</Text>
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
+                              {posting ? t('profile.modals.posting') : t('profile.modals.post')}
+                            </Text>
                           </TouchableOpacity>
                         </View>
-                        <TouchableOpacity onPress={() => setCommentsModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t('profile.modals.close')}</Text>
+                        <TouchableOpacity
+                          onPress={() => setCommentsModalVisible(false)}
+                          style={{
+                            alignSelf: 'center',
+                            backgroundColor: theme.card,
+                            paddingHorizontal: 32,
+                            paddingVertical: 10,
+                            borderRadius: 8,
+                            marginBottom: 12,
+                            marginTop: 2,
+                          }}
+                        >
+                          <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 15 }}>
+                            {t('profile.modals.close')}
+                          </Text>
                         </TouchableOpacity>
                       </View>
                     </KeyboardAvoidingView>
@@ -1396,31 +1691,55 @@ const Profile = () => {
                       style={{ flex: 1, justifyContent: 'flex-end' }}
                       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                     >
-                      <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '70%' }}>
+                      <View
+                        style={{
+                          backgroundColor: theme.surface,
+                          borderTopLeftRadius: 18,
+                          borderTopRightRadius: 18,
+                          width: '100%',
+                          maxHeight: '70%',
+                          borderWidth: 1,
+                          borderColor: theme.border,
+                        }}
+                      >
                         <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-                          <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-                          <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.likesTitle')}</Text>
+                          <View style={{ width: 40, height: 4, backgroundColor: theme.border, borderRadius: 2, marginBottom: 4 }} />
+                          <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.likesTitle')}</Text>
                         </View>
                         {loadingLikes ? (
-                          <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
+                          <ActivityIndicator color={theme.accent} size="large" style={{ marginVertical: 24 }} />
                         ) : likesList.length === 0 ? (
-                          <Text style={{ color: '#fff', textAlign: 'center', marginVertical: 24 }}>{t('profile.modals.noLikes')}</Text>
+                          <Text style={{ color: theme.textSecondary, textAlign: 'center', marginVertical: 24 }}>{t('profile.modals.noLikes')}</Text>
                         ) : (
                           <FlatList
                             data={likesList}
                             keyExtractor={u => u.$id}
                             renderItem={({ item: u }) => (
-                              <TouchableOpacity onPress={() => handleUserPress(u.$id)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 18 }}>
+                              <TouchableOpacity
+                                onPress={() => handleUserPress(u.$id)}
+                                style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 18 }}
+                              >
                                 <Image source={{ uri: u.avatar || images.profile }} style={{ width: 38, height: 38, borderRadius: 19, marginRight: 12 }} />
-                                <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>{u.username}</Text>
+                                <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600' }}>{u.username}</Text>
                               </TouchableOpacity>
                             )}
                             style={{ maxHeight: 320, marginBottom: 8 }}
                             showsVerticalScrollIndicator={false}
                           />
                         )}
-                        <TouchableOpacity onPress={() => setLikesModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t('profile.modals.close')}</Text>
+                        <TouchableOpacity
+                          onPress={() => setLikesModalVisible(false)}
+                          style={{
+                            alignSelf: 'center',
+                            backgroundColor: theme.card,
+                            paddingHorizontal: 32,
+                            paddingVertical: 10,
+                            borderRadius: 8,
+                            marginBottom: 12,
+                            marginTop: 2,
+                          }}
+                        >
+                          <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 15 }}>{t('profile.modals.close')}</Text>
                         </TouchableOpacity>
                       </View>
                     </KeyboardAvoidingView>
@@ -1438,54 +1757,66 @@ const Profile = () => {
           transparent={true}
           onRequestClose={closeFollowModal}
         >
-          <View style={{ 
-            flex: 1, 
-            backgroundColor: "rgba(0,0,0,0.5)",
-            justifyContent: "center",
-            alignItems: "center",
-            paddingHorizontal: 20
-          }}>
-            <View style={{ 
-              backgroundColor: "#22223b", 
-              padding: 24, 
-              borderRadius: 12, 
-              width: "100%",
-              maxWidth: 350,
-              maxHeight: 500
-            }}>
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: themedColor("rgba(0,0,0,0.55)", "rgba(15,23,42,0.3)"),
+              justifyContent: "center",
+              alignItems: "center",
+              paddingHorizontal: 20,
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: theme.surface,
+                padding: 24,
+                borderRadius: 12,
+                width: "100%",
+                maxWidth: 350,
+                maxHeight: 500,
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}
+            >
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                <Text style={{ color: "#fff", fontSize: 20, fontWeight: "bold" }}>
+                <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: "bold" }}>
                   {followModalType === 'following' ? t('profile.modals.followingTitle') : t('profile.modals.followersTitle')}
                 </Text>
                 <TouchableOpacity onPress={closeFollowModal}>
-                  <Text style={{ color: "#fff", fontSize: 20 }}>✕</Text>
+                  <Text style={{ color: theme.textPrimary, fontSize: 20 }}>✕</Text>
                 </TouchableOpacity>
               </View>
-              
+
               <ScrollView style={{ maxHeight: 400 }}>
                 {followModalData.length > 0 ? (
                   followModalData.map((modalUser, index) => {
-                    // Check if current user is following this user
                     const isFollowingUser = modalUser.followers?.includes(user?.$id) || false;
-                    
+
                     return (
-                      <View key={index} style={{ 
-                        flexDirection: "row", 
-                        alignItems: "center", 
-                        paddingVertical: 12, 
-                        borderBottomWidth: 1, 
-                        borderBottomColor: "#333" 
-                      }}>
-                        <View style={{ 
-                          width: 40, 
-                          height: 40, 
-                          borderRadius: 20, 
-                          backgroundColor: "#4CAF50", 
-                          alignItems: "center", 
-                          justifyContent: "center",
-                          marginRight: 12,
-                          overflow: "hidden"
-                        }}>
+                      <View
+                        key={index}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          paddingVertical: 12,
+                          borderBottomWidth: 1,
+                          borderBottomColor: theme.divider,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 20,
+                            backgroundColor: theme.accentSoft,
+                            alignItems: "center",
+                            justifyContent: "center",
+                            marginRight: 12,
+                            overflow: "hidden",
+                            borderWidth: 1,
+                            borderColor: theme.border,
+                          }}
+                        >
                           {modalUser.avatar ? (
                             <Image
                               source={{ uri: modalUser.avatar }}
@@ -1493,28 +1824,27 @@ const Profile = () => {
                               resizeMode="cover"
                             />
                           ) : (
-                            <Text style={{ color: "#000", fontSize: 16, fontWeight: "bold" }}>
+                            <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "bold" }}>
                               {modalUser.username ? modalUser.username.charAt(0).toUpperCase() : 'U'}
                             </Text>
                           )}
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={{ color: "#fff", fontSize: 16, fontWeight: "bold" }}>
+                          <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "bold" }}>
                             {modalUser.username || t('profile.general.unknownUser')}
                           </Text>
-                          <Text style={{ color: "#ccc", fontSize: 14 }}>
+                          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
                             @{modalUser.username || 'unknown'}
                           </Text>
                         </View>
-                        {/* Follow/Unfollow Button */}
                         {modalUser.$id !== user?.$id && (
                           <TouchableOpacity
                             onPress={() => handleFollowToggle(modalUser.$id)}
                             style={{
-                              backgroundColor: isFollowingUser ? '#444' : '#ff2d55',
+                              backgroundColor: isFollowingUser ? theme.cardSoft : theme.accent,
                               paddingHorizontal: 16,
                               paddingVertical: 6,
-                              borderRadius: 6
+                              borderRadius: 6,
                             }}
                           >
                             <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
@@ -1527,7 +1857,7 @@ const Profile = () => {
                   })
                 ) : (
                   <View style={{ alignItems: "center", paddingVertical: 40 }}>
-                    <Text style={{ color: "#ccc", fontSize: 16 }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 16 }}>
                       {followModalType === 'following' ? t('profile.modals.notFollowing') : t('profile.modals.noFollowers')}
                     </Text>
                   </View>
@@ -1546,56 +1876,92 @@ const Profile = () => {
         >
           <View style={{ 
             flex: 1, 
-            backgroundColor: "rgba(0,0,0,0.5)",
+            backgroundColor: themedColor("rgba(0,0,0,0.55)", "rgba(15,23,42,0.3)"),
             justifyContent: "center",
             alignItems: "center",
             paddingHorizontal: 20
           }}>
             <View style={{ 
-              backgroundColor: "#22223b", 
+              backgroundColor: theme.surface, 
               padding: 24, 
               borderRadius: 12, 
               width: "100%",
-              maxWidth: 350
+              maxWidth: 350,
+              borderWidth: 1,
+              borderColor: theme.border,
             }}>
-              <Text style={{ color: "#fff", fontSize: 20, marginBottom: 20, textAlign: "center" }}>
+              <Text style={{ color: theme.textPrimary, fontSize: 20, marginBottom: 20, textAlign: "center" }}>
                 {t('profile.modals.editTitle')}
               </Text>
               
               {/* Username Input */}
-              <Text style={{ color: "#fff", fontSize: 16, marginBottom: 8 }}>{t('profile.modals.usernameLabel')}</Text>
+              <Text style={{ color: theme.textPrimary, fontSize: 16, marginBottom: 8 }}>{t('profile.modals.usernameLabel')}</Text>
               <TextInput
                 value={newUsername}
                 onChangeText={setNewUsername}
-                style={{ backgroundColor: "#333", color: "#fff", padding: 12, borderRadius: 8, marginBottom: 20 }}
+                style={{
+                  backgroundColor: themedColor('#333', theme.inputBackground),
+                  color: theme.textPrimary,
+                  padding: 12,
+                  borderRadius: 8,
+                  marginBottom: 20,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                }}
                 placeholder={t('profile.modals.usernamePlaceholder')}
-                placeholderTextColor="#666"
+                placeholderTextColor={theme.inputPlaceholder}
               />
 
               {/* Avatar Upload */}
-              <Text style={{ color: "#fff", fontSize: 16, marginBottom: 8 }}>{t('profile.modals.avatarLabel')}</Text>
-              <TouchableOpacity onPress={pickAvatarImage} style={{ backgroundColor: "#333", padding: 12, borderRadius: 8, marginBottom: 20, alignItems: "center" }}>
-                <Text style={{ color: "#fff" }}>{uploadingAvatar ? t('profile.modals.uploadingAvatar') : t('profile.modals.uploadAvatar')}</Text>
+              <Text style={{ color: theme.textPrimary, fontSize: 16, marginBottom: 8 }}>{t('profile.modals.avatarLabel')}</Text>
+              <TouchableOpacity
+                onPress={pickAvatarImage}
+                style={{
+                  backgroundColor: themedColor('#333', theme.surfaceMuted),
+                  padding: 12,
+                  borderRadius: 8,
+                  marginBottom: 20,
+                  alignItems: "center",
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                }}
+              >
+                <Text style={{ color: theme.textPrimary }}>
+                  {uploadingAvatar ? t('profile.modals.uploadingAvatar') : t('profile.modals.uploadAvatar')}
+                </Text>
               </TouchableOpacity>
 
               {/* Theme Toggle */}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingVertical: 8 }}>
-                <Text style={{ color: "#fff", fontSize: 16 }}>{t('profile.modals.themeLabel')}</Text>
+                <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t('profile.modals.themeLabel')}</Text>
                 <ThemeToggle />
               </View>
 
               {/* Re-enable privacy toggle */}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingVertical: 8 }}>
-                <Text style={{ color: "#fff", fontSize: 16 }}>{t('profile.modals.privateProfileLabel')}</Text>
-                <TouchableOpacity onPress={() => setIsPrivate(!isPrivate)} style={{ width: 50, height: 30, borderRadius: 15, backgroundColor: isPrivate ? "#a77df8" : "#444", justifyContent: "center", alignItems: isPrivate ? "flex-end" : "flex-start", paddingHorizontal: 4 }}>
-                  <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: "#fff" }} />
+                <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t('profile.modals.privateProfileLabel')}</Text>
+                <TouchableOpacity
+                  onPress={() => setIsPrivate(!isPrivate)}
+                  style={{
+                    width: 50,
+                    height: 30,
+                    borderRadius: 15,
+                    backgroundColor: isPrivate ? theme.accent : theme.cardSoft,
+                    justifyContent: "center",
+                    alignItems: isPrivate ? "flex-end" : "flex-start",
+                    paddingHorizontal: 4,
+                  }}
+                >
+                  <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' }} />
                 </TouchableOpacity>
               </View>
 
               {/* Re-enable pending requests section in modal */}
               {isPrivate && pendingRequests && pendingRequests.length > 0 && (
                 <View style={{ marginBottom: 20 }}>
-                  <Text style={{ color: "#fff", fontSize: 16, marginBottom: 12 }}>{t('profile.modals.pendingRequestsTitle', { count: pendingRequests.length })}</Text>
+                  <Text style={{ color: theme.textPrimary, fontSize: 16, marginBottom: 12 }}>
+                    {t('profile.modals.pendingRequestsTitle', { count: pendingRequests.length })}
+                  </Text>
                   <View style={{ maxHeight: 200 }}>
                     {pendingRequests.map((requestingUserId, index) => (
                       <PendingRequestItem 
@@ -1611,11 +1977,34 @@ const Profile = () => {
 
               {/* Save and Cancel Buttons */}
               <View style={{ flexDirection: "row", gap: 12 }}>
-                <TouchableOpacity onPress={saveProfileChanges} disabled={saving} style={{ flex: 1, backgroundColor: "#a77df8", padding: 12, borderRadius: 8, alignItems: "center" }}>
-                  <Text style={{ color: "#fff", fontWeight: "bold" }}>{saving ? t('profile.modals.saving') : t('profile.modals.save')}</Text>
+                <TouchableOpacity
+                  onPress={saveProfileChanges}
+                  disabled={saving}
+                  style={{
+                    flex: 1,
+                    backgroundColor: saving ? theme.border : theme.accent,
+                    padding: 12,
+                    borderRadius: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "bold" }}>
+                    {saving ? t('profile.modals.saving') : t('profile.modals.save')}
+                  </Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={closeEditModal} style={{ flex: 1, backgroundColor: "#666", padding: 12, borderRadius: 8, alignItems: "center" }}>
-                  <Text style={{ color: "#fff", fontWeight: "bold" }}>{t('profile.modals.cancel')}</Text>
+                <TouchableOpacity
+                  onPress={closeEditModal}
+                  style={{
+                    flex: 1,
+                    backgroundColor: theme.cardSoft,
+                    padding: 12,
+                    borderRadius: 8,
+                    alignItems: "center",
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                  }}
+                >
+                  <Text style={{ color: theme.textPrimary, fontWeight: "bold" }}>{t('profile.modals.cancel')}</Text>
                 </TouchableOpacity>
               </View>
             </View>

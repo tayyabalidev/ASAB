@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { View, Text, TextInput, TouchableOpacity, Image } from "react-native";
 
 import { icons } from "../constants";
@@ -14,26 +14,53 @@ const FormField = ({
   ...props
 }) => {
   const [showPassword, setShowPassword] = useState(false);
-  const { isDarkMode, isRTL } = useGlobalContext();
+  const { isDarkMode, isRTL, theme } = useGlobalContext();
+
+  const themedColor = useCallback(
+    (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
+    [isDarkMode]
+  );
 
   return (
-    <View className={`space-y-2 ${otherStyles}`}>
-      <Text className={`text-base font-pmedium ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>{title}</Text>
+    <View className={otherStyles || ""} style={{ gap: 8 }}>
+      <Text
+        style={{
+          fontSize: 16,
+          fontFamily: "Poppins-Medium",
+          color: theme.textPrimary,
+          textAlign: isRTL ? "right" : "left",
+          marginBottom: 4,
+        }}
+      >
+        {title}
+      </Text>
 
       <View 
-        className={`w-full h-16 px-4 rounded-2xl border-2 flex flex-row items-center ${
-          isDarkMode ? 'bg-black-100' : 'bg-gray-50'
-        }`}
-        style={{ borderColor: isDarkMode ? '#501478' : '#8B5CF6' }}
+        style={{
+          width: "100%",
+          height: 60,
+          paddingHorizontal: 16,
+          borderRadius: 18,
+          borderWidth: 1,
+          borderColor: theme.border,
+          backgroundColor: themedColor(theme.surface, theme.surface),
+          flexDirection: isRTL ? "row-reverse" : "row",
+          alignItems: "center",
+        }}
       >
         <TextInput
-          className={`flex-1 font-psemibold text-base ${isDarkMode ? 'text-white' : 'text-gray-900'}`}
+          style={{
+            flex: 1,
+            fontFamily: "Poppins-SemiBold",
+            fontSize: 16,
+            color: theme.textPrimary,
+            textAlign: isRTL ? "right" : "left",
+          }}
           value={value}
           placeholder={placeholder}
-          placeholderTextColor={isDarkMode ? "#7B7B8B" : "#9CA3AF"}
+          placeholderTextColor={theme.inputPlaceholder}
           onChangeText={handleChangeText}
           secureTextEntry={isPassword && !showPassword}
-          textAlign={isRTL ? 'right' : 'left'}
           {...props}
         />
 
@@ -41,7 +68,11 @@ const FormField = ({
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
             <Image
               source={!showPassword ? icons.eye : icons.eyeHide}
-              className="w-6 h-6"
+              style={{
+                width: 24,
+                height: 24,
+                tintColor: theme.textSecondary,
+              }}
               resizeMode="contain"
             />
           </TouchableOpacity>

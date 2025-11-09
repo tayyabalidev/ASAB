@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Platform } from "react-native";
 import { FlatList, Image, RefreshControl, Text, View, TouchableOpacity, Dimensions, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Share, Alert, ScrollView } from "react-native";
@@ -17,7 +17,7 @@ import { appwriteConfig } from "../../lib/appwrite";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused }) => {
+const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused, theme, isDarkMode }) => {
   const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
   const { t } = useTranslation();
   const [play, setPlay] = useState(false);
@@ -305,10 +305,15 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     return count.toString();
   };
 
+  const themedColor = useCallback(
+    (darkColor, lightColor) => (isDarkMode ? darkColor : lightColor),
+    [isDarkMode]
+  );
+
   return (
     <View style={{ 
       height: SCREEN_HEIGHT, 
-      backgroundColor: '#000', 
+      backgroundColor: themedColor('#000', theme.background), 
       overflow: 'hidden', 
       position: 'relative',
       ...(Platform.OS === 'ios' && { 
@@ -356,7 +361,14 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={handleVideoPress}
-        style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, backgroundColor: '#000' }}
+        style={{
+          width: '100%',
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          backgroundColor: themedColor('#000', theme.surface),
+        }}
       >
         {item.video ? (
         <Video
@@ -387,8 +399,16 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           })}
         />
         ) : (
-          <View style={{ width: '100%', height: '100%', backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontSize: 16 }}>{t("home.noVideoAvailable")}</Text>
+          <View
+            style={{
+              width: '100%',
+              height: '100%',
+              backgroundColor: themedColor('#333', theme.surfaceMuted),
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t("home.noVideoAvailable")}</Text>
           </View>
         )}
         {!play && item.video && (
@@ -407,7 +427,13 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           <View style={{ position: 'relative' }}>
             <Image
               source={{ uri: item.creator.avatar }}
-              style={{ width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: '#fff' }}
+              style={{
+                width: 50,
+                height: 50,
+                borderRadius: 25,
+                borderWidth: 2,
+                borderColor: themedColor('#fff', theme.border),
+              }}
               resizeMode="cover"
             />
                          {/* Follow/Following Icon */}
@@ -418,22 +444,22 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                    position: 'absolute', 
                    bottom: -2, 
                    right: -2, 
-                   backgroundColor: isFollowing ? '#4CAF50' : '#007AFF', 
+                   backgroundColor: isFollowing ? theme.success : '#007AFF', 
                    width: 24, 
                    height: 24, 
                    borderRadius: 12, 
                    justifyContent: 'center', 
                    alignItems: 'center',
                    borderWidth: 2,
-                   borderColor: '#fff',
-                   shadowColor: '#000',
+                   borderColor: themedColor('#fff', theme.border),
+                   shadowColor: themedColor('#000', '#CBD5F5'),
                    shadowOffset: { width: 0, height: 2 },
                    shadowOpacity: 0.3,
                    shadowRadius: 4,
                    elevation: 4
                  }}
                >
-                 <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
+                 <Text style={{ color: themedColor('#fff', '#FFFFFF'), fontSize: 12, fontWeight: 'bold' }}>
                    {isFollowing ? '✓' : '+'}
                  </Text>
                </TouchableOpacity>
@@ -447,7 +473,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             width: 40,
             height: 40,
             borderRadius: 20,
-            backgroundColor: liked ? 'rgba(255, 71, 87, 0.2)' : 'rgba(255, 255, 255, 0.1)',
+           
             justifyContent: 'center',
             alignItems: 'center',
             marginBottom: 5
@@ -459,7 +485,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             />
           </View>
           <TouchableOpacity onPress={handleOpenLikesModal}>
-            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
+            <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
           </TouchableOpacity>
         </TouchableOpacity>
 
@@ -469,7 +495,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             width: 40,
             height: 40,
             borderRadius: 20,
-            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        
             justifyContent: 'center',
             alignItems: 'center',
             marginBottom: 5
@@ -480,7 +506,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               resizeMode="contain" 
             />
           </View>
-          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(commentsCount)}</Text>
+          <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(commentsCount)}</Text>
         </TouchableOpacity>
 
         {/* Bookmark Button */}
@@ -489,7 +515,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             width: 40,
             height: 40,
             borderRadius: 20,
-            backgroundColor: bookmarked ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 255, 255, 0.1)',
+           
             justifyContent: 'center',
             alignItems: 'center',
             marginBottom: 5
@@ -500,7 +526,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               resizeMode="contain" 
             />
           </View>
-          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+          <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
             {bookmarked ? t("home.saved") : t("home.save")}
           </Text>
         </TouchableOpacity>
@@ -511,7 +537,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             width: 40,
             height: 40,
             borderRadius: 20,
-            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+           
             justifyContent: 'center',
             alignItems: 'center',
             marginBottom: 5
@@ -522,24 +548,24 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               resizeMode="contain" 
             />
           </View>
-          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(shareCount)}</Text>
+          <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(shareCount)}</Text>
         </TouchableOpacity>
       </View>
 
       {/* Bottom Left Video Information */}
       <View style={{ position: 'absolute', bottom: 100, left: 15, right: 80, zIndex: 20 }}>
-        <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
+        <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
           {item.creator.username}
         </Text>
-        <Text style={{ color: '#fff', fontSize: 14, marginBottom: 8 }}>
+        <Text style={{ color: theme.textPrimary, fontSize: 14, marginBottom: 8 }}>
           {item.title} ♫ ✨
         </Text>
-        <Text style={{ color: '#fff', fontSize: 12, marginBottom: 4 }}>
+        <Text style={{ color: theme.textSecondary, fontSize: 12, marginBottom: 4 }}>
           …
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ color: '#fff', fontSize: 12, marginRight: 5 }}>♫</Text>
-          <Text style={{ color: '#fff', fontSize: 12 }}>
+          <Text style={{ color: theme.textPrimary, fontSize: 12, marginRight: 5 }}>♫</Text>
+          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
             {t("home.containsLabel", { title: item.title })}
           </Text>
         </View>
@@ -556,10 +582,31 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           style={{ flex: 1, justifyContent: 'flex-end' }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '80%', paddingBottom: 0 }}>
+          <View
+            style={{
+              backgroundColor: themedColor('#22223b', theme.surface),
+              borderTopLeftRadius: 18,
+              borderTopRightRadius: 18,
+              width: '100%',
+              maxHeight: '80%',
+              paddingBottom: 0,
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}
+          >
             <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-              <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-              <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t("home.commentsTitle")}</Text>
+              <View
+                style={{
+                  width: 40,
+                  height: 4,
+                  backgroundColor: themedColor('#444', theme.border),
+                  borderRadius: 2,
+                  marginBottom: 4,
+                }}
+              />
+              <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 18, fontWeight: 'bold' }}>
+                {t("home.commentsTitle")}
+              </Text>
             </View>
             {loadingComments ? (
               <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
@@ -568,12 +615,26 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 data={[...comments].reverse()} // Newest at bottom
                 keyExtractor={c => c.$id}
                 renderItem={({ item: c }) => (
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 14, paddingHorizontal: 16 }}>
-                    <Image source={{ uri: c.avatar || images.profile }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'flex-start',
+                      marginBottom: 14,
+                      paddingHorizontal: 16,
+                    }}
+                  >
+                    <Image
+                      source={{ uri: c.avatar || images.profile }}
+                      style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }}
+                    />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: '#a77df8', fontWeight: 'bold', fontSize: 15 }}>{c.username || c.userId}</Text>
-                      <Text style={{ color: '#fff', fontSize: 16 }}>{c.content}</Text>
-                      <Text style={{ color: '#aaa', fontSize: 11, marginTop: 2 }}>{new Date(c.createdAt).toLocaleString()}</Text>
+                      <Text style={{ color: themedColor('#a77df8', theme.accent), fontWeight: 'bold', fontSize: 15 }}>
+                        {c.username || c.userId}
+                      </Text>
+                      <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16 }}>{c.content}</Text>
+                      <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11, marginTop: 2 }}>
+                        {new Date(c.createdAt).toLocaleString()}
+                      </Text>
                     </View>
                   </View>
                 )}
@@ -582,25 +643,67 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 inverted // So newest is at the bottom
               />
             )}
-            <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 12, backgroundColor: '#22223b' }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingHorizontal: 12,
+                paddingBottom: 12,
+                backgroundColor: themedColor('#22223b', theme.surface),
+                borderTopWidth: 1,
+                borderColor: theme.border,
+              }}
+            >
               <TextInput
                 value={newComment}
                 onChangeText={setNewComment}
                 placeholder={t("home.commentPlaceholder")}
-                placeholderTextColor="#aaa"
-                style={{ flex: 1, backgroundColor: '#333', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, textAlign: isRTL ? 'right' : 'left' }}
+                placeholderTextColor={theme.inputPlaceholder}
+                style={{
+                  flex: 1,
+                  backgroundColor: themedColor('#333', theme.inputBackground),
+                  color: themedColor('#fff', theme.textPrimary),
+                  borderRadius: 8,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  fontSize: 16,
+                  textAlign: isRTL ? 'right' : 'left',
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                }}
                 editable={!posting}
               />
               <TouchableOpacity
                 onPress={handleAddComment}
                 disabled={posting || !newComment.trim()}
-                style={{ marginLeft: 8, backgroundColor: posting ? '#888' : '#a77df8', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12 }}
+                style={{
+                  marginLeft: 8,
+                  backgroundColor: posting ? themedColor('#888', theme.border) : theme.accent,
+                  borderRadius: 8,
+                  paddingHorizontal: 18,
+                  paddingVertical: 12,
+                }}
               >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{posting ? '...' : t("home.post")}</Text>
+                <Text style={{ color: themedColor('#fff', '#FFFFFF'), fontWeight: 'bold', fontSize: 16 }}>
+                  {posting ? '...' : t("home.post")}
+                </Text>
               </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={() => setCommentsModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t("home.close")}</Text>
+            <TouchableOpacity
+              onPress={() => setCommentsModalVisible(false)}
+              style={{
+                alignSelf: 'center',
+                backgroundColor: themedColor('#444', theme.card),
+                paddingHorizontal: 32,
+                paddingVertical: 10,
+                borderRadius: 8,
+                marginBottom: 12,
+                marginTop: 2,
+              }}
+            >
+              <Text style={{ color: themedColor('#fff', theme.textPrimary), fontWeight: 'bold', fontSize: 15 }}>
+                {t("home.close")}
+              </Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -617,15 +720,37 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           style={{ flex: 1, justifyContent: 'flex-end' }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '70%' }}>
+          <View
+            style={{
+              backgroundColor: themedColor('#22223b', theme.surface),
+              borderTopLeftRadius: 18,
+              borderTopRightRadius: 18,
+              width: '100%',
+              maxHeight: '70%',
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}
+          >
             <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-              <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-              <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t("home.likesTitle")}</Text>
+              <View
+                style={{
+                  width: 40,
+                  height: 4,
+                  backgroundColor: themedColor('#444', theme.border),
+                  borderRadius: 2,
+                  marginBottom: 4,
+                }}
+              />
+              <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 18, fontWeight: 'bold' }}>
+                {t("home.likesTitle")}
+              </Text>
             </View>
             {loadingLikes ? (
               <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
             ) : likesList.length === 0 ? (
-              <Text style={{ color: '#fff', textAlign: 'center', marginVertical: 24 }}>{t("home.likesEmpty")}</Text>
+              <Text style={{ color: themedColor('#fff', theme.textSecondary), textAlign: 'center', marginVertical: 24 }}>
+                {t("home.likesEmpty")}
+              </Text>
             ) : (
               <FlatList
                 data={likesList}
@@ -633,15 +758,28 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 renderItem={({ item: u }) => (
                   <TouchableOpacity onPress={() => handleUserPress(u.$id)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 18 }}>
                     <Image source={{ uri: u.avatar || images.profile }} style={{ width: 38, height: 38, borderRadius: 19, marginRight: 12 }} />
-                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>{u.username}</Text>
+                    <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16, fontWeight: '600' }}>{u.username}</Text>
                   </TouchableOpacity>
                 )}
                 style={{ maxHeight: 320, marginBottom: 8 }}
                 showsVerticalScrollIndicator={false}
               />
             )}
-            <TouchableOpacity onPress={() => setLikesModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t("home.close")}</Text>
+            <TouchableOpacity
+              onPress={() => setLikesModalVisible(false)}
+              style={{
+                alignSelf: 'center',
+                backgroundColor: themedColor('#444', theme.card),
+                paddingHorizontal: 32,
+                paddingVertical: 10,
+                borderRadius: 8,
+                marginBottom: 12,
+                marginTop: 2,
+              }}
+            >
+              <Text style={{ color: themedColor('#fff', theme.textPrimary), fontWeight: 'bold', fontSize: 15 }}>
+                {t("home.close")}
+              </Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -651,7 +789,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
 };
 
 const Home = () => {
-  const { user, isRTL } = useGlobalContext();
+  const { user, isRTL, theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
   const [selectedTab, setSelectedTab] = useState('forYou'); // 'forYou' or 'following'
   const [refreshing, setRefreshing] = useState(false);
@@ -666,6 +804,11 @@ const Home = () => {
   const [trendingModalVideo, setTrendingModalVideo] = useState(null);
   const [isTrendingVideoPlaying, setIsTrendingVideoPlaying] = useState(true);
   const trendingVideoRef = useRef(null);
+  
+  const themedColor = useCallback(
+    (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
+    [isDarkMode]
+  );
   
   // Get posts based on selected tab
   const { data: forYouPosts, refetch: refetchForYou } = useAppwrite(getAllPosts, []);
@@ -824,15 +967,20 @@ const Home = () => {
     minimumViewTime: 100,
   };
 
-  const renderVideoCard = useCallback(({ item, index }) => (
-    <StrollVideoCard
-      item={item}
-      index={index}
-      isVisible={index === currentVideoIndex}
-      onVideoStateChange={() => {}} // Empty function since we're not using it anymore
-      isHomeFocused={isHomeFocused}
-    />
-  ), [currentVideoIndex, isHomeFocused]);
+  const renderVideoCard = useCallback(
+    ({ item, index }) => (
+      <StrollVideoCard
+        item={item}
+        index={index}
+        isVisible={index === currentVideoIndex}
+        onVideoStateChange={() => {}} // Empty function since we're not using it anymore
+        isHomeFocused={isHomeFocused}
+        theme={theme}
+        isDarkMode={isDarkMode}
+      />
+    ),
+    [currentVideoIndex, isHomeFocused, theme, isDarkMode]
+  );
 
   // Render trending video item
   const renderTrendingItem = ({ item, index }) => {
@@ -908,9 +1056,9 @@ const Home = () => {
               height: videoHeight,
               borderRadius: 24,
               marginTop: 18,
-              backgroundColor: 'rgba(255,255,255,0.06)',
+              backgroundColor: themedColor('rgba(255,255,255,0.06)', theme.surface),
               overflow: 'hidden',
-              shadowColor: '#000',
+              shadowColor: themedColor('#000', '#CBD5F5'),
               shadowOffset: { width: 0, height: 6 },
               shadowOpacity: 0.45,
               shadowRadius: 10,
@@ -949,12 +1097,12 @@ const Home = () => {
                 style={{
                   width: '100%',
                   height: '100%',
-                  backgroundColor: 'rgba(0,0,0,0.35)',
+                  backgroundColor: themedColor('rgba(0,0,0,0.35)', theme.surfaceMuted),
                   justifyContent: 'center',
                   alignItems: 'center',
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center' }}>
+                <Text style={{ color: theme.textPrimary, fontSize: 16, textAlign: 'center' }}>
                   {item.title || t("home.noVideo")}
                 </Text>
               </View>
@@ -980,14 +1128,14 @@ const Home = () => {
                   height: 50,
                   borderRadius: 25,
                   borderWidth: 3,
-                  borderColor: '#fff',
+                  borderColor: themedColor('#fff', theme.border),
                   overflow: 'hidden',
-                  shadowColor: '#000',
+                  shadowColor: themedColor('#000', '#CBD5F5'),
                   shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: 0.3,
                   shadowRadius: 6,
                   elevation: 6,
-                  backgroundColor: '#fff',
+                  backgroundColor: theme.surface,
                 }}
               >
                 <Image
@@ -1001,7 +1149,10 @@ const Home = () => {
             {/* Name Banner */}
             {(displayName || handleLabel) && (
               <LinearGradient
-                colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.75)']}
+                colors={[
+                  themedColor('rgba(0,0,0,0)', 'rgba(255,255,255,0)'),
+                  themedColor('rgba(0,0,0,0.75)', 'rgba(15,23,42,0.75)'),
+                ]}
                 locations={[0, 1]}
                 start={{ x: 0.5, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
@@ -1017,7 +1168,7 @@ const Home = () => {
                 {!!displayName && (
                   <Text
                     style={{
-                      color: '#fff',
+                      color: theme.textPrimary,
                       fontSize: 18,
                       fontWeight: '700',
                       textAlign: 'center',
@@ -1034,7 +1185,7 @@ const Home = () => {
                 {!!handleLabel && (
                   <Text
                     style={{
-                      color: 'rgba(255,255,255,0.8)',
+                      color: themedColor('rgba(255,255,255,0.8)', theme.textSecondary),
                       fontSize: 13,
                       textAlign: 'center',
                       marginTop: displayName ? 4 : 0,
@@ -1054,9 +1205,9 @@ const Home = () => {
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.background }}>
       <SafeAreaView 
-        style={{ flex: 1, backgroundColor: '#000'}} 
+        style={{ flex: 1, backgroundColor: theme.background }} 
         edges={Platform.OS === 'ios' ? ['top', 'left', 'right'] : ['top', 'left', 'right']}
       >
         <View style={{ flex: 1, position: 'relative' }}>
@@ -1084,7 +1235,7 @@ const Home = () => {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.3)'
+            backgroundColor: themedColor('rgba(0, 0, 0, 0.35)', 'rgba(255, 255, 255, 0.35)')
           }} />
 
 
@@ -1125,7 +1276,7 @@ const Home = () => {
             <View style={{ 
               paddingVertical: 20,
               borderBottomWidth: 1,
-              borderBottomColor: 'rgba(255,255,255,0.1)'
+              borderBottomColor: themedColor('rgba(255,255,255,0.1)', 'rgba(15,23,42,0.1)')
             }}>
               {/* Header with Logo and ASAB Badge */}
               <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
@@ -1158,7 +1309,7 @@ const Home = () => {
                 {/* Welcome Back and Username */}
                 <View>
                   <Text style={{ 
-                    color: '#ccc', 
+                    color: theme.textSecondary, 
                     fontSize: 14, 
                     marginBottom: 5,
                     textAlign: isRTL ? 'right' : 'left',
@@ -1166,7 +1317,7 @@ const Home = () => {
                     {t("home.welcomeBack")}
                   </Text>
                   <Text style={{ 
-                    color: '#fff', 
+                    color: theme.textPrimary, 
                     fontSize: 24, 
                     fontWeight: 'bold',
                     textAlign: isRTL ? 'right' : 'left',
@@ -1181,19 +1332,20 @@ const Home = () => {
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
-                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  backgroundColor: themedColor('rgba(255,255,255,0.1)', theme.surface),
                   paddingHorizontal: 20,
                   paddingVertical: 12,
                   borderWidth: 1,
-                  borderColor: 'rgba(255,255,255,0.2)'
+                  borderColor: themedColor('rgba(255,255,255,0.2)', theme.border),
+                  borderRadius: 14,
                 }}>
                   <TextInput
                     ref={searchInputRef}
                     placeholder={t("home.searchPlaceholder")}
-                    placeholderTextColor="rgba(255,255,255,0.6)"
+                    placeholderTextColor={themedColor('rgba(255,255,255,0.6)', theme.textSecondary)}
                     style={{
                       flex: 1,
-                      color: '#fff',
+                      color: theme.textPrimary,
                       fontSize: 16,
                       marginRight: 10,
                       textAlign: isRTL ? 'right' : 'left',
@@ -1220,7 +1372,7 @@ const Home = () => {
                       setIsSearching(false);
                     }
                   }}>
-                  <Text style={{ color: '#fff', fontSize: 18 }}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 18 }}>
                       {searchQuery.trim() ? '✕' : '🔍'}
                     </Text>
                   </TouchableOpacity>
@@ -1232,7 +1384,7 @@ const Home = () => {
               {/* Search Results Indicator */}
               {isSearching && searchQuery.trim() && (
                 <View style={{ paddingHorizontal: 20, marginBottom: 20 }}>
-                  <Text style={{ color: '#fff', fontSize: 16, textAlign: 'center' }}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 16, textAlign: 'center' }}>
                     {searchResults.length > 0 
                       ? t("home.searchResults", { count: searchResults.length, query: searchQuery })
                       : t("home.searchNoResults", { query: searchQuery })
@@ -1244,13 +1396,14 @@ const Home = () => {
               {/* Trending Videos Section */}
               {latestPosts && latestPosts.length > 0 ? (
                 <View style={{ 
-                  backgroundColor: '#020E0D', 
+                  backgroundColor: themedColor('rgba(2,14,13,0.95)', theme.surfaceMuted), 
                   paddingVertical: 20,
                   borderBottomWidth: 1,
+                  borderBottomColor: themedColor('rgba(255,255,255,0.08)', 'rgba(15,23,42,0.08)'),
                   height: 400
                 }}>
                   <Text style={{ 
-                    color: '#fff', 
+                    color: theme.textPrimary, 
                     fontSize: 20, 
                     fontWeight: 'bold', 
                     marginBottom: 15, 
@@ -1280,43 +1433,47 @@ const Home = () => {
                           width: 8, 
                           height: 8, 
                           borderRadius: 4, 
-                          backgroundColor: index === 1 ? '#FFD700' : 'rgba(255,255,255,0.3)', 
+                          backgroundColor: index === 1 ? theme.accent : themedColor('rgba(255,255,255,0.3)', 'rgba(15,23,42,0.2)'), 
                           marginHorizontal: 4 
                         }} 
                       />
                     ))}
                   </View>
                 </View>
-               ) : null}
+              ) : null}
               
               {/* For You / Following Tabs - TikTok Style */}
-              <View style={{ paddingVertical: 15, backgroundColor: '#000' }}>
+              <View style={{ paddingVertical: 15, backgroundColor: theme.background }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
                   <TouchableOpacity 
                     onPress={() => setSelectedTab('forYou')}
                     style={{ 
-                      backgroundColor: selectedTab === 'forYou' ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', 
+                      backgroundColor: selectedTab === 'forYou' ? themedColor('rgba(255,255,255,0.25)', theme.accentSoft) : themedColor('rgba(255,255,255,0.1)', theme.surfaceMuted), 
                       paddingHorizontal: 24, 
                       paddingVertical: 10, 
                       borderRadius: 20, 
-                      marginHorizontal: 5 
+                      marginHorizontal: 5,
+                      borderWidth: selectedTab === 'forYou' ? 1 : 0,
+                      borderColor: selectedTab === 'forYou' ? themedColor('rgba(255,255,255,0.3)', theme.border) : 'transparent',
                     }}
                   >
-                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: selectedTab === 'forYou' ? '700' : '400' }}>
+                    <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: selectedTab === 'forYou' ? '700' : '400' }}>
                       {t("home.tabForYou")}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity 
                     onPress={() => setSelectedTab('following')}
                     style={{ 
-                      backgroundColor: selectedTab === 'following' ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', 
+                      backgroundColor: selectedTab === 'following' ? themedColor('rgba(255,255,255,0.25)', theme.accentSoft) : themedColor('rgba(255,255,255,0.1)', theme.surfaceMuted), 
                       paddingHorizontal: 24, 
                       paddingVertical: 10, 
                       borderRadius: 20, 
-                      marginHorizontal: 5 
+                      marginHorizontal: 5,
+                      borderWidth: selectedTab === 'following' ? 1 : 0,
+                      borderColor: selectedTab === 'following' ? themedColor('rgba(255,255,255,0.3)', theme.border) : 'transparent',
                     }}
                   >
-                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: selectedTab === 'following' ? '700' : '400' }}>
+                    <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: selectedTab === 'following' ? '700' : '400' }}>
                       {t("home.tabFollowing")}
                     </Text>
                   </TouchableOpacity>
@@ -1334,21 +1491,21 @@ const Home = () => {
         animationType="slide"
         transparent={false}
         onRequestClose={() => setTrendingModalVisible(false)}
-        style={{ backgroundColor: '#000' }}
+        style={{ backgroundColor: theme.background }}
       >
         {trendingModalVideo && (
           <GestureHandlerRootView style={{ flex: 1 }}>
-            <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
+            <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
               {/* Close Button */}
               <TouchableOpacity 
                 onPress={() => setTrendingModalVisible(false)} 
                 style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}
               >
-                <Text style={{ color: '#fff', fontSize: 28 }}>×</Text>
+                <Text style={{ color: theme.textPrimary, fontSize: 28 }}>×</Text>
               </TouchableOpacity>
               
               {/* Video */}
-              <View style={{ flex: 1, backgroundColor: '#000', position: 'relative' }}>
+              <View style={{ flex: 1, backgroundColor: theme.background, position: 'relative' }}>
                 <Video
                   ref={trendingVideoRef}
                   source={{ 
@@ -1393,14 +1550,14 @@ const Home = () => {
                     width: 50,
                     height: 50,
                     borderRadius: 25,
-                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    backgroundColor: themedColor('rgba(255, 255, 255, 0.2)', 'rgba(15,23,42,0.2)'),
                     justifyContent: 'center',
                     alignItems: 'center',
                     zIndex: 5
                   }}
                 >
-                  <Text style={{ color: '#fff', fontSize: 24 }}>
-                    {isTrendingVideoPlaying ? '❚❚' : '▶'}
+                  <Text style={{ color: theme.textPrimary, fontSize: 24 }}>
+                    {isTrendingVideoPlaying ? '❚❚' : '►'}
                   </Text>
                 </TouchableOpacity>
                 
@@ -1412,11 +1569,11 @@ const Home = () => {
                   right: 20,
                   zIndex: 5
                 }}>
-                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 5 }}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold', marginBottom: 5 }}>
                     {trendingModalVideo.title || t("home.untitledVideo")}
                   </Text>
                   {trendingModalVideo.creator && (
-                    <Text style={{ color: '#ccc', fontSize: 14 }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
                       @{trendingModalVideo.creator.username}
                     </Text>
                   )}

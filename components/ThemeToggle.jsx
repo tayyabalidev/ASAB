@@ -5,20 +5,22 @@ import { useTranslation } from 'react-i18next';
 import { useGlobalContext } from '../context/GlobalProvider';
 
 const ThemeToggle = ({ containerStyles }) => {
-  const { isDarkMode, setIsDarkMode } = useGlobalContext();
+  const { isDarkMode, toggleTheme, theme } = useGlobalContext();
   const { t } = useTranslation();
 
   return (
     <TouchableOpacity
-      onPress={() => setIsDarkMode(!isDarkMode)}
+      onPress={toggleTheme}
       className={`px-4 py-2 rounded-lg ${containerStyles || ''}`}
       style={{
-        backgroundColor: isDarkMode ? '#333' : '#f0f0f0',
+        backgroundColor: isDarkMode ? theme.surface : theme.surfaceMuted,
+        borderWidth: 1,
+        borderColor: theme.border,
       }}
     >
       <Text
         style={{
-          color: isDarkMode ? '#fff' : '#000',
+          color: theme.textPrimary,
           fontSize: 16,
           fontWeight: '600',
         }}

@@ -28,7 +28,7 @@ const TabIcon = ({ iconName, color, focused, label, isRTL }) => {
 };
 
 const TabLayout = () => {
-  const { loading, isLogged, isRTL } = useGlobalContext();
+  const { loading, isLogged, isRTL, theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
 
   const tabLabels = {
@@ -49,12 +49,12 @@ const TabLayout = () => {
     <>
       <Tabs
         screenOptions={{
-          tabBarActiveTintColor: "#FFA001",
-          tabBarInactiveTintColor: "#76E6FF",
+          tabBarActiveTintColor: theme.tabActive,
+          tabBarInactiveTintColor: theme.tabInactive,
           tabBarShowLabel: false,
           tabBarStyle: {
 
-            backgroundColor: "#000",
+            backgroundColor: theme.tabBar,
             height: 80,
             borderTopWidth: 0,
             paddingBottom: 0,
@@ -166,7 +166,7 @@ const TabLayout = () => {
       </Tabs>
 
       <Loader isLoading={loading} />
-      <StatusBar backgroundColor="#000" style="light" />
+      <StatusBar backgroundColor={theme.tabBar} style={isDarkMode ? "light" : "dark"} />
     </>
   );
 };

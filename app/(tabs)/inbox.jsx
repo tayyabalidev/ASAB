@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { View, Image, FlatList, TouchableOpacity, Text, Alert } from "react-native";
@@ -30,10 +30,15 @@ const getAvatarUrl = (avatarField) => {
 
 const Inbox = () => {
   const { t } = useTranslation();
-  const { user: currentUser } = useGlobalContext();
+  const { user: currentUser, theme, isDarkMode } = useGlobalContext();
   const [notifications, setNotifications] = useState([]);
   const [recentMessages, setRecentMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const themedColor = useCallback(
+    (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
+    [isDarkMode]
+  );
 
   useEffect(() => {
     fetchNotifications();
@@ -139,9 +144,12 @@ const Inbox = () => {
           alignItems: 'center',
           paddingVertical: 12,
           paddingHorizontal: 16,
-          backgroundColor: item.isRead ? 'transparent' : 'rgba(255, 45, 85, 0.1)',
+          backgroundColor: item.isRead ? theme.surface : theme.accentSoft,
           borderBottomWidth: 0.5,
-          borderBottomColor: '#333'
+          borderBottomColor: theme.divider,
+          borderRadius: 12,
+          marginHorizontal: 16,
+          marginBottom: 8,
         }}
       >
         {/* User Avatar */}
@@ -153,13 +161,13 @@ const Inbox = () => {
 
         {/* Notification Content */}
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>
+          <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: '600' }}>
             {item.fromUsername}
           </Text>
-          <Text style={{ color: '#aaa', fontSize: 14 }}>
+          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
             {t(messageKey)}
           </Text>
-          <Text style={{ color: '#666', fontSize: 12, marginTop: 2 }}>
+          <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
             {formatTime(item.createdAt)}
           </Text>
         </View>
@@ -168,7 +176,7 @@ const Inbox = () => {
         {isFollow && (
           <TouchableOpacity
             style={{
-              backgroundColor: '#ff2d55',
+              backgroundColor: theme.accent,
               paddingHorizontal: 16,
               paddingVertical: 8,
               borderRadius: 16
@@ -198,7 +206,11 @@ const Inbox = () => {
           paddingVertical: 12,
           paddingHorizontal: 16,
           borderBottomWidth: 0.5,
-          borderBottomColor: '#333'
+          borderBottomColor: theme.divider,
+          marginHorizontal: 16,
+          marginBottom: 8,
+          backgroundColor: theme.surface,
+          borderRadius: 12,
         }}
       >
         {/* User Avatar */}
@@ -209,20 +221,20 @@ const Inbox = () => {
         />
         {/* Message Content */}
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>
+          <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: '600' }}>
             {item.otherUsername}
           </Text>
-          <Text style={{ color: '#aaa', fontSize: 14 }}>
+          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
             {latestMsg ? latestMsg.content : ''}
           </Text>
-          <Text style={{ color: '#666', fontSize: 12, marginTop: 2 }}>
+          <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
             {latestMsg ? formatTime(latestMsg.$createdAt) : ''}
           </Text>
         </View>
         {/* Unread Count Badge */}
         {unreadCount > 0 && (
           <View style={{
-            backgroundColor: '#7f5af0',
+            backgroundColor: theme.accent,
             borderRadius: 10,
             minWidth: 20,
             paddingHorizontal: 6,
@@ -239,7 +251,7 @@ const Inbox = () => {
         <TouchableOpacity style={{ marginLeft: 8 }}>
           <Image
             source={icons.camera}
-            style={{ width: 24, height: 24, tintColor: '#666' }}
+            style={{ width: 24, height: 24, tintColor: theme.textMuted }}
             resizeMode="contain"
           />
         </TouchableOpacity>
@@ -254,14 +266,19 @@ const Inbox = () => {
       alignItems: 'center',
       paddingVertical: 12,
       paddingHorizontal: 16,
-      backgroundColor: '#1a1a1a'
+      backgroundColor: theme.surface,
+      marginHorizontal: 16,
+      marginTop: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
     }}>
-      <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
+      <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: 'bold' }}>
         {title}
       </Text>
       {count > 0 && (
         <View style={{
-          backgroundColor: '#ff2d55',
+          backgroundColor: theme.accent,
           borderRadius: 10,
           paddingHorizontal: 8,
           paddingVertical: 2
@@ -276,16 +293,16 @@ const Inbox = () => {
 
   if (loading) {
     return (
-      <SafeAreaView className="bg-primary h-full">
-        <View className="flex-1 justify-center items-center">
-          <Text className="text-white text-lg">{t('common.loading')}</Text>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ color: theme.textPrimary, fontSize: 18 }}>{t('common.loading')}</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView className="bg-primary h-full">
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       {/* Header */}
       <View style={{
         flexDirection: 'row',
@@ -294,15 +311,15 @@ const Inbox = () => {
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: 0.5,
-        borderBottomColor: '#333'
+        borderBottomColor: theme.divider
       }}>
-          <Text style={{ color: '#fff', fontSize: 24, fontWeight: 'bold' }}>
+          <Text style={{ color: theme.textPrimary, fontSize: 24, fontWeight: 'bold' }}>
             {t('nav.inbox')}
           </Text>
         <TouchableOpacity>
           <Image
             source={icons.search}
-            style={{ width: 24, height: 24, tintColor: '#fff' }}
+            style={{ width: 24, height: 24, tintColor: theme.textPrimary }}
             resizeMode="contain"
           />
         </TouchableOpacity>
@@ -329,6 +346,8 @@ const Inbox = () => {
           }
         }}
         showsVerticalScrollIndicator={false}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 24 }}
       />
     </SafeAreaView>
   );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { router } from "expo-router";
 import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
@@ -20,7 +20,7 @@ import { CustomButton, FormField } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const Create = () => {
-  const { user, isRTL } = useGlobalContext();
+  const { user, isRTL, theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({
@@ -29,6 +29,19 @@ const Create = () => {
     thumbnail: null,
     prompt: "",
   });
+
+  const themedColor = useCallback(
+    (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
+    [isDarkMode]
+  );
+
+  const gradientColors = useMemo(
+    () =>
+      isDarkMode
+        ? ["#0f172a", "#020617", "#000000"]
+        : ["#FFFFFF", "#F5F3FF", theme.background],
+    [isDarkMode, theme.background]
+  );
 
   const openPicker = async (selectType) => {
     try {
@@ -144,60 +157,92 @@ const Create = () => {
   };
 
   return (
-    <SafeAreaView style={{ backgroundColor: '#032727', flex: 1 }}>
+    <SafeAreaView style={{ backgroundColor: theme.background, flex: 1 }}>
       <LinearGradient
-        colors={['#032727', '#000']}
+        colors={gradientColors}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
         style={{ flex: 1 }}
       >
-        <ScrollView className="px-4 my-6">
-        <Text
-          className="text-2xl text-white font-psemibold"
-          style={{ textAlign: isRTL ? 'right' : 'left' }}
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}
         >
-          {t("create.screenTitle")}
-        </Text>
-
-        <FormField
-          title={t("create.videoTitleLabel")}
-          value={form.title}
-          placeholder={t("create.videoTitlePlaceholder")}
-          handleChangeText={(e) => setForm({ ...form, title: e })}
-          otherStyles="mt-10"
-        />
-
-        <View className="mt-7 space-y-2">
           <Text
-            className="text-base text-gray-100 font-pmedium"
-            style={{ textAlign: isRTL ? 'right' : 'left' }}
+            style={{
+              color: theme.textPrimary,
+              fontSize: 24,
+              fontFamily: "Poppins-SemiBold",
+              textAlign: isRTL ? "right" : "left",
+            }}
           >
-            {t("create.uploadVideoLabel")}
+            {t("create.screenTitle")}
           </Text>
 
-          <TouchableOpacity onPress={() => openPicker("video")}>
-            {form.video ? (
-              <Video
-                source={{ uri: form.video.uri }}
-                className="w-full h-64 rounded-2xl"
-                useNativeControls
-                resizeMode={ResizeMode.COVER}
-                isLooping
-              />
-            ) : (
-              <View className="w-full h-40 px-4 bg-black-100 rounded-2xl border border-black-200 flex justify-center items-center">
-                <View className="w-14 h-14 border border-dashed border-secondary-100 flex justify-center items-center">
-                  <Image
-                    source={icons.upload}
-                    resizeMode="contain"
-                    alt="upload"
-                    className="w-1/2 h-1/2"
-                  />
+          <FormField
+            title={t("create.videoTitleLabel")}
+            value={form.title}
+            placeholder={t("create.videoTitlePlaceholder")}
+            handleChangeText={(e) => setForm({ ...form, title: e })}
+            otherStyles="mt-4"
+          />
+
+          <View style={{ gap: 12 }}>
+            <Text
+              style={{
+                color: theme.textPrimary,
+                fontSize: 16,
+                fontFamily: "Poppins-Medium",
+                textAlign: isRTL ? "right" : "left",
+              }}
+            >
+              {t("create.uploadVideoLabel")}
+            </Text>
+
+            <TouchableOpacity onPress={() => openPicker("video")}>
+              {form.video ? (
+                <Video
+                  source={{ uri: form.video.uri }}
+                  style={{ width: "100%", height: 256, borderRadius: 16, overflow: "hidden" }}
+                  useNativeControls
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                />
+              ) : (
+                <View
+                  style={{
+                    width: "100%",
+                    height: 180,
+                    paddingHorizontal: 16,
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderStyle: "dashed",
+                      borderColor: theme.accent,
+                      justifyContent: "center",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Image
+                      source={icons.upload}
+                      resizeMode="contain"
+                      style={{ width: 28, height: 28, tintColor: theme.accent }}
+                    />
+                  </View>
                 </View>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
+              )}
+            </TouchableOpacity>
+          </View>
 
         {/* Thumbnail section hidden for now */}
         {/* <View className="mt-7 space-y-2">
@@ -228,20 +273,19 @@ const Create = () => {
           </TouchableOpacity>
         </View> */}
 
-        <FormField
-          title={t("create.aiPromptLabel")}
-          value={form.prompt}
-          placeholder={t("create.aiPromptPlaceholder")}
-          handleChangeText={(e) => setForm({ ...form, prompt: e })}
-          otherStyles="mt-7"
-        />
+          <FormField
+            title={t("create.aiPromptLabel")}
+            value={form.prompt}
+            placeholder={t("create.aiPromptPlaceholder")}
+            handleChangeText={(e) => setForm({ ...form, prompt: e })}
+          />
 
-        <CustomButton
-          title={t("create.submitButton")}
-          handlePress={submit}
-          containerStyles="mt-7"
-          isLoading={uploading}
-        />
+          <CustomButton
+            title={t("create.submitButton")}
+            handlePress={submit}
+            containerStyles="mt-6"
+            isLoading={uploading}
+          />
         </ScrollView>
       </LinearGradient>
     </SafeAreaView>
