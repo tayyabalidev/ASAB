@@ -1538,21 +1538,33 @@ const Profile = () => {
 
                   {/* Bottom Left Video Information - TikTok Style */}
                   <View style={{ position: 'absolute', bottom: 120, left: 15, right: 80, zIndex: 10 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                      <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600', marginRight: 8 }}>
-                        @{modalVideo.creator?.username || user?.username}
-                      </Text>
-                    </View>
-                    <Text style={{ color: theme.textPrimary, fontSize: 14, marginBottom: 8, lineHeight: 18 }}>
-                      {t('profile.general.videoTitle', { title: modalVideo.title || t('profile.general.untitled') })}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600', marginRight: 8, maxWidth: '80%' }}
+                    >
+                      @{modalVideo.creator?.username || user?.username}
                     </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                      <Text style={{ color: theme.textPrimary, fontSize: 12, marginRight: 5 }}>♫</Text>
-                      <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                        {t('profile.general.originalSound', { username: modalVideo.creator?.username || user?.username })}
-                      </Text>
-                    </View>
-                    <Text style={{ color: theme.textSecondary, fontSize: 12, opacity: 0.8 }}>
+                  </View>
+                  <Text
+                    numberOfLines={2}
+                    ellipsizeMode="tail"
+                    style={{ color: theme.textPrimary, fontSize: 14, marginBottom: 8, lineHeight: 18 }}
+                  >
+                    {t('profile.general.videoTitle', { title: modalVideo.title || t('profile.general.untitled') })}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12, marginRight: 5 }}>♫</Text>
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      style={{ color: theme.textSecondary, fontSize: 12, maxWidth: '75%' }}
+                    >
+                      {t('profile.general.originalSound', { username: modalVideo.creator?.username || user?.username })}
+                    </Text>
+                  </View>
+                  <Text style={{ color: theme.textSecondary, fontSize: 12, opacity: 0.8 }} numberOfLines={1}>
                       {t('profile.general.trendingTags')}
                     </Text>
                   </View>

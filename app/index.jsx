@@ -13,8 +13,14 @@ const Welcome = () => {
   const { loading, isLogged, isDarkMode, theme } = useGlobalContext();
   const [showSplash, setShowSplash] = useState(true);
 
-  // Always show splash screen first, regardless of loading state
-  if (showSplash) {
+  useEffect(() => {
+    if (!loading && isLogged) {
+      setShowSplash(false);
+    }
+  }, [loading, isLogged]);
+
+  // Show splash only for users who still need onboarding
+  if (showSplash && !isLogged) {
     console.log('Showing splash screen');
     return <SplashScreen onComplete={() => {
       console.log('Splash screen completed, showing onboarding');

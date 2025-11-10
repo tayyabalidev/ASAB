@@ -3,7 +3,7 @@ import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View, Modal as RNModal, Pressable } from "react-native";
 import { Query } from 'react-native-appwrite';
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -64,7 +64,7 @@ const Chat = () => {
   const [incomingCall, setIncomingCall] = useState(null);
   const [zegoInitialized, setZegoInitialized] = useState(false);
   const { t } = useTranslation();
-  const { isRTL } = useGlobalContext();
+  const { isRTL, theme, isDarkMode } = useGlobalContext();
 
   const tabOptions = useMemo(() => ['all', 'unread', 'favourites', 'groups', 'users'], []);
   const tabLabels = useMemo(() => ({
@@ -1060,19 +1060,21 @@ const Chat = () => {
     // );
   };
 
+  const themedColor = (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue);
+
   return (
     <>
       {/* Main UI: either chat list or chat window */}
       {(!selectedUser) ? (
-      <SafeAreaView className="bg-primary h-full">
-                  <LinearGradient colors={["#a8ede993", "#f0d68ea1", "#7f5af0"]} start={{x:0, y:0}} end={{x:1, y:1}} style={{ paddingTop: 32, paddingBottom: 24, paddingHorizontal: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+                  <LinearGradient colors={theme.gradient} start={{x:0, y:0}} end={{x:1, y:1}} style={{ paddingTop: 24, paddingBottom: 18, paddingHorizontal: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 24, paddingHorizontal: 16, height: 44, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8 }}>
-                <MaterialCommunityIcons name="magnify" size={22} color="#888" />
+              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: theme.surface, borderRadius: 20, paddingHorizontal: 16, height: 42, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8 }}>
+                <MaterialCommunityIcons name="magnify" size={22} color={theme.textMuted} />
                 <TextInput
-                  style={{ flex: 1, marginLeft: 8, color: '#222', fontSize: 16, textAlign: isRTL ? 'right' : 'left' }}
+                  style={{ flex: 1, marginLeft: 8, color: theme.textPrimary, fontSize: 16, textAlign: isRTL ? 'right' : 'left' }}
                   placeholder={t('chat.searchPlaceholder')}
-                  placeholderTextColor="#aaa"
+                  placeholderTextColor={theme.inputPlaceholder}
                   value={search}
                   onChangeText={setSearch}
                 />
@@ -1081,8 +1083,8 @@ const Chat = () => {
                 onPress={checkZegoStatus}
                 style={{ 
                   marginLeft: 8, 
-                  backgroundColor: '#7f5af0', 
-                  borderRadius: 20, 
+                  backgroundColor: theme.accent, 
+                  borderRadius: 18, 
                   padding: 8,
                   width: 36,
                   height: 36,
@@ -1096,41 +1098,48 @@ const Chat = () => {
             </LinearGradient>
 
           {/* Tab Bar */}
-          <ScrollView
-  horizontal
-  showsHorizontalScrollIndicator={false}
-  contentContainerStyle={{ paddingHorizontal: 10, marginTop: 10, marginBottom: 4 }}
-
-           style={{ flexDirection: 'row', marginTop: 10, marginBottom: 4, marginHorizontal: 10 }}>
-            {tabOptions.map(tab => (
-              <TouchableOpacity
-                key={tab}
-                onPress={() => setSelectedTab(tab)}
-                style={{
-                  backgroundColor: selectedTab === tab ? '#232533' : 'transparent',
-                  borderRadius: 20,
-                  paddingHorizontal: 16,
-                  paddingVertical: 6,
-                  marginRight: 8,
-                  borderWidth: selectedTab === tab ? 0 : 1,
-                  borderColor: '#444',
-                }}
-              >
-                <Text style={{
-                  color: selectedTab === tab ? '#7f5af0' : '#aaa',
-                  fontWeight: selectedTab === tab ? 'bold' : 'normal',
-                  fontSize: 15
-                }}>
-                  {tab === 'all' && tabLabels.all}
-                  {tab === 'unread' && `${tabLabels.unread}${totalUnread > 0 ? ` ${totalUnread}` : ''}`}
-                  {tab === 'favourites' && tabLabels.favourites}
-                  {tab === 'groups' && `${tabLabels.groups}${groupCount > 0 ? ` ${groupCount}` : ''}`}
-                  {tab === 'users' && tabLabels.users}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          
-          </ScrollView>
+          <View style={{ paddingHorizontal: 12, marginTop: 8, marginBottom: 8 }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              {tabOptions.map(tab => (
+                <TouchableOpacity
+                  key={tab}
+                  onPress={() => setSelectedTab(tab)}
+                  style={{
+                    backgroundColor: selectedTab === tab ? theme.accentSoft : theme.surface,
+                    borderRadius: 16,
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderWidth: selectedTab === tab ? 0 : 1,
+                    borderColor: theme.border,
+                    minWidth: 96,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: selectedTab === tab ? theme.accent : theme.textSecondary,
+                      fontWeight: selectedTab === tab ? 'bold' : 'normal',
+                      fontSize: 14,
+                    }}
+                  >
+                    {tab === 'all' && tabLabels.all}
+                    {tab === 'unread' && `${tabLabels.unread}${totalUnread > 0 ? ` ${totalUnread}` : ''}`}
+                    {tab === 'favourites' && tabLabels.favourites}
+                    {tab === 'groups' && `${tabLabels.groups}${groupCount > 0 ? ` ${groupCount}` : ''}`}
+                    {tab === 'users' && tabLabels.users}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
           {/* Chat List */}
           <FlatList
             data={filteredChats}
@@ -1147,20 +1156,61 @@ const Chat = () => {
                 const lastMsg = groupMessages.length > 0 ? groupMessages[groupMessages.length - 1] : null;
                 // Unread count
                 return (
-                  <TouchableOpacity onPress={() => handleOpenChat(item)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: '#232533', backgroundColor: '#181A20', borderRadius: 16, marginHorizontal: 6, marginVertical: 2, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 2 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 14, width: 44, height: 44 }}>
+                  <TouchableOpacity
+                    onPress={() => handleOpenChat(item)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: 12,
+                      paddingHorizontal: 16,
+                      borderBottomWidth: 0.5,
+                      borderBottomColor: theme.divider,
+                      backgroundColor: theme.surface,
+                      borderRadius: 16,
+                      marginHorizontal: 12,
+                      marginVertical: 4,
+                      shadowColor: '#000',
+                      shadowOpacity: 0.04,
+                      shadowRadius: 2,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, width: 80 }}>
                       {groupMembers.slice(0, maxAvatars).map((u, i) => (
-                        <Image key={u.$id} source={{ uri: u.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.username || u.email || 'User') }} style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: '#181A20', position: 'absolute', left: i * 12, zIndex: maxAvatars - i, backgroundColor: '#232533' }} />
+                        <Image
+                          key={u.$id}
+                          source={{ uri: u.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.username || u.email || 'User') }}
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: 17,
+                            marginLeft: i === 0 ? 0 : -12,
+                            borderWidth: 2,
+                            borderColor: theme.background,
+                            backgroundColor: theme.card,
+                          }}
+                        />
                       ))}
                       {extraCount > 0 && (
-                        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#232533', justifyContent: 'center', alignItems: 'center', position: 'absolute', left: maxAvatars * 12, zIndex: 1, borderWidth: 2, borderColor: '#181A20' }}>
-                          <Text style={{ color: '#7f5af0', fontWeight: 'bold', fontSize: 13 }}>+{extraCount}</Text>
+                        <View
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: 17,
+                            backgroundColor: theme.cardSoft,
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            marginLeft: -12,
+                            borderWidth: 2,
+                            borderColor: theme.background,
+                          }}
+                        >
+                          <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 13 }}>+{extraCount}</Text>
                         </View>
                       )}
                     </View>
                     <View style={{ flex: 1, justifyContent: 'center' }}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }} numberOfLines={1}>{item.name || 'Unnamed Group'}</Text>
-                      <Text style={{ color: '#aaa', fontSize: 14, marginTop: 2 }} numberOfLines={1}>
+                      <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16 }} numberOfLines={1}>{item.name || 'Unnamed Group'}</Text>
+                      <Text style={{ color: theme.textSecondary, fontSize: 14, marginTop: 2 }} numberOfLines={1}>
                         {lastMsg
                           ? lastMsg.type === 'image'
                             ? '📷 Photo'
@@ -1180,7 +1230,7 @@ const Chat = () => {
                     </View>
                     <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
                       {lastMsg && (
-                        <Text style={{ color: '#aaa', fontSize: 13 }}>
+                        <Text style={{ color: theme.textMuted, fontSize: 13 }}>
                           {(() => {
                             const d = new Date(lastMsg.$createdAt);
                             const now = new Date();
@@ -1193,7 +1243,7 @@ const Chat = () => {
                         </Text>
                       )}
                       {unreadCount > 0 && (
-                        <View style={{ backgroundColor: '#7f5af0', borderRadius: 10, minWidth: 20, paddingHorizontal: 6, paddingVertical: 2, marginTop: 4, alignItems: 'center' }}>
+                        <View style={{ backgroundColor: theme.accent, borderRadius: 10, minWidth: 20, paddingHorizontal: 6, paddingVertical: 2, marginTop: 4, alignItems: 'center' }}>
                           <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{unreadCount}</Text>
                         </View>
                       )}
@@ -1203,7 +1253,7 @@ const Chat = () => {
                           <MaterialCommunityIcons
                             name={item.isFavourite ? 'star' : 'star-outline'}
                             size={22}
-                            color={item.isFavourite ? '#FFD700' : '#aaa'}
+                            color={item.isFavourite ? '#FFD700' : theme.textMuted}
                           />
                         </TouchableOpacity>
                       )}
@@ -1221,11 +1271,39 @@ const Chat = () => {
                 const isFavourite = chatDoc ? chatDoc.isFavourite : false;
                 
                 return (
-                  <TouchableOpacity onPress={() => handleOpenChat(item)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: '#232533', backgroundColor: '#181A20', borderRadius: 16, marginHorizontal: 6, marginVertical: 2, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 2 }}>
-                    <Image source={{ uri: item.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(item.username || item.email || 'User') }} style={{ width: 44, height: 44, borderRadius: 22, marginRight: 14, backgroundColor: '#232533', borderWidth: 2, borderColor: '#181A20' }} />
+                  <TouchableOpacity
+                    onPress={() => handleOpenChat(item)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: 12,
+                      paddingHorizontal: 16,
+                      borderBottomWidth: 0.5,
+                      borderBottomColor: theme.divider,
+                      backgroundColor: theme.surface,
+                      borderRadius: 16,
+                      marginHorizontal: 12,
+                      marginVertical: 4,
+                      shadowColor: '#000',
+                      shadowOpacity: 0.04,
+                      shadowRadius: 2,
+                    }}
+                  >
+                    <Image
+                      source={{ uri: item.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(item.username || item.email || 'User') }}
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 22,
+                        marginRight: 14,
+                        backgroundColor: theme.card,
+                        borderWidth: 2,
+                        borderColor: theme.background,
+                      }}
+                    />
                     <View style={{ flex: 1, justifyContent: 'center' }}>
-                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }} numberOfLines={1}>{item.username || item.email || 'Unknown User'}</Text>
-                      <Text style={{ color: '#aaa', fontSize: 14, marginTop: 2 }} numberOfLines={1}>
+                      <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16 }} numberOfLines={1}>{item.username || item.email || 'Unknown User'}</Text>
+                      <Text style={{ color: theme.textSecondary, fontSize: 14, marginTop: 2 }} numberOfLines={1}>
                         {lastMsg
                           ? lastMsg.type === 'image'
                             ? '📷 Photo'
@@ -1245,7 +1323,7 @@ const Chat = () => {
                     </View>
                     <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
                       {lastMsg && (
-                        <Text style={{ color: '#aaa', fontSize: 13 }}>
+                        <Text style={{ color: theme.textMuted, fontSize: 13 }}>
                           {(() => {
                             const d = new Date(lastMsg.$createdAt);
                             const now = new Date();
@@ -1258,7 +1336,7 @@ const Chat = () => {
                         </Text>
                       )}
                       {unreadCount > 0 && (
-                        <View style={{ backgroundColor: '#7f5af0', borderRadius: 10, minWidth: 20, paddingHorizontal: 6, paddingVertical: 2, marginTop: 4, alignItems: 'center' }}>
+                        <View style={{ backgroundColor: theme.accent, borderRadius: 10, minWidth: 20, paddingHorizontal: 6, paddingVertical: 2, marginTop: 4, alignItems: 'center' }}>
                           <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>{unreadCount}</Text>
                         </View>
                       )}
@@ -1267,7 +1345,7 @@ const Chat = () => {
                         <MaterialCommunityIcons
                           name={isFavourite ? 'star' : 'star-outline'}
                           size={22}
-                          color={isFavourite ? '#FFD700' : '#aaa'}
+                          color={isFavourite ? '#FFD700' : theme.textMuted}
                         />
                       </TouchableOpacity>
                     </View>
@@ -1321,16 +1399,16 @@ const Chat = () => {
           )}
         </SafeAreaView>
       ) : selectedUser && !selectedUser.$id ? (
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#181A20', justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ color: '#fff' }}>Invalid user or group selected.</Text>
+        <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ color: theme.textPrimary }}>Invalid user or group selected.</Text>
         </SafeAreaView>
       ) : (
         // Chat window UI
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#181A20' }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
           {/* Header */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#232533', backgroundColor: '#232533' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: theme.divider, backgroundColor: theme.surface }}>
             <TouchableOpacity onPress={() => setSelectedUser(null)} style={{ marginRight: 12 }}>
-              <MaterialCommunityIcons name="arrow-left" size={28} color="#fff" />
+            <MaterialCommunityIcons name="arrow-left" size={28} color={theme.textPrimary} />
             </TouchableOpacity>
             {selectedUser?.type === 'group' ? (
               <MaterialCommunityIcons name="account-group" size={36} color="#7DE2FC" style={{ marginRight: 12 }} />
@@ -1338,8 +1416,8 @@ const Chat = () => {
               <Image source={{ uri: selectedUser?.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(selectedUser?.username || selectedUser?.email || 'User') }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 12 }} />
             )}
             <View style={{ flex: 1 }}>
-              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{selectedUser?.name || selectedUser?.username || selectedUser?.email || 'Unknown'}</Text>
-              <Text style={{ color: '#aaa', fontSize: 13 }}>{selectedUser?.type === 'group' ? 'Group chat' : 'User'}</Text>
+              <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16 }}>{selectedUser?.name || selectedUser?.username || selectedUser?.email || 'Unknown'}</Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 13 }}>{selectedUser?.type === 'group' ? 'Group chat' : 'User'}</Text>
             </View>
             {/* Audio and Video Call Icons in Header */}
             {selectedUser?.type !== 'group' && (
@@ -1348,13 +1426,13 @@ const Chat = () => {
                   onPress={handleVideoCall}
                   style={{ marginRight: 8, padding: 8 }}
                 >
-                  <MaterialCommunityIcons name="video" size={24} color="#fff" />
+                  <MaterialCommunityIcons name="video" size={24} color={theme.textPrimary} />
                 </TouchableOpacity>
                 <TouchableOpacity 
                   onPress={handleAudioCall}
                   style={{ padding: 8 }}
                 >
-                  <MaterialCommunityIcons name="phone" size={24} color="#fff" />
+                  <MaterialCommunityIcons name="phone" size={24} color={theme.textPrimary} />
                 </TouchableOpacity>
               </View>
             )}
