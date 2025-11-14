@@ -792,27 +792,30 @@ const Profile = () => {
     [isDarkMode]
   );
 
+  const profileBackgroundImage = useMemo(
+    () => (isDarkMode ? images.textBackgroundDark : images.textBackgroundLight),
+    [isDarkMode]
+  );
+
   return (
     <SafeAreaView style={{ backgroundColor: theme.background, flex: 1 }}>
       <ScrollView style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Profile Section with Background Image */}
         <View style={{ flex: 1, position: 'relative' }}>
-          {/* Background Image (dark mode only) */}
-          {isDarkMode && (
-            <Image
-              source={images.backgroundImage}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                width: '100%',
-                height: '100%',
-                resizeMode: 'cover'
-              }}
-            />
-          )}
+          {/* Background Image */}
+          <Image
+            source={profileBackgroundImage || images.backgroundImage}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: '100%',
+              height: '100%',
+              resizeMode: 'cover'
+            }}
+          />
           {/* Overlay for better text readability */}
           <View style={{
             position: 'absolute',
