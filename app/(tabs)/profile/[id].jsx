@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Image, FlatList, TouchableOpacity, Text, Alert, Linking, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, FlatList as RNFlatList, Share } from "react-native";
+import { View, Image, ImageBackground, FlatList, TouchableOpacity, Text, Alert, Linking, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, FlatList as RNFlatList, Share } from "react-native";
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { Query } from 'react-native-appwrite';
 import { Video, ResizeMode } from "expo-av";
@@ -20,7 +20,7 @@ import { images } from "../../../constants";
 const UserProfile = () => {
   const { id } = useLocalSearchParams();
   const { t } = useTranslation();
-  const { user: currentUser, followStatus, updateFollowStatus } = useGlobalContext();
+  const { user: currentUser, followStatus, updateFollowStatus, theme, isDarkMode } = useGlobalContext();
   const [profileUser, setProfileUser] = useState(null);
   // Re-enable privacy states
   const [isPrivate, setIsPrivate] = useState(false);
@@ -49,6 +49,21 @@ const UserProfile = () => {
   const [modalIndex, setModalIndex] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
   const modalVideoRef = useRef(null);
+
+  const profileBackgroundImage = useMemo(
+    () => (isDarkMode ? images.textBackgroundDark : images.usersPage),
+    [isDarkMode]
+  );
+
+  const textBackgroundImage = useMemo(
+    () => (isDarkMode ? images.textBackgroundDark : images.textBackgroundLight),
+    [isDarkMode]
+  );
+
+  const overlayColor = useMemo(
+    () => (isDarkMode ? 'rgba(0, 0, 0, 0.45)' : 'rgba(255, 255, 255, 0.8)'),
+    [isDarkMode]
+  );
 
   // Get posts for the profile user
   const { data: posts } = useAppwrite(() => {
@@ -398,11 +413,11 @@ const UserProfile = () => {
             headerShown: false 
           }} 
         />
-        <SafeAreaView style={{ backgroundColor: '#000', flex: 1 }}>
+        <SafeAreaView style={{ backgroundColor: theme?.background || '#000', flex: 1 }}>
           <View style={{ flex: 1, position: 'relative' }}>
             {/* Background Image */}
             <Image
-              source={images.backgroundImage}
+              source={profileBackgroundImage || images.backgroundImage}
               style={{
                 position: 'absolute',
                 top: 0,
@@ -421,7 +436,7 @@ const UserProfile = () => {
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.4)'
+              backgroundColor: overlayColor
             }} />
             <View className="flex-1 justify-center items-center">
               <Text className="text-white text-lg">{t('profile.other.loading')}</Text>
@@ -441,11 +456,11 @@ const UserProfile = () => {
             headerShown: false 
           }} 
         />
-        <SafeAreaView style={{ backgroundColor: '#000', flex: 1 }}>
+        <SafeAreaView style={{ backgroundColor: theme?.background || '#000', flex: 1 }}>
           <View style={{ flex: 1, position: 'relative' }}>
             {/* Background Image */}
             <Image
-              source={images.backgroundImage}
+              source={profileBackgroundImage || images.backgroundImage}
               style={{
                 position: 'absolute',
                 top: 0,
@@ -464,7 +479,7 @@ const UserProfile = () => {
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.4)'
+              backgroundColor: overlayColor
             }} />
             <View className="flex flex-row items-center justify-between px-4 mt-6 mb-8">
               <TouchableOpacity onPress={handleBack}>
@@ -511,11 +526,11 @@ const UserProfile = () => {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <SafeAreaView style={{ backgroundColor: '#000', flex: 1 }}>
+      <SafeAreaView style={{ backgroundColor: theme?.background || '#000', flex: 1 }}>
         <View style={{ flex: 1, position: 'relative' }}>
           {/* Background Image */}
           <Image
-            source={images.backgroundImage}
+            source={profileBackgroundImage || images.backgroundImage}
             style={{
               position: 'absolute',
               top: 0,
@@ -534,7 +549,7 @@ const UserProfile = () => {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.4)'
+            backgroundColor: overlayColor
           }} />
           <FlatList
             data={posts}
@@ -567,7 +582,23 @@ const UserProfile = () => {
               />
             )}
             ListHeaderComponent={() => (
-              <View style={{ alignItems: 'center', marginTop: 30, marginBottom: 16 }}>
+              <ImageBackground
+                source={textBackgroundImage || images.backgroundImage}
+                style={{
+                  alignItems: 'center',
+                  marginTop: 30,
+                  marginBottom: 16,
+                  marginHorizontal: 16,
+                  paddingHorizontal: 16,
+                  paddingVertical: 24,
+                  borderRadius: 24,
+                  overflow: 'hidden',
+                }}
+                imageStyle={{
+                  borderRadius: 24,
+                  opacity: isDarkMode ? 0.45 : 0.85,
+                }}
+              >
                 {/* Profile Picture */}
                 <View className="w-20 h-20 border border-secondary items-center justify-center mb-4 rounded-lg">
                   <Image
@@ -724,7 +755,7 @@ const UserProfile = () => {
                     <Text style={{ color: '#3ec6ff', fontSize: 15 }}>{profileUser.link}</Text>
                   </TouchableOpacity>
                 )} */}
-              </View>
+              </ImageBackground>
             )}
           />
         </View>

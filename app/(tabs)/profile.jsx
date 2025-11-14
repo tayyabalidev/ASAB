@@ -7,10 +7,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as ImagePicker from "expo-image-picker";
 import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
 import { images } from "../../constants";
@@ -248,6 +249,9 @@ const Profile = () => {
   // Profile section state
   const [activeSection, setActiveSection] = useState('videos'); // 'videos' or 'bookmarks'
   const [isRefreshingBookmarks, setIsRefreshingBookmarks] = useState(false);
+  
+  // Notification count state
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
 
   // Function to handle section change and refresh bookmarks if needed
   const handleSectionChange = (section) => {
@@ -724,6 +728,28 @@ const Profile = () => {
     }
   }, [bookmarks]);
 
+  // Fetch unread notification count
+  useEffect(() => {
+    const fetchNotificationCount = async () => {
+      if (!user?.$id) return;
+      
+      try {
+        const notifications = await getNotifications(user.$id);
+        const unreadCount = notifications.filter(n => !n.isRead || n.isRead === false).length;
+        setUnreadNotificationCount(unreadCount);
+      } catch (error) {
+        console.error('Error fetching notification count:', error);
+      }
+    };
+
+    fetchNotificationCount();
+    
+    // Poll for new notifications every 3 seconds
+    const intervalId = setInterval(fetchNotificationCount, 3000);
+    
+    return () => clearInterval(intervalId);
+  }, [user?.$id]);
+
   // Handle following/followers modal
   const openFollowModal = async (type) => {
     try {
@@ -796,7 +822,7 @@ const Profile = () => {
             bottom: 0,
             backgroundColor: themedColor('rgba(0, 0, 0, 0.45)', 'rgba(255, 255, 255, 0.85)')
           }} />
-          {/* Header with logout and menu */}
+          {/* Header with logout, notification and menu */}
           <View className="flex-row justify-between items-center px-4 pt-4 pb-6">
             <TouchableOpacity onPress={logout}>
               <Image
@@ -805,13 +831,38 @@ const Profile = () => {
                 className="w-6 h-6"
               />
             </TouchableOpacity>
-            <TouchableOpacity onPress={openEditModal}>
-              <Image
-                source={icons.menu}
-                resizeMode="contain"
-                className="w-6 h-6"
-              />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+              <TouchableOpacity onPress={() => router.push('/inbox')} style={{ position: 'relative' }}>
+                <Feather name="bell" size={24} color={theme.textPrimary} />
+                {unreadNotificationCount > 0 && (
+                  <View style={{
+                    position: 'absolute',
+                    top: -6,
+                    right: -6,
+                    backgroundColor: '#ff4757',
+                    borderRadius: 10,
+                    minWidth: 20,
+                    height: 20,
+                    paddingHorizontal: 6,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    borderWidth: 2,
+                    borderColor: theme.background,
+                  }}>
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
+                      {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={openEditModal}>
+                <Image
+                  source={icons.menu}
+                  resizeMode="contain"
+                  className="w-6 h-6"
+                />
+              </TouchableOpacity>
+            </View>
           </View>
 
          {/* Profile Section */}

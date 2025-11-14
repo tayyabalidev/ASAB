@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View, Modal as RNModal, Pressable } from "react-native";
 import { Query } from 'react-native-appwrite';
 import { SafeAreaView } from "react-native-safe-area-context";
-import { account, appwriteConfig, databases, getCurrentUser, storage, uploadFile } from '../../lib/appwrite';
+import { account, appwriteConfig, databases, getCurrentUser, storage, uploadFile, createNotification } from '../../lib/appwrite';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import { Audio } from 'expo-av';
@@ -329,8 +329,9 @@ const Chat = () => {
     };
 
     // Optimistic UI update
+    let tempId = null;
     if (optimistic) {
-      const tempId = 'temp-' + Date.now();
+      tempId = 'temp-' + Date.now();
       const optimisticMessage = {
         $id: tempId,
         ...messageData,
@@ -344,7 +345,7 @@ const Chat = () => {
     }
 
     try {
-      await databases.createDocument(
+      const savedMessage = await databases.createDocument(
         appwriteConfig.databaseId,
         appwriteConfig.messagesCollectionId,
         "unique()",
@@ -355,12 +356,40 @@ const Chat = () => {
           fileUrl: type !== 'text' ? (fileUrl || content) : '',
         }
       );
-      // Real-time subscription will update the list with the real message
+      
+      // Replace optimistic message with real saved message
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.optimistic || m.$id !== tempId);
+        return [...filtered, savedMessage].sort((a, b) => 
+          new Date(a.$createdAt) - new Date(b.$createdAt)
+        );
+      });
+      setAllMessages(prev => {
+        const filtered = prev.filter(m => !m.optimistic || m.$id !== tempId);
+        return [...filtered, savedMessage].sort((a, b) => 
+          new Date(a.$createdAt) - new Date(b.$createdAt)
+        );
+      });
+      
+      // Create notification for new message (only for private chats, not groups)
+      // Note: In a real-time system, you'd check if the receiver is viewing the chat
+      // For now, we'll create notifications for all messages
+      if (messageData.receiverId && messageData.receiverId !== currentUser.$id && selectedUser.type !== 'group') {
+        try {
+          await createNotification('message', currentUser.$id, messageData.receiverId, null);
+        } catch (notifError) {
+          // Don't fail message send if notification fails
+          console.error('Failed to create message notification:', notifError);
+        }
+      }
+      
+      // Trigger a refresh to ensure both users see the message
+      // The polling will handle this, but we can also trigger manually if needed
     } catch (e) {
       Alert.alert(t('common.error'), e.message || t('chat.generalError'));
       // Remove optimistic message if sending fails
-      setMessages(prev => prev.filter(m => !m.optimistic));
-      setAllMessages(prev => prev.filter(m => !m.optimistic));
+      setMessages(prev => prev.filter(m => !m.optimistic || m.$id !== tempId));
+      setAllMessages(prev => prev.filter(m => !m.optimistic || m.$id !== tempId));
     } finally {
       setSending(false);
     }

@@ -116,6 +116,14 @@ const TabLayout = () => {
           }}
         />
         <Tabs.Screen
+          name="inbox"
+          options={{
+            title: tabLabels.inbox,
+            headerShown: false,
+            href: null, // Hide from tab bar
+          }}
+        />
+        <Tabs.Screen
           name="chat"
           options={{
             title: tabLabels.chat,

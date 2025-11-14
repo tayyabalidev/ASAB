@@ -16,6 +16,9 @@ import splash2 from "../assets/images/splash2.png";
 import splash3 from "../assets/images/splash3.png";
 import splash4 from "../assets/images/splash4.png";
 import beigeBack from "../assets/images/Beige Back.png";
+import textBackgroundDark from "../assets/images/text_background_dark.png";
+import textBackgroundLight from "../assets/images/text_background_light.png";
+import usersPage from "../assets/images/users_page.png";
 export default {
   profile,
   thumbnail,
@@ -35,5 +38,8 @@ export default {
   splash3,
   splash4,
   beigeBack,
+  textBackgroundDark,
+  textBackgroundLight,
+  usersPage,
   backgroundImage: require("../assets/images/backgroundImage.png"),
 };

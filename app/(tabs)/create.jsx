@@ -8,13 +8,14 @@ import {
   Text,
   Alert,
   Image,
+  ImageBackground,
   TouchableOpacity,
   ScrollView,
 } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from "react-i18next";
 
-import { icons } from "../../constants";
+import { icons, images } from "../../constants";
 import { createVideoPost } from "../../lib/appwrite";
 import { CustomButton, FormField } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
@@ -41,6 +42,21 @@ const Create = () => {
         ? ["#0f172a", "#020617", "#000000"]
         : ["#FFFFFF", "#F5F3FF", theme.background],
     [isDarkMode, theme.background]
+  );
+
+  const screenBackgroundImage = useMemo(
+    () => (isDarkMode ? images.textBackgroundDark : images.usersPage),
+    [isDarkMode]
+  );
+
+  const panelBackgroundImage = useMemo(
+    () => (isDarkMode ? images.textBackgroundDark : images.textBackgroundLight),
+    [isDarkMode]
+  );
+
+  const overlayColor = useMemo(
+    () => (isDarkMode ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.9)"),
+    [isDarkMode]
   );
 
   const openPicker = async (selectType) => {
@@ -158,15 +174,44 @@ const Create = () => {
 
   return (
     <SafeAreaView style={{ backgroundColor: theme.background, flex: 1 }}>
-      <LinearGradient
-        colors={gradientColors}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={{ flex: 1 }}
-      >
-        <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}
+      <View style={{ flex: 1, position: "relative" }}>
+        <Image
+          source={screenBackgroundImage || images.backgroundImage}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: "100%",
+            height: "100%",
+            resizeMode: "cover",
+          }}
+        />
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: overlayColor,
+          }}
+        />
+        <LinearGradient
+          colors={gradientColors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={{ flex: 1 }}
         >
+          <ImageBackground
+            source={panelBackgroundImage || images.backgroundImage}
+            style={{ flex: 1 }}
+            imageStyle={{ opacity: isDarkMode ? 0.45 : 0.85 }}
+          >
+            <ScrollView
+              contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}
+            >
           <Text
             style={{
               color: theme.textPrimary,
@@ -287,7 +332,9 @@ const Create = () => {
             isLoading={uploading}
           />
         </ScrollView>
-      </LinearGradient>
+          </ImageBackground>
+        </LinearGradient>
+      </View>
     </SafeAreaView>
   );
 };
