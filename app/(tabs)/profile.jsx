@@ -11,7 +11,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
 import { images } from "../../constants";
@@ -28,8 +28,6 @@ const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
     const fetchUserData = async () => {
       try {
         setLoading(true);
-        const { databases } = await import('../../lib/appwrite');
-        const { appwriteConfig } = await import('../../lib/appwrite');
         
         const user = await databases.getDocument(
           appwriteConfig.databaseId,
@@ -381,9 +379,6 @@ const Profile = () => {
       if (post.postId && !post.video) {
         
         
-        // Import the function to get video by ID
-        const { getVideoById } = await import('../../lib/appwrite');
-        
         try {
           const videoData = await getVideoById(post.postId);
    
@@ -572,13 +567,11 @@ const Profile = () => {
     if (!user?.$id || !targetUserId || user.$id === targetUserId) return;
     
     try {
-      const { toggleFollowUser } = await import('../../lib/appwrite');
       await toggleFollowUser(user.$id, targetUserId);
       
       // Update local state immediately for real-time feedback
       // Refresh the follow modal data if it's currently open
       if (followModalVisible) {
-        const { getFollowers, getFollowing } = await import('../../lib/appwrite');
         if (followModalType === 'followers') {
           const updatedFollowers = await getFollowers(user.$id);
           setFollowModalData(updatedFollowers || []);
@@ -637,7 +630,6 @@ const Profile = () => {
           const users = await Promise.all(
             userIds.map(async (uid) => {
               try {
-                const { databases, appwriteConfig } = await import('../../lib/appwrite');
                 const u = await databases.getDocument(appwriteConfig.databaseId, appwriteConfig.userCollectionId, uid);
                 return { $id: u.$id, username: u.username, avatar: u.avatar };
               } catch {
@@ -695,7 +687,6 @@ const Profile = () => {
         
         
         setBookmarkVideosLoading(true);
-        const { getVideoById } = await import('../../lib/appwrite');
         const newBookmarkVideos = {};
         
         for (const bookmark of bookmarks) {
