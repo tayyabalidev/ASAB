@@ -7,7 +7,11 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "token-server": "node agora-token-server.js"
+    "token-server": "node agora-token-server.js",
+    "prebuild": "expo prebuild --clean",
+    "prebuild:ios": "expo prebuild --platform ios",
+    "prebuild:android": "expo prebuild --platform android",
+    "setup:agora": "node setup-agora.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -42,6 +46,7 @@
     "react-dom": "19.1.0",
     "react-i18next": "^13.5.0",
     "react-native": "0.81.4",
+    "react-native-agora": "^4.5.3",
     "react-native-animatable": "^1.4.0",
     "react-native-appwrite": "^0.14.0",
     "react-native-fbsdk-next": "^13.4.1",

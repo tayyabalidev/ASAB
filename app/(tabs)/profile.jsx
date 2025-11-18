@@ -11,7 +11,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
 import { images } from "../../constants";
@@ -144,7 +144,8 @@ const Profile = () => {
   const { t } = useTranslation();
   const { user, setUser, setIsLogged, theme, isDarkMode } = useGlobalContext();
   const SUPPORT_REQUIREMENT = 1000;
-  const { data: posts } = useAppwrite(() => getUserPosts(user.$id), [user?.$id]);
+  const { data: posts, refetch: refetchPosts } = useAppwrite(() => getUserPosts(user.$id), [user?.$id]);
+  const { data: photos, refetch: refetchPhotos } = useAppwrite(() => getUserPhotos(user.$id), [user?.$id]);
   const { data: followers } = useAppwrite(() => getFollowers(user?.$id), [user?.$id]);
   const { data: following } = useAppwrite(() => getFollowing(user?.$id), [user?.$id]);
   const { data: bookmarks, loading: bookmarksLoading, error: bookmarksError, refetch: refetchBookmarks } = useAppwrite(() => {
@@ -168,7 +169,15 @@ const Profile = () => {
       const now = Date.now();
       const timeSinceLastRefresh = now - lastRefreshTime;
       
-      // Only refresh if it's been more than 2 seconds since last refresh
+      // Refresh posts and photos when profile screen comes into focus
+      if (refetchPosts) {
+        refetchPosts();
+      }
+      if (refetchPhotos) {
+        refetchPhotos();
+      }
+      
+      // Only refresh bookmarks if it's been more than 2 seconds since last refresh
       if (timeSinceLastRefresh > 2000) {
        
         if (user?.$id && refetchBookmarks && !isRefreshingBookmarks) {
@@ -181,7 +190,7 @@ const Profile = () => {
       } else {
        
       }
-    }, [user?.$id, refetchBookmarks, lastRefreshTime])
+    }, [user?.$id, refetchBookmarks, refetchPosts, refetchPhotos, lastRefreshTime])
   );
 
   // Stop videos when profile loses focus
@@ -245,11 +254,85 @@ const Profile = () => {
   const [followModalData, setFollowModalData] = useState([]);
 
   // Profile section state
-  const [activeSection, setActiveSection] = useState('videos'); // 'videos' or 'bookmarks'
+  const [activeSection, setActiveSection] = useState('videos'); // 'videos', 'pics', or 'bookmarks'
   const [isRefreshingBookmarks, setIsRefreshingBookmarks] = useState(false);
+  
+  // Photo modal state
+  const [photoModalVisible, setPhotoModalVisible] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
+  const [photoIndex, setPhotoIndex] = useState(0);
   
   // Notification count state
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  
+  // Delete handlers
+  const handleDeleteVideo = async (videoId, index, e) => {
+    e?.stopPropagation?.(); // Prevent opening modal when clicking delete
+    Alert.alert(
+      t('profile.alerts.deleteVideoTitle', 'Delete Video'),
+      t('profile.alerts.deleteVideoMessage', 'Are you sure you want to delete this video? This action cannot be undone.'),
+      [
+        {
+          text: t('common.cancel', 'Cancel'),
+          style: 'cancel'
+        },
+        {
+          text: t('common.delete', 'Delete'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteVideoPost(videoId);
+              // Close modal if it's open for this video
+              if (modalVisible && modalIndex === index) {
+                setModalVisible(false);
+              }
+              // Refresh the posts list
+              if (refetchPosts) {
+                await refetchPosts();
+              }
+              Alert.alert(t('common.success', 'Success'), t('profile.alerts.videoDeleted', 'Video deleted successfully'));
+            } catch (error) {
+              Alert.alert(t('common.error', 'Error'), error.message || t('profile.alerts.deleteVideoError', 'Failed to delete video'));
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleDeletePhoto = async (photoId, index, e) => {
+    e?.stopPropagation?.(); // Prevent opening modal when clicking delete
+    Alert.alert(
+      t('profile.alerts.deletePhotoTitle', 'Delete Photo'),
+      t('profile.alerts.deletePhotoMessage', 'Are you sure you want to delete this photo? This action cannot be undone.'),
+      [
+        {
+          text: t('common.cancel', 'Cancel'),
+          style: 'cancel'
+        },
+        {
+          text: t('common.delete', 'Delete'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deletePhotoPost(photoId);
+              // Close modal if it's open for this photo
+              if (photoModalVisible && photoIndex === index) {
+                setPhotoModalVisible(false);
+              }
+              // Refresh the photos list
+              if (refetchPhotos) {
+                await refetchPhotos();
+              }
+              Alert.alert(t('common.success', 'Success'), t('profile.alerts.photoDeleted', 'Photo deleted successfully'));
+            } catch (error) {
+              Alert.alert(t('common.error', 'Error'), error.message || t('profile.alerts.deletePhotoError', 'Failed to delete photo'));
+            }
+          }
+        }
+      ]
+    );
+  };
 
   // Function to handle section change and refresh bookmarks if needed
   const handleSectionChange = (section) => {
@@ -1084,6 +1167,27 @@ const Profile = () => {
                   paddingVertical: 10,
                   paddingHorizontal: 16,
                   borderRadius: 10,
+                  backgroundColor: activeSection === 'pics' ? theme.accentSoft : 'transparent',
+                }}
+                onPress={() => handleSectionChange('pics')}
+              >
+                <Text
+                  style={{
+                    textAlign: 'center',
+                    fontFamily: 'Poppins-Medium',
+                    color: activeSection === 'pics' ? theme.textPrimary : theme.textSecondary,
+                  }}
+                >
+                  Pics
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  paddingHorizontal: 16,
+                  borderRadius: 10,
                   backgroundColor: activeSection === 'bookmarks' ? theme.accentSoft : 'transparent',
                 }}
                 onPress={() => handleSectionChange('bookmarks')}
@@ -1119,7 +1223,7 @@ const Profile = () => {
               {posts && posts.length > 0 ? (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
                   {posts.map((post, index) => (
-                    <TouchableOpacity
+                    <View
                       key={post.$id}
                       style={{
                         width: '48%',
@@ -1130,30 +1234,53 @@ const Profile = () => {
                         overflow: 'hidden',
                         borderWidth: 1,
                         borderColor: theme.border,
+                        position: 'relative',
                       }}
-                      onPress={() => openVideoModal(post, index)}
                     >
-                      <View style={{ width: '100%', height: '100%' }}>
-                        {post.video ? (
-                          <Video
-                            source={{ uri: post.video }}
-                            style={{ width: '100%', height: '100%' }}
-                            resizeMode="cover"
-                            shouldPlay={false}
-                            isMuted={true}
-                            useNativeControls={false}
-                            posterSource={post.thumbnail && !post.thumbnail.includes('placeholder') ? { uri: post.thumbnail } : undefined}
-                          />
-                        ) : (
-                          <Image
-                            source={{ uri: post.thumbnail || 'https://via.placeholder.com/300x300' }}
-                            style={{ width: '100%', height: '100%' }}
-                            resizeMode="cover"
-                          />
-                        )}
-                        {/* Play Icon */}
-                      </View>
-                    </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{ width: '100%', height: '100%' }}
+                        onPress={() => openVideoModal(post, index)}
+                      >
+                        <View style={{ width: '100%', height: '100%' }}>
+                          {post.video ? (
+                            <Video
+                              source={{ uri: post.video }}
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="cover"
+                              shouldPlay={false}
+                              isMuted={true}
+                              useNativeControls={false}
+                              posterSource={post.thumbnail && !post.thumbnail.includes('placeholder') ? { uri: post.thumbnail } : undefined}
+                            />
+                          ) : (
+                            <Image
+                              source={{ uri: post.thumbnail || 'https://via.placeholder.com/300x300' }}
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="cover"
+                            />
+                          )}
+                          {/* Play Icon */}
+                        </View>
+                      </TouchableOpacity>
+                      {/* Delete Button */}
+                      <TouchableOpacity
+                        onPress={(e) => handleDeleteVideo(post.$id, index, e)}
+                        style={{
+                          position: 'absolute',
+                          top: 8,
+                          right: 8,
+                          backgroundColor: 'rgba(255, 59, 48, 0.9)',
+                          borderRadius: 20,
+                          width: 32,
+                          height: 32,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          zIndex: 10,
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>×</Text>
+                      </TouchableOpacity>
+                    </View>
                   ))}
                 </View>
               ) : (
@@ -1164,6 +1291,96 @@ const Profile = () => {
                   <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>
                     {t('profile.sections.noVideosSubtitle')}
                   </Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Pics Section */}
+          {activeSection === 'pics' && (
+            <View style={{ paddingHorizontal: 16, marginBottom: 32 }}>
+              <Text
+                style={{
+                  color: theme.textPrimary,
+                  fontSize: 18,
+                  fontFamily: 'Poppins-SemiBold',
+                  marginBottom: 16,
+                }}
+              >
+                Your Photos
+              </Text>
+              {photos && photos.length > 0 ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
+                  {photos.map((photo, index) => (
+                    <View
+                      key={photo.$id}
+                      style={{
+                        width: '48%',
+                        aspectRatio: 1,
+                        backgroundColor: theme.surface,
+                        borderRadius: 16,
+                        marginBottom: 12,
+                        overflow: 'hidden',
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        position: 'relative',
+                      }}
+                    >
+                      <TouchableOpacity
+                        style={{ width: '100%', height: '100%' }}
+                        onPress={() => {
+                          setSelectedPhoto(photo);
+                          setPhotoIndex(index);
+                          setPhotoModalVisible(true);
+                        }}
+                      >
+                        <Image
+                          source={{ uri: photo.photo || 'https://via.placeholder.com/300x300' }}
+                          style={{ width: '100%', height: '100%' }}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                      {/* Delete Button */}
+                      <TouchableOpacity
+                        onPress={(e) => handleDeletePhoto(photo.$id, index, e)}
+                        style={{
+                          position: 'absolute',
+                          top: 8,
+                          right: 8,
+                          backgroundColor: 'rgba(255, 59, 48, 0.9)',
+                          borderRadius: 20,
+                          width: 32,
+                          height: 32,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          zIndex: 10,
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>×</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                  <Text style={{ color: theme.textSecondary, textAlign: 'center', fontSize: 16 }}>
+                    No photos yet
+                  </Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>
+                    Create your first photo post
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => router.push('/create')}
+                    style={{
+                      marginTop: 16,
+                      backgroundColor: theme.accent,
+                      paddingHorizontal: 24,
+                      paddingVertical: 12,
+                      borderRadius: 10,
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Create Post</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </View>
@@ -1922,6 +2139,115 @@ const Profile = () => {
               </ScrollView>
             </View>
           </View>
+        </Modal>
+
+        {/* Photo Viewing Modal */}
+        <Modal
+          visible={photoModalVisible}
+          animationType="fade"
+          transparent={false}
+          onRequestClose={() => setPhotoModalVisible(false)}
+          style={{ backgroundColor: theme.background }}
+        >
+          {selectedPhoto && (
+            <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+              <TouchableOpacity
+                onPress={() => setPhotoModalVisible(false)}
+                style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}
+              >
+                <Text style={{ color: theme.textPrimary, fontSize: 28 }}>×</Text>
+              </TouchableOpacity>
+
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <Image
+                  source={{ uri: selectedPhoto.photo || 'https://via.placeholder.com/300x300' }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="contain"
+                />
+              </View>
+
+              {/* Photo Info Overlay */}
+              <View style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                backgroundColor: 'rgba(0,0,0,0.7)',
+                padding: 20,
+              }}>
+                {selectedPhoto.title && (
+                  <Text style={{
+                    color: '#fff',
+                    fontSize: 18,
+                    fontWeight: 'bold',
+                    marginBottom: 8,
+                  }}>
+                    {selectedPhoto.title}
+                  </Text>
+                )}
+                {selectedPhoto.caption && (
+                  <Text style={{
+                    color: '#fff',
+                    fontSize: 14,
+                    marginBottom: selectedPhoto.title ? 4 : 8,
+                  }}>
+                    {selectedPhoto.caption}
+                  </Text>
+                )}
+                <Text style={{
+                  color: '#fff',
+                  fontSize: 12,
+                  opacity: 0.8,
+                }}>
+                  Posted {selectedPhoto.$createdAt ? new Date(selectedPhoto.$createdAt).toLocaleDateString() : ''}
+                </Text>
+              </View>
+
+              {/* Navigation Buttons */}
+              {photos && photos.length > 1 && (
+                <>
+                  {photoIndex > 0 && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        const prevPhoto = photos[photoIndex - 1];
+                        setSelectedPhoto(prevPhoto);
+                        setPhotoIndex(photoIndex - 1);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: 20,
+                        top: '50%',
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        padding: 15,
+                        borderRadius: 25,
+                      }}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 24 }}>‹</Text>
+                    </TouchableOpacity>
+                  )}
+                  {photoIndex < photos.length - 1 && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        const nextPhoto = photos[photoIndex + 1];
+                        setSelectedPhoto(nextPhoto);
+                        setPhotoIndex(photoIndex + 1);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        right: 20,
+                        top: '50%',
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        padding: 15,
+                        borderRadius: 25,
+                      }}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 24 }}>›</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+            </SafeAreaView>
+          )}
         </Modal>
 
         {/* Edit Profile Modal */}

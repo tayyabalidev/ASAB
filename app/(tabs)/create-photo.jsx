@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
 import { router } from "expo-router";
-import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,13 +11,15 @@ import {
   ImageBackground,
   TouchableOpacity,
   ScrollView,
+  TextInput,
   Modal,
+  ActivityIndicator,
 } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from "react-i18next";
 
 import { icons, images } from "../../constants";
-import { createVideoPost, createPhotoPost } from "../../lib/appwrite";
+import { createPhotoPost } from "../../lib/appwrite";
 import { CustomButton, FormField } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
@@ -33,28 +34,30 @@ const FILTERS = [
   { id: 'bright', name: 'Bright' },
 ];
 
-const Create = () => {
+const CreatePhoto = () => {
   const { user, isRTL, theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
   const [uploading, setUploading] = useState(false);
-  const [postType, setPostType] = useState('video'); // 'video' or 'photo'
-  const [form, setForm] = useState({
-    title: "",
-    video: null,
-    thumbnail: null,
-    prompt: "",
-  });
-  const [photoForm, setPhotoForm] = useState({
-    title: "",
-    photo: null,
-    caption: "",
-    filter: "none",
-  });
+  const [editing, setEditing] = useState(false);
   const [originalImage, setOriginalImage] = useState(null);
   const [editedImage, setEditedImage] = useState(null);
   const [edits, setEdits] = useState({});
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const form = useState({
+    title: "",
+    photo: null,
+    caption: "",
+    filter: "none",
+  })[0];
+  const setForm = useState({
+    title: "",
+    photo: null,
+    caption: "",
+    filter: "none",
+  })[1];
+
+  // Adjustments state
   const [adjustments, setAdjustments] = useState({
     brightness: 0,
     contrast: 1,
@@ -90,9 +93,8 @@ const Create = () => {
     [isDarkMode]
   );
 
-  const openPicker = async (selectType) => {
+  const openPicker = async () => {
     try {
-      // Request permissions
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
         Alert.alert(t('alerts.permissionRequiredTitle'), t('alerts.permissionRequiredMessage'));
@@ -100,61 +102,28 @@ const Create = () => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: selectType === "image" 
-          ? ImagePicker.MediaTypeOptions.Images 
-          : ImagePicker.MediaTypeOptions.Videos,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        quality: 0.7,
-        aspect: [16, 9],
-        videoMaxDuration: 60, // Limit to 60 seconds
-        exif: false, // Don't include EXIF data
+        quality: 0.8,
+        exif: false,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const selectedAsset = result.assets[0];
-        let fileName = selectedAsset.fileName || selectedAsset.name || selectedAsset.uri.split('/').pop() || `file_${Date.now()}`;
-        
-        // Ensure proper file extension for Appwrite compatibility
-        if (selectType === "video") {
-          // Force .mp4 extension for videos to ensure Appwrite compatibility
-          const baseName = fileName.split('.')[0];
-          fileName = `${baseName}.mp4`;
-        } else if (selectType === "image") {
-          // Force .jpg extension for images
-          const baseName = fileName.split('.')[0];
-          fileName = `${baseName}.jpg`;
-        }
-        
-        const fileType = selectedAsset.type === 'image' ? 'image/jpeg' : selectedAsset.type === 'video' ? 'video/mp4' : selectedAsset.type;
-        const fileSize = selectedAsset.fileSize || selectedAsset.size;
+        const fileName = selectedAsset.fileName || selectedAsset.name || selectedAsset.uri.split('/').pop() || `photo_${Date.now()}.jpg`;
+        const baseName = fileName.split('.')[0];
         const file = {
           uri: selectedAsset.uri,
-          name: fileName,
-          type: fileType,
-          mimeType: fileType, // Add mimeType for iOS compatibility
-          size: fileSize,
+          name: `${baseName}.jpg`,
+          type: 'image/jpeg',
+          mimeType: 'image/jpeg',
+          size: selectedAsset.fileSize || selectedAsset.size,
         };
-        
-        if (postType === 'video') {
-          if (selectType === "image") {
-            setForm({
-              ...form,
-              thumbnail: file,
-            });
-          }
 
-          if (selectType === "video") {
-            setForm({
-              ...form,
-              video: file,
-            });
-          }
-        } else {
-          // Photo mode
-          setOriginalImage(file);
-          setEditedImage(file);
-          setPhotoForm({ ...photoForm, photo: file });
-        }
+        setOriginalImage(file);
+        setEditedImage(file);
+        setForm({ ...form, photo: file });
+        setEditing(true);
       }
     } catch (error) {
       Alert.alert(t("common.error"), t("alerts.mediaSelectError"));
@@ -207,14 +176,13 @@ const Create = () => {
         };
 
         setEditedImage(editedFile);
-        setPhotoForm({ ...photoForm, photo: editedFile, filter: filterId });
+        setForm({ ...form, photo: editedFile, filter: filterId });
         setEdits(newEdits);
       } else {
         setEditedImage(originalImage);
-        setPhotoForm({ ...photoForm, photo: originalImage, filter: filterId });
+        setForm({ ...form, photo: originalImage, filter: filterId });
         setEdits(newEdits);
       }
-      setShowFilterModal(false);
     } catch (error) {
       Alert.alert(t("common.error"), "Failed to apply filter");
     }
@@ -252,11 +220,12 @@ const Create = () => {
         };
 
         setEditedImage(editedFile);
-        setPhotoForm({ ...photoForm, photo: editedFile });
+        setForm({ ...form, photo: editedFile });
         setEdits({ ...edits, adjustments });
       } else {
+        // If no adjustments, keep original
         setEditedImage(originalImage);
-        setPhotoForm({ ...photoForm, photo: originalImage });
+        setForm({ ...form, photo: originalImage });
       }
       setShowAdjustModal(false);
     } catch (error) {
@@ -264,89 +233,73 @@ const Create = () => {
     }
   };
 
+  const cropImage = async () => {
+    if (!originalImage) return;
+
+    try {
+      const manipResult = await ImageManipulator.manipulateAsync(
+        originalImage.uri,
+        [{ resize: { width: 1080 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+
+      const editedFile = {
+        ...originalImage,
+        uri: manipResult.uri,
+      };
+
+      setEditedImage(editedFile);
+      setForm({ ...form, photo: editedFile });
+      Alert.alert(t("common.success"), "Image cropped");
+    } catch (error) {
+      Alert.alert(t("common.error"), "Failed to crop image");
+    }
+  };
+
   const resetEdits = () => {
     setEditedImage(originalImage);
-    setPhotoForm({ ...photoForm, photo: originalImage, filter: "none" });
+    setForm({ ...form, photo: originalImage, filter: "none" });
     setEdits({});
     setAdjustments({ brightness: 0, contrast: 1, saturation: 1, hue: 0 });
   };
 
   const submit = async () => {
-    if (postType === 'video') {
-      if (!form.prompt || form.prompt.trim() === "") {
-        return Alert.alert(t("common.error"), t("alerts.promptRequired"));
-      }
-      
-      if (!form.title || form.title.trim() === "") {
-        return Alert.alert(t("common.error"), t("alerts.titleRequired"));
-      }
-      
-      if (!form.video) {
-        return Alert.alert(t("common.error"), t("alerts.videoRequired"));
-      }
+    if (!form.title || form.title.trim() === "") {
+      return Alert.alert(t("common.error"), "Title is required");
+    }
 
-      if (!user || !user.$id) {
-        return Alert.alert(t("common.error"), t("alerts.loginToUpload"));
-      }
+    if (!form.photo) {
+      return Alert.alert(t("common.error"), "Please select a photo");
+    }
 
-      setUploading(true);
-      try {
-        await createVideoPost({
-          ...form,
-          userId: user.$id,
-        });
+    if (!user || !user.$id) {
+      return Alert.alert(t("common.error"), t("alerts.loginToUpload"));
+    }
 
-        Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
-        router.push("/home");
-      } catch (error) {
-        Alert.alert(t("common.error"), error.message || t("alerts.uploadFailed"));
-      } finally {
-        setForm({
-          title: "",
-          video: null,
-          thumbnail: null,
-          prompt: "",
-        });
-        setUploading(false);
-      }
-    } else {
-      // Photo submission
-      if (!photoForm.title || photoForm.title.trim() === "") {
-        return Alert.alert(t("common.error"), "Title is required");
-      }
+    setUploading(true);
+    try {
+      await createPhotoPost({
+        ...form,
+        userId: user.$id,
+        edits: edits,
+      });
 
-      if (!photoForm.photo) {
-        return Alert.alert(t("common.error"), "Please select a photo");
-      }
-
-      if (!user || !user.$id) {
-        return Alert.alert(t("common.error"), t("alerts.loginToUpload"));
-      }
-
-      setUploading(true);
-      try {
-        await createPhotoPost({
-          ...photoForm,
-          userId: user.$id,
-          edits: edits,
-        });
-
-        Alert.alert(t("common.success"), "Photo uploaded successfully!");
-        router.push("/profile");
-      } catch (error) {
-        Alert.alert(t("common.error"), error.message || "Failed to upload photo");
-      } finally {
-        setPhotoForm({
-          title: "",
-          photo: null,
-          caption: "",
-          filter: "none",
-        });
-        setOriginalImage(null);
-        setEditedImage(null);
-        setEdits({});
-        setUploading(false);
-      }
+      Alert.alert(t("common.success"), "Photo uploaded successfully!");
+      router.push("/profile");
+    } catch (error) {
+      Alert.alert(t("common.error"), error.message || "Failed to upload photo");
+    } finally {
+      setForm({
+        title: "",
+        photo: null,
+        caption: "",
+        filter: "none",
+      });
+      setOriginalImage(null);
+      setEditedImage(null);
+      setEditing(false);
+      setEdits({});
+      setUploading(false);
     }
   };
 
@@ -390,175 +343,22 @@ const Create = () => {
             <ScrollView
               contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}
             >
-          <Text
-            style={{
-              color: theme.textPrimary,
-              fontSize: 24,
-              fontFamily: "Poppins-SemiBold",
-              textAlign: isRTL ? "right" : "left",
-            }}
-          >
-            {t("create.screenTitle")}
-          </Text>
-
-          {/* Post Type Selection */}
-          <View
-            style={{
-              flexDirection: 'row',
-              borderRadius: 14,
-              padding: 4,
-              backgroundColor: themedColor('rgba(15,23,42,0.6)', theme.surface),
-              borderWidth: 1,
-              borderColor: theme.border,
-              marginBottom: 16,
-            }}
-          >
-            <TouchableOpacity
-              style={{
-                flex: 1,
-                paddingVertical: 10,
-                paddingHorizontal: 16,
-                borderRadius: 10,
-                backgroundColor: postType === 'video' ? theme.accentSoft : 'transparent',
-              }}
-              onPress={() => setPostType('video')}
-            >
               <Text
                 style={{
-                  textAlign: 'center',
-                  fontFamily: 'Poppins-Medium',
-                  color: postType === 'video' ? theme.textPrimary : theme.textSecondary,
+                  color: theme.textPrimary,
+                  fontSize: 24,
+                  fontFamily: "Poppins-SemiBold",
+                  textAlign: isRTL ? "right" : "left",
                 }}
               >
-                Video
+                Create Photo Post
               </Text>
-            </TouchableOpacity>
 
-            <TouchableOpacity
-              style={{
-                flex: 1,
-                paddingVertical: 10,
-                paddingHorizontal: 16,
-                borderRadius: 10,
-                backgroundColor: postType === 'photo' ? theme.accentSoft : 'transparent',
-              }}
-              onPress={() => setPostType('photo')}
-            >
-              <Text
-                style={{
-                  textAlign: 'center',
-                  fontFamily: 'Poppins-Medium',
-                  color: postType === 'photo' ? theme.textPrimary : theme.textSecondary,
-                }}
-              >
-                Photo
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {postType === 'video' ? (
-            <>
-              <FormField
-                title={t("create.videoTitleLabel")}
-                value={form.title}
-                placeholder={t("create.videoTitlePlaceholder")}
-                handleChangeText={(e) => setForm({ ...form, title: e })}
-                otherStyles="mt-4"
-              />
-
-              <View style={{ gap: 12 }}>
-                <Text
-                  style={{
-                    color: theme.textPrimary,
-                    fontSize: 16,
-                    fontFamily: "Poppins-Medium",
-                    textAlign: isRTL ? "right" : "left",
-                  }}
-                >
-                  {t("create.uploadVideoLabel")}
-                </Text>
-
-                <View style={{ position: 'relative' }}>
-                  <TouchableOpacity onPress={() => openPicker("video")}>
-                    {form.video ? (
-                      <Video
-                        source={{ uri: form.video.uri }}
-                        style={{ width: "100%", height: 256, borderRadius: 16, overflow: "hidden" }}
-                        useNativeControls
-                        resizeMode={ResizeMode.COVER}
-                        isLooping
-                      />
-                    ) : (
-                    <View
-                      style={{
-                        width: "100%",
-                        height: 180,
-                        paddingHorizontal: 16,
-                        borderRadius: 16,
-                        borderWidth: 1,
-                        borderColor: theme.border,
-                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
-                        justifyContent: "center",
-                        alignItems: "center",
-                      }}
-                    >
-                      <View
-                        style={{
-                          width: 64,
-                          height: 64,
-                          borderRadius: 12,
-                          borderWidth: 1,
-                          borderStyle: "dashed",
-                          borderColor: theme.accent,
-                          justifyContent: "center",
-                          alignItems: "center",
-                        }}
-                      >
-                        <Image
-                          source={icons.upload}
-                          resizeMode="contain"
-                          style={{ width: 28, height: 28, tintColor: theme.accent }}
-                        />
-                      </View>
-                    </View>
-                  )}
-                  </TouchableOpacity>
-                  {form.video && (
-                    <TouchableOpacity
-                      onPress={() => setForm({ ...form, video: null })}
-                      style={{
-                        position: 'absolute',
-                        top: 10,
-                        right: 10,
-                        backgroundColor: 'rgba(255, 59, 48, 0.9)',
-                        borderRadius: 20,
-                        width: 36,
-                        height: 36,
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        zIndex: 10,
-                      }}
-                    >
-                      <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>×</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-
-              <FormField
-                title={t("create.aiPromptLabel")}
-                value={form.prompt}
-                placeholder={t("create.aiPromptPlaceholder")}
-                handleChangeText={(e) => setForm({ ...form, prompt: e })}
-              />
-            </>
-          ) : (
-            <>
               <FormField
                 title="Title"
-                value={photoForm.title}
+                value={form.title}
                 placeholder="Enter photo title"
-                handleChangeText={(e) => setPhotoForm({ ...photoForm, title: e })}
+                handleChangeText={(e) => setForm({ ...form, title: e })}
                 otherStyles="mt-4"
               />
 
@@ -574,7 +374,7 @@ const Create = () => {
                   Select Photo
                 </Text>
 
-                <TouchableOpacity onPress={() => openPicker("image")}>
+                <TouchableOpacity onPress={openPicker}>
                   {editedImage ? (
                     <View style={{ position: 'relative' }}>
                       <Image
@@ -582,68 +382,46 @@ const Create = () => {
                         style={{ width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}
                         resizeMode="cover"
                       />
-                      {/* Delete/Remove Button */}
-                      <TouchableOpacity
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          setEditedImage(null);
-                          setOriginalImage(null);
-                          setPhotoForm({ ...photoForm, photo: null });
-                          setEdits({});
-                        }}
-                        style={{
+                      {editing && (
+                        <View style={{
                           position: 'absolute',
-                          top: 10,
+                          bottom: 10,
                           right: 10,
-                          backgroundColor: 'rgba(255, 59, 48, 0.9)',
-                          borderRadius: 20,
-                          width: 36,
-                          height: 36,
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          zIndex: 10,
-                        }}
-                      >
-                        <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>×</Text>
-                      </TouchableOpacity>
-                      <View style={{
-                        position: 'absolute',
-                        bottom: 10,
-                        right: 10,
-                        flexDirection: 'row',
-                        gap: 8,
-                      }}>
-                        <TouchableOpacity
-                          onPress={() => setShowFilterModal(true)}
-                          style={{
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            padding: 12,
-                            borderRadius: 8,
-                          }}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 12 }}>Filters</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => setShowAdjustModal(true)}
-                          style={{
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            padding: 12,
-                            borderRadius: 8,
-                          }}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 12 }}>Adjust</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={resetEdits}
-                          style={{
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            padding: 12,
-                            borderRadius: 8,
-                          }}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 12 }}>Reset</Text>
-                        </TouchableOpacity>
-                      </View>
+                          flexDirection: 'row',
+                          gap: 8,
+                        }}>
+                          <TouchableOpacity
+                            onPress={() => setShowFilterModal(true)}
+                            style={{
+                              backgroundColor: 'rgba(0,0,0,0.7)',
+                              padding: 12,
+                              borderRadius: 8,
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 12 }}>Filters</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => setShowAdjustModal(true)}
+                            style={{
+                              backgroundColor: 'rgba(0,0,0,0.7)',
+                              padding: 12,
+                              borderRadius: 8,
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 12 }}>Adjust</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={resetEdits}
+                            style={{
+                              backgroundColor: 'rgba(0,0,0,0.7)',
+                              padding: 12,
+                              borderRadius: 8,
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 12 }}>Reset</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   ) : (
                     <View
@@ -687,22 +465,20 @@ const Create = () => {
 
               <FormField
                 title="Caption (Optional)"
-                value={photoForm.caption}
+                value={form.caption}
                 placeholder="Add a caption..."
-                handleChangeText={(e) => setPhotoForm({ ...photoForm, caption: e })}
+                handleChangeText={(e) => setForm({ ...form, caption: e })}
                 multiline
                 numberOfLines={3}
               />
-            </>
-          )}
 
-          <CustomButton
-            title={uploading ? "Uploading..." : (postType === 'video' ? t("create.submitButton") : "Post Photo")}
-            handlePress={submit}
-            containerStyles="mt-6"
-            isLoading={uploading}
-          />
-        </ScrollView>
+              <CustomButton
+                title={uploading ? "Uploading..." : "Post Photo"}
+                handlePress={submit}
+                containerStyles="mt-6"
+                isLoading={uploading}
+              />
+            </ScrollView>
 
             {/* Filter Modal */}
             <Modal
@@ -736,11 +512,14 @@ const Create = () => {
                       {FILTERS.map((filter) => (
                         <TouchableOpacity
                           key={filter.id}
-                          onPress={() => applyFilter(filter.id)}
+                          onPress={() => {
+                            applyFilter(filter.id);
+                            setShowFilterModal(false);
+                          }}
                           style={{
                             alignItems: 'center',
                             padding: 10,
-                            backgroundColor: photoForm.filter === filter.id ? theme.accentSoft : theme.cardSoft,
+                            backgroundColor: form.filter === filter.id ? theme.accentSoft : theme.cardSoft,
                             borderRadius: 10,
                             minWidth: 80,
                           }}
@@ -748,7 +527,7 @@ const Create = () => {
                           <Text style={{
                             color: theme.textPrimary,
                             fontSize: 14,
-                            fontWeight: photoForm.filter === filter.id ? 'bold' : 'normal',
+                            fontWeight: form.filter === filter.id ? 'bold' : 'normal',
                           }}>
                             {filter.name}
                           </Text>
@@ -812,24 +591,35 @@ const Create = () => {
                             height: 6,
                             backgroundColor: theme.border,
                             borderRadius: 3,
-                          }} />
+                            position: 'relative',
+                          }}>
+                            <View style={{
+                              position: 'absolute',
+                              left: `${((adjustments.brightness + 100) / 200) * 100}%`,
+                              top: -3,
+                              width: 12,
+                              height: 12,
+                              borderRadius: 6,
+                              backgroundColor: theme.accent,
+                              borderWidth: 2,
+                              borderColor: '#fff',
+                            }} />
+                          </View>
                         </View>
                         <Text style={{ color: theme.textSecondary, width: 50, textAlign: 'right' }}>100</Text>
                       </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-                        <TouchableOpacity
-                          onPress={() => setAdjustments({ ...adjustments, brightness: Math.max(-100, adjustments.brightness - 10) })}
-                          style={{ padding: 8, backgroundColor: theme.cardSoft, borderRadius: 8 }}
-                        >
-                          <Text style={{ color: theme.textPrimary }}>-</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => setAdjustments({ ...adjustments, brightness: Math.min(100, adjustments.brightness + 10) })}
-                          style={{ padding: 8, backgroundColor: theme.cardSoft, borderRadius: 8 }}
-                        >
-                          <Text style={{ color: theme.textPrimary }}>+</Text>
-                        </TouchableOpacity>
-                      </View>
+                      <TouchableOpacity
+                        onPress={() => setAdjustments({ ...adjustments, brightness: Math.max(-100, adjustments.brightness - 10) })}
+                        style={{ position: 'absolute', left: 50 }}
+                      >
+                        <Text>-</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => setAdjustments({ ...adjustments, brightness: Math.min(100, adjustments.brightness + 10) })}
+                        style={{ position: 'absolute', right: 50 }}
+                      >
+                        <Text>+</Text>
+                      </TouchableOpacity>
                     </View>
 
                     <View>
@@ -946,4 +736,5 @@ const Create = () => {
   );
 };
 
-export default Create;
+export default CreatePhoto;
+

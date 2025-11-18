@@ -10,7 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getLatestPosts, toggleLikePost, getComments, addComment, getPostLikes, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser } from "../../lib/appwrite";
+import { getAllPosts, getLatestPosts, toggleLikePost, getComments, addComment, getPostLikes, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
 import { appwriteConfig } from "../../lib/appwrite";
@@ -36,6 +36,40 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [shareCount, setShareCount] = useState(item.shares || 0);
   const [isFollowing, setIsFollowing] = useState(false);
   const [showProfileHint, setShowProfileHint] = useState(false);
+  const [creatorData, setCreatorData] = useState(null);
+  
+  // Fetch creator data if creator is a string ID
+  useEffect(() => {
+    const fetchCreator = async () => {
+      if (!item?.creator) return;
+      
+      // If creator is already an object, use it
+      if (typeof item.creator === 'object' && item.creator !== null) {
+        setCreatorData(item.creator);
+        return;
+      }
+      
+      // If creator is a string ID, fetch the user document
+      if (typeof item.creator === 'string') {
+        try {
+          const userDoc = await databases.getDocument(
+            appwriteConfig.databaseId,
+            appwriteConfig.userCollectionId,
+            item.creator
+          );
+          setCreatorData(userDoc);
+        } catch (error) {
+          console.log('Failed to fetch creator:', error);
+          setCreatorData({ username: 'Unknown', avatar: images.profile, $id: item.creator });
+        }
+      }
+    };
+    
+    fetchCreator();
+  }, [item?.creator]);
+  
+  // Use creatorData if available, otherwise fall back to item.creator
+  const creator = creatorData || (typeof item.creator === 'object' ? item.creator : { username: 'Unknown', avatar: images.profile, $id: item.creator });
 
   // Show initial hint when video becomes visible (only once per video)
   useEffect(() => {
@@ -89,22 +123,23 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     fetchShareCount();
   }, [item.$id]);
 
-  // Check if current user is following the video creator
+  // Check if current user is following the video/photo creator
   useEffect(() => {
     async function checkFollowStatus() {
-      if (user?.$id && item.creator?.$id && user.$id !== item.creator.$id) {
+      const creatorId = creator?.$id || (typeof item.creator === 'string' ? item.creator : item.creator?.$id);
+      if (user?.$id && creatorId && user.$id !== creatorId) {
         // First check global state
-        if (followStatus[item.creator.$id] !== undefined) {
-          setIsFollowing(followStatus[item.creator.$id]);
+        if (followStatus[creatorId] !== undefined) {
+          setIsFollowing(followStatus[creatorId]);
         } else {
           // Fallback to database check
           try {
             const currentUser = await databases.getDocument(appwriteConfig.databaseId, appwriteConfig.userCollectionId, user.$id);
             const following = currentUser.following || [];
-            const isFollowingUser = following.includes(item.creator.$id);
+            const isFollowingUser = following.includes(creatorId);
             setIsFollowing(isFollowingUser);
             // Update global state
-            updateFollowStatus(item.creator.$id, isFollowingUser);
+            updateFollowStatus(creatorId, isFollowingUser);
           } catch (error) {
             
           }
@@ -115,7 +150,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       }
     }
     checkFollowStatus();
-  }, [user?.$id, item.creator?.$id, followStatus]);
+  }, [user?.$id, creator?.$id, item.creator, followStatus]);
 
   // Fetch comments when modal opens
   useEffect(() => {
@@ -181,16 +216,17 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     }
 
     try {
-      const videoData = {
+      const postData = {
         title: item.title,
-        creator: item.creator.username,
-        avatar: item.creator.avatar,
-        thumbnail: item.thumbnail,
-        video: item.video,
-        videoId: item.$id
+        creator: creator?.username || (typeof item.creator === 'string' ? 'Unknown' : item.creator?.username || 'Unknown'),
+        avatar: creator?.avatar || (typeof item.creator === 'string' ? images.profile : item.creator?.avatar || images.profile),
+        thumbnail: item.thumbnail || (item.postType === 'photo' ? item.photo : null),
+        video: item.video || (item.postType === 'photo' ? item.photo : null),
+        videoId: item.$id,
+        postType: item.postType || 'video'
       };
 
-      const newBookmarkStatus = await toggleBookmark(user.$id, item.$id, videoData);
+      const newBookmarkStatus = await toggleBookmark(user.$id, item.$id, postData);
       setBookmarked(newBookmarkStatus);
     } catch (error) {
       
@@ -200,8 +236,17 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
 
   const handleShare = async () => {
     try {
+      const shareUrl = item.postType === 'photo' ? (item.photo && typeof item.photo === 'string' ? item.photo : '') : item.video;
+      const shareType = item.postType === 'photo' ? 'photo' : 'video';
+      const creatorName = creator?.username || (typeof item.creator === 'string' ? 'Unknown' : item.creator?.username || 'Unknown');
+      
+      if (!shareUrl || (typeof shareUrl !== 'string')) {
+        Alert.alert(t("common.error"), "Cannot share: Invalid URL");
+        return;
+      }
+      
       const result = await Share.share({
-        message: `Check out this video: ${item.title} by ${item.creator.username}\n${item.video}`,
+        message: `Check out this ${shareType}: ${item.title} by ${creatorName}\n${shareUrl}`,
         title: item.title,
       });
       
@@ -218,8 +263,9 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   };
 
   const handleProfilePress = () => {
-    if (item.creator.$id && item.creator.$id !== user?.$id) {
-      router.push(`/profile/${item.creator.$id}`);
+    const creatorId = creator?.$id || (typeof item.creator === 'string' ? item.creator : item.creator?.$id);
+    if (creatorId && creatorId !== user?.$id) {
+      router.push(`/profile/${creatorId}`);
     }
   };
 
@@ -243,15 +289,16 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   };
 
   const handleFollowPress = async () => {
-    if (!user?.$id || !item.creator?.$id || user.$id === item.creator.$id) return;
+    const creatorId = creator?.$id || (typeof item.creator === 'string' ? item.creator : item.creator?.$id);
+    if (!user?.$id || !creatorId || user.$id === creatorId) return;
     
     // Immediate visual feedback - no loading state
     const newFollowState = !isFollowing;
     setIsFollowing(newFollowState);
-    updateFollowStatus(item.creator.$id, newFollowState);
+    updateFollowStatus(creatorId, newFollowState);
     
     try {
-      await toggleFollowUser(user.$id, item.creator.$id);
+      await toggleFollowUser(user.$id, creatorId);
       
       // Show success message
       const action = newFollowState ? 'followed' : 'unfollowed';
@@ -261,7 +308,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       Alert.alert(t("common.error"), t("alerts.followFailed"));
       // Revert the state change on error
       setIsFollowing(!newFollowState);
-      updateFollowStatus(item.creator.$id, !newFollowState);
+      updateFollowStatus(creatorId, !newFollowState);
     }
   };
 
@@ -328,13 +375,14 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               const { translationX, state } = event.nativeEvent;
               
               if (state === State.END && translationX < -80) {
-                // Only open profile if it's not the current user's video
-                if (item.creator?.$id && item.creator.$id !== user?.$id) {
+                // Only open profile if it's not the current user's video/photo
+                const creatorId = creator?.$id || (typeof item.creator === 'string' ? item.creator : item.creator?.$id);
+                if (creatorId && creatorId !== user?.$id) {
                   // Show hint briefly before opening profile
                   setShowProfileHint(true);
                   
                   // Navigate to profile
-                  router.push(`/profile/${item.creator.$id}`);
+                  router.push(`/profile/${creatorId}`);
                   
                   setTimeout(() => {
                     setShowProfileHint(false);
@@ -357,7 +405,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
            </View>
         </PanGestureHandler>
       
-      {/* Video Background */}
+      {/* Video/Photo Background */}
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={handleVideoPress}
@@ -370,34 +418,43 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           backgroundColor: themedColor('#000', theme.surface),
         }}
       >
-        {item.video ? (
-        <Video
-          source={{ 
-            uri: getIOSCompatibleVideoUrl(item.video) || item.video
-          }}
-          style={{ width: '100%', height: '100%' }}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay={play}
-          isLooping
-          isMuted={false}
-          useNativeControls={false}
-          onError={(error) => {
-            console.log('Video error:', error);
-          }}
-          onLoad={() => {
-            console.log('Video loaded successfully');
-          }}
-          onPlaybackStatusUpdate={(status) => {
-            if (status.didJustFinish) {
-              setPlay(false);
-            }
-          }}
-          {...(Platform.OS === 'ios' && {
-            allowsExternalPlayback: false,
-            playInSilentModeIOS: true,
-            ignoreSilentSwitch: 'ignore'
-          })}
-        />
+        {item.postType === 'photo' && item.photo && typeof item.photo === 'string' && item.photo.trim() !== '' ? (
+          <Image
+            source={{ uri: String(item.photo) }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+            onError={(error) => {
+              console.log('Photo error:', error);
+            }}
+          />
+        ) : item.video ? (
+          <Video
+            source={{ 
+              uri: getIOSCompatibleVideoUrl(item.video) || item.video
+            }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={play}
+            isLooping
+            isMuted={false}
+            useNativeControls={false}
+            onError={(error) => {
+              console.log('Video error:', error);
+            }}
+            onLoad={() => {
+              console.log('Video loaded successfully');
+            }}
+            onPlaybackStatusUpdate={(status) => {
+              if (status.didJustFinish) {
+                setPlay(false);
+              }
+            }}
+            {...(Platform.OS === 'ios' && {
+              allowsExternalPlayback: false,
+              playInSilentModeIOS: true,
+              ignoreSilentSwitch: 'ignore'
+            })}
+          />
         ) : (
           <View
             style={{
@@ -411,7 +468,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t("home.noVideoAvailable")}</Text>
           </View>
         )}
-        {!play && item.video && (
+        {!play && item.video && item.postType !== 'photo' && (
           <View style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -24 }, { translateY: -24 }] }}>
             <Image source={icons.play} style={{ width: 48, height: 48 }} resizeMode="contain" />
           </View>
@@ -426,7 +483,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         <TouchableOpacity onPress={handleProfilePress} style={{ marginBottom: 20, alignItems: 'center' }}>
           <View style={{ position: 'relative' }}>
             <Image
-              source={{ uri: item.creator.avatar }}
+              source={creator?.avatar && typeof creator.avatar === 'string' ? { uri: creator.avatar } : images.profile}
               style={{
                 width: 50,
                 height: 50,
@@ -437,7 +494,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               resizeMode="cover"
             />
                          {/* Follow/Following Icon */}
-             {user?.$id !== item.creator?.$id && (
+             {user?.$id !== (creator?.$id || (typeof item.creator === 'string' ? item.creator : item.creator?.$id)) && (
                <TouchableOpacity 
                  onPress={handleFollowPress}
                  style={{ 
@@ -552,10 +609,10 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         </TouchableOpacity>
       </View>
 
-      {/* Bottom Left Video Information */}
+      {/* Bottom Left Video/Photo Information */}
       <View style={{ position: 'absolute', bottom: 100, left: 15, right: 80, zIndex: 20 }}>
         <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
-          {item.creator.username}
+          {creator?.username || (typeof item.creator === 'string' ? 'Unknown' : item.creator?.username || 'Unknown')}
         </Text>
         <Text style={{ color: theme.textPrimary, fontSize: 14, marginBottom: 8 }}>
           {item.title} ♫ ✨
@@ -624,7 +681,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                     }}
                   >
                     <Image
-                      source={{ uri: c.avatar || images.profile }}
+                      source={c.avatar && typeof c.avatar === 'string' ? { uri: c.avatar } : images.profile}
                       style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }}
                     />
                     <View style={{ flex: 1 }}>
@@ -757,7 +814,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 keyExtractor={u => u.$id}
                 renderItem={({ item: u }) => (
                   <TouchableOpacity onPress={() => handleUserPress(u.$id)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 18 }}>
-                    <Image source={{ uri: u.avatar || images.profile }} style={{ width: 38, height: 38, borderRadius: 19, marginRight: 12 }} />
+                    <Image source={u.avatar && typeof u.avatar === 'string' ? { uri: u.avatar } : images.profile} style={{ width: 38, height: 38, borderRadius: 19, marginRight: 12 }} />
                     <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16, fontWeight: '600' }}>{u.username}</Text>
                   </TouchableOpacity>
                 )}
@@ -812,13 +869,43 @@ const Home = () => {
   
   // Get posts based on selected tab
   const { data: forYouPosts, refetch: refetchForYou } = useAppwrite(getAllPosts, []);
+  const { data: forYouPhotos, refetch: refetchForYouPhotos } = useAppwrite(getAllPhotoPosts, []);
   const { data: followingPosts, refetch: refetchFollowing } = useAppwrite(
     () => user?.$id ? getFollowingPosts(user.$id) : Promise.resolve([]),
     [user?.$id]
   );
   
   // Get latest posts for trending section
-  const { data: latestPosts } = useAppwrite(getLatestPosts, []);
+  const { data: latestPosts, refetch: refetchLatestPosts } = useAppwrite(getLatestPosts, []);
+  const { data: latestPhotos, refetch: refetchLatestPhotos } = useAppwrite(getLatestPhotoPosts, []);
+  
+  // Combine videos and photos into single feed, sorted by date
+  const combinedForYouPosts = useMemo(() => {
+    const allPosts = [
+      ...(forYouPosts || []).map(post => ({ ...post, postType: 'video' })),
+      ...(forYouPhotos || []).map(post => ({ ...post, postType: 'photo' }))
+    ];
+    // Sort by creation date (newest first)
+    return allPosts.sort((a, b) => {
+      const dateA = new Date(a.$createdAt || 0);
+      const dateB = new Date(b.$createdAt || 0);
+      return dateB - dateA;
+    });
+  }, [forYouPosts, forYouPhotos]);
+  
+  // Combine latest videos and photos for trending
+  const combinedLatestPosts = useMemo(() => {
+    const allPosts = [
+      ...(latestPosts || []).map(post => ({ ...post, postType: 'video' })),
+      ...(latestPhotos || []).map(post => ({ ...post, postType: 'photo' }))
+    ];
+    // Sort by creation date (newest first)
+    return allPosts.sort((a, b) => {
+      const dateA = new Date(a.$createdAt || 0);
+      const dateB = new Date(b.$createdAt || 0);
+      return dateB - dateA;
+    });
+  }, [latestPosts, latestPhotos]);
   
   const [trendingCreators, setTrendingCreators] = useState({});
   const fetchedTrendingCreatorIds = useRef(new Set());
@@ -826,8 +913,8 @@ const Home = () => {
   useEffect(() => {
     let isMounted = true;
     const fetchCreators = async () => {
-      if (!latestPosts || latestPosts.length === 0) return;
-      const missingIds = latestPosts
+      if (!combinedLatestPosts || combinedLatestPosts.length === 0) return;
+      const missingIds = combinedLatestPosts
         .map((post) => {
           if (!post?.creator) return null;
           if (typeof post.creator === "object" && post.creator !== null) return null;
@@ -877,12 +964,15 @@ const Home = () => {
     return () => {
       isMounted = false;
     };
-  }, [latestPosts]);
+  }, [combinedLatestPosts]);
 
  
   
-  const posts = selectedTab === 'forYou' ? forYouPosts : followingPosts;
-  const refetch = selectedTab === 'forYou' ? refetchForYou : refetchFollowing;
+  const posts = selectedTab === 'forYou' ? combinedForYouPosts : followingPosts;
+  const refetch = selectedTab === 'forYou' ? async () => {
+    await refetchForYou();
+    await refetchForYouPhotos();
+  } : refetchFollowing;
 
   // Simple search function that maintains focus
   const handleSearch = (query) => {
@@ -923,14 +1013,30 @@ const Home = () => {
     setCurrentVideoIndex(0);
   }, [selectedTab]);
 
-  // Handle focus/blur to stop videos when navigating away
+  // Handle focus/blur to stop videos when navigating away and refresh data
   useFocusEffect(
     useCallback(() => {
       setIsHomeFocused(true);
+      // Refresh posts when screen comes into focus (including trending)
+      if (refetchForYou) {
+        refetchForYou();
+      }
+      if (refetchForYouPhotos) {
+        refetchForYouPhotos();
+      }
+      if (refetchFollowing) {
+        refetchFollowing();
+      }
+      if (refetchLatestPosts) {
+        refetchLatestPosts();
+      }
+      if (refetchLatestPhotos) {
+        refetchLatestPhotos();
+      }
       return () => {
         setIsHomeFocused(false);
       };
-    }, [])
+    }, [refetchForYou, refetchForYouPhotos, refetchFollowing, refetchLatestPosts, refetchLatestPhotos])
   );
 
   // Handle trending videos scroll to determine center video
@@ -945,7 +1051,7 @@ const Home = () => {
     const maxIndex = Math.max(0, (latestPosts?.length || 1) - 1);
     const newIndex = Math.max(0, Math.min(centerIndex, maxIndex));
     
-    if (newIndex !== currentTrendingIndex && newIndex < (latestPosts?.length || 0)) {
+    if (newIndex !== currentTrendingIndex && newIndex < (combinedLatestPosts?.length || 0)) {
       setCurrentTrendingIndex(newIndex);
     }
   };
@@ -1022,8 +1128,8 @@ const Home = () => {
       "";
     const rawHandle = creator.handle || creator.username || "";
     const handleLabel = rawHandle ? (rawHandle.startsWith("@") ? rawHandle : `@${rawHandle}`) : "";
-    const hasAvatar = Boolean(creator.avatar);
-    const avatarSource = hasAvatar ? { uri: creator.avatar } : null;
+    const hasAvatar = Boolean(creator.avatar && typeof creator.avatar === 'string');
+    const avatarSource = hasAvatar ? { uri: String(creator.avatar) } : null;
 
     const handleCreatorPress = () => {
       if (creatorId) {
@@ -1068,7 +1174,16 @@ const Home = () => {
               position: 'relative',
             }}
           >
-            {item.video ? (
+            {item.postType === 'photo' && item.photo && typeof item.photo === 'string' && item.photo.trim() !== '' ? (
+              <Image
+                source={{ uri: String(item.photo) }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+                onError={(error) => {
+                  console.log('Trending photo error:', error);
+                }}
+              />
+            ) : item.video ? (
               <Video
                 source={{
                   uri: getIOSCompatibleVideoUrl(item.video) || item.video,
@@ -1108,8 +1223,8 @@ const Home = () => {
               </View>
             )}
 
-            {/* Play Icon Overlay */}
-            {item.video && (
+            {/* Play Icon Overlay - Only for videos */}
+            {item.video && item.postType !== 'photo' && (
               <View style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -24 }, { translateY: -24 }] }}>
                 <Image source={icons.play} style={{ width: 48, height: 48 }} resizeMode="contain" />
               </View>
@@ -1393,8 +1508,8 @@ const Home = () => {
                 </View>
               )}
 
-              {/* Trending Videos Section */}
-              {latestPosts && latestPosts.length > 0 ? (
+              {/* Trending Videos and Photos Section */}
+              {combinedLatestPosts && combinedLatestPosts.length > 0 ? (
                 <View style={{ 
                   backgroundColor: themedColor('rgba(2,14,13,0.95)', theme.surfaceMuted), 
                   paddingVertical: 20,
@@ -1418,7 +1533,7 @@ const Home = () => {
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={{ paddingHorizontal: 20 }}
                   >
-                    {latestPosts.slice(0, 5).map((item, index) => renderTrendingItem({ item, index }))}
+                    {combinedLatestPosts.slice(0, 5).map((item, index) => renderTrendingItem({ item, index }))}
                   </ScrollView>
                   
                   {/* Carousel Indicators */}
@@ -1426,7 +1541,7 @@ const Home = () => {
                     flexDirection: 'row', 
                     justifyContent: 'center', 
                   }}>
-                    {latestPosts.slice(0, 4).map((_, index) => (
+                    {combinedLatestPosts.slice(0, 4).map((_, index) => (
                       <View 
                         key={index}
                         style={{ 
@@ -1504,62 +1619,81 @@ const Home = () => {
                 <Text style={{ color: theme.textPrimary, fontSize: 28 }}>×</Text>
               </TouchableOpacity>
               
-              {/* Video */}
+              {/* Video or Photo */}
               <View style={{ flex: 1, backgroundColor: theme.background, position: 'relative' }}>
-                <Video
-                  ref={trendingVideoRef}
-                  source={{ 
-                    uri: getIOSCompatibleVideoUrl(trendingModalVideo.video) || trendingModalVideo.video
-                  }}
-                  style={{ flex: 1, width: '100%', height: '100%' }}
-                  resizeMode={ResizeMode.CONTAIN}
-                  shouldPlay={isTrendingVideoPlaying}
-                  isMuted={false}
-                  isLooping={true}
-                  useNativeControls={false}
-                  posterSource={trendingModalVideo.thumbnail ? { uri: trendingModalVideo.thumbnail } : undefined}
-                  {...(Platform.OS === 'ios' && {
-                    allowsExternalPlayback: false,
-                    playInSilentModeIOS: true,
-                    ignoreSilentSwitch: 'ignore'
-                  })}
-                  onError={(error) => {
-                    console.log('Trending modal video error:', error);
-                  }}
-                  onLoad={() => {
-                    console.log('Trending modal video loaded');
-                  }}
-                />
-                
-                {/* Play/Pause Button */}
-                <TouchableOpacity
-                  onPress={() => {
-                    if (isTrendingVideoPlaying) {
-                      trendingVideoRef.current?.pauseAsync();
-                      setIsTrendingVideoPlaying(false);
-                    } else {
-                      trendingVideoRef.current?.playAsync();
-                      setIsTrendingVideoPlaying(true);
-                    }
-                  }}
-                  style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: [{ translateX: -25 }, { translateY: -25 }],
-                    width: 50,
-                    height: 50,
-                    borderRadius: 25,
-                    backgroundColor: themedColor('rgba(255, 255, 255, 0.2)', 'rgba(15,23,42,0.2)'),
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    zIndex: 5
-                  }}
-                >
-                  <Text style={{ color: theme.textPrimary, fontSize: 24 }}>
-                    {isTrendingVideoPlaying ? '❚❚' : '►'}
-                  </Text>
-                </TouchableOpacity>
+                {trendingModalVideo.postType === 'photo' && trendingModalVideo.photo && typeof trendingModalVideo.photo === 'string' && trendingModalVideo.photo.trim() !== '' ? (
+                  <Image
+                    source={{ uri: String(trendingModalVideo.photo) }}
+                    style={{ flex: 1, width: '100%', height: '100%' }}
+                    resizeMode="contain"
+                    onError={(error) => {
+                      console.log('Trending modal photo error:', error);
+                    }}
+                  />
+                ) : trendingModalVideo.video ? (
+                  <>
+                    <Video
+                      ref={trendingVideoRef}
+                      source={{ 
+                        uri: getIOSCompatibleVideoUrl(trendingModalVideo.video) || trendingModalVideo.video
+                      }}
+                      style={{ flex: 1, width: '100%', height: '100%' }}
+                      resizeMode={ResizeMode.CONTAIN}
+                      shouldPlay={isTrendingVideoPlaying}
+                      isMuted={false}
+                      isLooping={true}
+                      useNativeControls={false}
+                      posterSource={trendingModalVideo.thumbnail ? { uri: trendingModalVideo.thumbnail } : undefined}
+                      {...(Platform.OS === 'ios' && {
+                        allowsExternalPlayback: false,
+                        playInSilentModeIOS: true,
+                        ignoreSilentSwitch: 'ignore'
+                      })}
+                      onError={(error) => {
+                        console.log('Trending modal video error:', error);
+                      }}
+                      onLoad={() => {
+                        console.log('Trending modal video loaded');
+                      }}
+                    />
+                    
+                    {/* Play/Pause Button - Only for videos */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (isTrendingVideoPlaying) {
+                          trendingVideoRef.current?.pauseAsync();
+                          setIsTrendingVideoPlaying(false);
+                        } else {
+                          trendingVideoRef.current?.playAsync();
+                          setIsTrendingVideoPlaying(true);
+                        }
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: [{ translateX: -25 }, { translateY: -25 }],
+                        width: 50,
+                        height: 50,
+                        borderRadius: 25,
+                        backgroundColor: themedColor('rgba(255, 255, 255, 0.2)', 'rgba(15,23,42,0.2)'),
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        zIndex: 5
+                      }}
+                    >
+                      <Text style={{ color: theme.textPrimary, fontSize: 24 }}>
+                        {isTrendingVideoPlaying ? '❚❚' : '►'}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <Text style={{ color: theme.textPrimary, fontSize: 16 }}>
+                      {t("home.noVideoAvailable")}
+                    </Text>
+                  </View>
+                )}
                 
                 {/* Video Info Overlay */}
                 <View style={{ 

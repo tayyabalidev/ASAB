@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Dimensions, TouchableOpacity, Alert, Text } from 'react-native';
+import { View, StyleSheet, Dimensions, TouchableOpacity, Alert, Text, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { LiveStreamPlayer, LiveChatPanel, LiveReactions } from '../components';
@@ -74,42 +74,48 @@ const LiveViewer = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.container}>
-        {/* Video Player - Agora will work after EAS build */}
-        <LiveStreamPlayer 
-          stream={stream}
-          onClose={handleClose}
-        />
+      <KeyboardAvoidingView 
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
+        <View style={styles.container}>
+          {/* Video Player - Agora will work after EAS build */}
+          <LiveStreamPlayer 
+            stream={stream}
+            onClose={handleClose}
+          />
 
-        {/* Live Reactions Overlay */}
-        <LiveReactions streamId={streamId} isHost={false} />
+          {/* Live Reactions Overlay */}
+          <LiveReactions streamId={streamId} isHost={false} />
 
-        {/* Live Chat Panel */}
-        {showChat && (
-          <View style={styles.chatPanel}>
-            <LiveChatPanel streamId={streamId} isHost={false} />
-          </View>
-        )}
+          {/* Live Chat Panel */}
+          {showChat && (
+            <View style={styles.chatPanel}>
+              <LiveChatPanel streamId={streamId} isHost={false} />
+            </View>
+          )}
 
-        {/* Chat Toggle Button */}
-        <TouchableOpacity 
-          style={styles.chatToggle}
-          onPress={toggleChat}
-        >
-          <View style={styles.chatToggleIcon}>
-            <View style={styles.chatBubble1} />
-            <View style={styles.chatBubble2} />
-          </View>
-        </TouchableOpacity>
+          {/* Chat Toggle Button */}
+          <TouchableOpacity 
+            style={styles.chatToggle}
+            onPress={toggleChat}
+          >
+            <View style={styles.chatToggleIcon}>
+              <View style={styles.chatBubble1} />
+              <View style={styles.chatBubble2} />
+            </View>
+          </TouchableOpacity>
 
-        {/* Picture-in-Picture Toggle Button */}
-        <TouchableOpacity 
-          style={styles.pipToggle}
-          onPress={handlePiPToggle}
-        >
-          <Text style={styles.pipIcon}>{isPiP ? '📺' : '📱'}</Text>
-        </TouchableOpacity>
-      </View>
+          {/* Picture-in-Picture Toggle Button */}
+          <TouchableOpacity 
+            style={styles.pipToggle}
+            onPress={handlePiPToggle}
+          >
+            <Text style={styles.pipIcon}>{isPiP ? '📺' : '📱'}</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
