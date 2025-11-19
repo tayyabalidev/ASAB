@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { router } from "expo-router";
 import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
@@ -13,9 +13,12 @@ import {
   TouchableOpacity,
   ScrollView,
   Modal,
+  ActivityIndicator,
 } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from "react-i18next";
+import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { icons, images } from "../../constants";
 import { createVideoPost, createPhotoPost } from "../../lib/appwrite";
@@ -61,6 +64,7 @@ const Create = () => {
     saturation: 1,
     hue: 0,
   });
+  const [processingImage, setProcessingImage] = useState(false);
 
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -162,114 +166,220 @@ const Create = () => {
   };
 
   const applyFilter = async (filterId) => {
-    if (!originalImage) return;
+    if (!originalImage || !originalImage.uri) {
+      Alert.alert(t("common.error"), "No image selected");
+      return;
+    }
 
+    setProcessingImage(true);
     try {
-      let actions = [];
       let newEdits = { ...edits, filter: filterId };
 
-      switch (filterId) {
-        case 'vintage':
-          actions.push({ brightness: 0.1 }, { contrast: 0.9 }, { saturation: 0.8 });
-          break;
-        case 'blackwhite':
-          actions.push({ saturation: 0 });
-          break;
-        case 'sepia':
-          actions.push({ saturate: 1.2, brightness: 0.1 });
-          break;
-        case 'cool':
-          actions.push({ hue: 0.3 }, { saturation: 0.9 });
-          break;
-        case 'warm':
-          actions.push({ hue: -0.3 }, { saturation: 1.1 });
-          break;
-        case 'contrast':
-          actions.push({ contrast: 1.3 });
-          break;
-        case 'bright':
-          actions.push({ brightness: 0.2 }, { contrast: 1.1 });
-          break;
-        default:
-          actions = [];
-      }
-
-      if (actions.length > 0) {
-        const manipResult = await ImageManipulator.manipulateAsync(
-          originalImage.uri,
-          actions,
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-        );
-
+      // expo-image-manipulator doesn't support color adjustments
+      // So we'll store the filter info and apply it visually
+      // The actual filter will be applied on the server or during display
+      
+      if (filterId === 'none') {
+        // Reset to original
+        setEditedImage(originalImage);
+        setPhotoForm({ ...photoForm, photo: originalImage, filter: filterId });
+        setEdits(newEdits);
+      } else {
+        // Store filter info with adjustments if any
         const editedFile = {
           ...originalImage,
-          uri: manipResult.uri,
+          filter: filterId, // Store filter type
+          adjustments: editedImage?.adjustments || adjustments, // Keep existing adjustments
         };
 
         setEditedImage(editedFile);
         setPhotoForm({ ...photoForm, photo: editedFile, filter: filterId });
         setEdits(newEdits);
-      } else {
-        setEditedImage(originalImage);
-        setPhotoForm({ ...photoForm, photo: originalImage, filter: filterId });
-        setEdits(newEdits);
       }
       setShowFilterModal(false);
     } catch (error) {
-      Alert.alert(t("common.error"), "Failed to apply filter");
+      console.error("Filter application error:", error);
+      Alert.alert(
+        t("common.error") || "Error", 
+        error.message || "Failed to apply filter. Please try again."
+      );
+    } finally {
+      setProcessingImage(false);
     }
   };
 
   const applyAdjustments = async () => {
-    if (!originalImage) return;
+    if (!originalImage || !originalImage.uri) {
+      Alert.alert(t("common.error"), "No image selected");
+      return;
+    }
 
+    setProcessingImage(true);
     try {
-      const actions = [];
-      
-      if (adjustments.brightness !== 0) {
-        actions.push({ brightness: adjustments.brightness / 100 });
-      }
-      if (adjustments.contrast !== 1) {
-        actions.push({ contrast: adjustments.contrast });
-      }
-      if (adjustments.saturation !== 1) {
-        actions.push({ saturation: adjustments.saturation });
-      }
-      if (adjustments.hue !== 0) {
-        actions.push({ hue: adjustments.hue / 360 });
-      }
+      // expo-image-manipulator doesn't support color adjustments
+      // Store adjustment values - they'll be applied on server or during display
+      const hasAdjustments = adjustments.brightness !== 0 || 
+                            adjustments.contrast !== 1 || 
+                            adjustments.saturation !== 1 || 
+                            adjustments.hue !== 0;
 
-      if (actions.length > 0) {
-        const manipResult = await ImageManipulator.manipulateAsync(
-          originalImage.uri,
-          actions,
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-        );
-
+      if (hasAdjustments) {
+        // Store adjustments in the image object, keeping the filter if any
         const editedFile = {
           ...originalImage,
-          uri: manipResult.uri,
+          filter: photoForm.filter || 'none', // Keep existing filter
+          adjustments: { ...adjustments }, // Store adjustment values
         };
 
         setEditedImage(editedFile);
         setPhotoForm({ ...photoForm, photo: editedFile });
         setEdits({ ...edits, adjustments });
       } else {
+        // If no adjustments, revert to filter state or original
+        if (photoForm.filter && photoForm.filter !== 'none' && editedImage) {
+          // Keep the filter applied
+          setEditedImage(editedImage);
+          setPhotoForm({ ...photoForm, photo: editedImage });
+      } else {
         setEditedImage(originalImage);
         setPhotoForm({ ...photoForm, photo: originalImage });
+        }
       }
       setShowAdjustModal(false);
     } catch (error) {
-      Alert.alert(t("common.error"), "Failed to apply adjustments");
+      console.error("Adjustments application error:", error);
+      Alert.alert(
+        t("common.error") || "Error", 
+        error.message || "Failed to apply adjustments. Please try again."
+      );
+    } finally {
+      setProcessingImage(false);
     }
   };
 
   const resetEdits = () => {
+    if (!originalImage) return;
     setEditedImage(originalImage);
     setPhotoForm({ ...photoForm, photo: originalImage, filter: "none" });
     setEdits({});
     setAdjustments({ brightness: 0, contrast: 1, saturation: 1, hue: 0 });
   };
+
+  // Get CSS filter string based on filter type and adjustments
+  const getFilterCSS = useCallback((filterId, adjustmentsData) => {
+    let filterCSS = '';
+    
+    // Apply filter effects
+    switch (filterId) {
+      case 'vintage':
+        filterCSS += 'brightness(1.1) contrast(0.9) saturate(0.8) sepia(0.2)';
+        break;
+      case 'blackwhite':
+        filterCSS += 'grayscale(100%)';
+        break;
+      case 'sepia':
+        filterCSS += 'sepia(1) brightness(1.1) contrast(0.9)';
+        break;
+      case 'cool':
+        filterCSS += 'hue-rotate(30deg) saturate(0.9)';
+        break;
+      case 'warm':
+        filterCSS += 'hue-rotate(-30deg) saturate(1.1)';
+        break;
+      case 'contrast':
+        filterCSS += 'contrast(1.3)';
+        break;
+      case 'bright':
+        filterCSS += 'brightness(1.2) contrast(1.1)';
+        break;
+      default:
+        break;
+    }
+    
+    // Apply manual adjustments
+    if (adjustmentsData) {
+      const parts = [];
+      if (adjustmentsData.brightness !== 0) {
+        parts.push(`brightness(${1 + (adjustmentsData.brightness / 100)})`);
+      }
+      if (adjustmentsData.contrast !== 1) {
+        parts.push(`contrast(${adjustmentsData.contrast})`);
+      }
+      if (adjustmentsData.saturation !== 1) {
+        parts.push(`saturate(${adjustmentsData.saturation})`);
+      }
+      if (adjustmentsData.hue !== 0) {
+        parts.push(`hue-rotate(${adjustmentsData.hue}deg)`);
+      }
+      if (parts.length > 0) {
+        filterCSS = filterCSS ? `${filterCSS} ${parts.join(' ')}` : parts.join(' ');
+      }
+    }
+    
+    return filterCSS || 'none';
+  }, []);
+
+  // Convert image URI to base64 for WebView
+  const [imageBase64, setImageBase64] = useState(null);
+  const lastConvertedUri = useRef(null);
+  const isConvertingRef = useRef(false);
+  
+  useEffect(() => {
+    const convertToBase64 = async () => {
+      const currentUri = originalImage?.uri;
+      
+      // Clear state if no image
+      if (!currentUri) {
+        if (imageBase64 !== null) {
+          setImageBase64(null);
+          lastConvertedUri.current = null;
+        }
+        return;
+      }
+
+      // Skip if we've already converted this URI or are currently converting
+      if (lastConvertedUri.current === currentUri || isConvertingRef.current) {
+        return;
+      }
+
+      isConvertingRef.current = true;
+      try {
+        // Check if it's already a base64 or http/https URL
+        if (currentUri.startsWith('data:') || currentUri.startsWith('http://') || currentUri.startsWith('https://')) {
+          setImageBase64(currentUri);
+          lastConvertedUri.current = currentUri;
+          return;
+        }
+        
+        // Handle file:// URIs
+        let fileUri = currentUri;
+        if (currentUri.startsWith('file://')) {
+          fileUri = currentUri;
+        } else if (currentUri.startsWith('content://') || currentUri.startsWith('ph://')) {
+          // For content:// or ph:// URIs, try to read directly
+          fileUri = currentUri;
+        }
+        
+        // Read file and convert to base64
+        const base64 = await FileSystem.readAsStringAsync(fileUri, {
+          encoding: 'base64',
+        });
+        const base64Data = `data:image/jpeg;base64,${base64}`;
+        setImageBase64(base64Data);
+        lastConvertedUri.current = currentUri;
+      } catch (error) {
+        console.error('Error converting image to base64:', error);
+        // Fallback: try using the URI directly (WebView might handle it)
+        setImageBase64(currentUri);
+        lastConvertedUri.current = currentUri;
+      } finally {
+        isConvertingRef.current = false;
+      }
+    };
+    
+    convertToBase64();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [originalImage?.uri]);
 
   const submit = async () => {
     if (postType === 'video') {
@@ -576,12 +686,71 @@ const Create = () => {
 
                 <TouchableOpacity onPress={() => openPicker("image")}>
                   {editedImage ? (
-                    <View style={{ position: 'relative' }}>
-                      <Image
-                        source={{ uri: editedImage.uri }}
-                        style={{ width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}
-                        resizeMode="cover"
-                      />
+                    <View style={{ position: 'relative', width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}>
+                      {imageBase64 ? (
+                        <WebView
+                          key={`${photoForm.filter}-${JSON.stringify(editedImage.adjustments || adjustments)}`}
+                          source={{
+                            html: `
+                              <!DOCTYPE html>
+                              <html>
+                                <head>
+                                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                  <style>
+                                    * {
+                                      margin: 0;
+                                      padding: 0;
+                                      box-sizing: border-box;
+                                    }
+                                    body {
+                                      width: 100%;
+                                      height: 100%;
+                                      overflow: hidden;
+                                    }
+                                    img {
+                                      width: 100%;
+                                      height: 100%;
+                                      object-fit: cover;
+                                      filter: ${getFilterCSS(photoForm.filter, editedImage.adjustments || adjustments)};
+                                    }
+                                  </style>
+                                </head>
+                                <body>
+                                  <img src="${imageBase64}" alt="Filtered Image" />
+                                </body>
+                              </html>
+                            `
+                          }}
+                          style={{ 
+                            width: "100%", 
+                            height: 400, 
+                            backgroundColor: 'transparent',
+                          }}
+                          scrollEnabled={false}
+                          showsVerticalScrollIndicator={false}
+                          showsHorizontalScrollIndicator={false}
+                        />
+                      ) : (
+                        <View style={{ width: "100%", height: 400, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.surface }}>
+                          <ActivityIndicator size="large" color={theme.accent} />
+                        </View>
+                      )}
+                      {/* Filter Indicator */}
+                      {photoForm.filter && photoForm.filter !== 'none' && (
+                        <View style={{
+                          position: 'absolute',
+                          top: 10,
+                          left: 10,
+                          backgroundColor: 'rgba(0,0,0,0.7)',
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          borderRadius: 8,
+                        }}>
+                          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                            Filter: {FILTERS.find(f => f.id === photoForm.filter)?.name || photoForm.filter}
+                          </Text>
+                        </View>
+                      )}
                       {/* Delete/Remove Button */}
                       <TouchableOpacity
                         onPress={(e) => {
@@ -723,26 +892,32 @@ const Create = () => {
                   padding: 20,
                   maxHeight: '60%',
                 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                   <Text style={{
                     color: theme.textPrimary,
                     fontSize: 20,
                     fontWeight: 'bold',
-                    marginBottom: 20,
                   }}>
                     Filters
                   </Text>
+                    {processingImage && (
+                      <ActivityIndicator size="small" color={theme.accent} />
+                    )}
+                  </View>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View style={{ flexDirection: 'row', gap: 12 }}>
                       {FILTERS.map((filter) => (
                         <TouchableOpacity
                           key={filter.id}
-                          onPress={() => applyFilter(filter.id)}
+                          onPress={() => !processingImage && applyFilter(filter.id)}
+                          disabled={processingImage}
                           style={{
                             alignItems: 'center',
                             padding: 10,
                             backgroundColor: photoForm.filter === filter.id ? theme.accentSoft : theme.cardSoft,
                             borderRadius: 10,
                             minWidth: 80,
+                            opacity: processingImage ? 0.5 : 1,
                           }}
                         >
                           <Text style={{
@@ -791,126 +966,235 @@ const Create = () => {
                   padding: 20,
                   maxHeight: '70%',
                 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                   <Text style={{
                     color: theme.textPrimary,
                     fontSize: 20,
                     fontWeight: 'bold',
-                    marginBottom: 20,
                   }}>
                     Adjustments
                   </Text>
+                    {processingImage && (
+                      <ActivityIndicator size="small" color={theme.accent} />
+                    )}
+                  </View>
                   
-                  <View style={{ gap: 20 }}>
+                  <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                    <View style={{ gap: 24 }}>
+                      {/* Brightness */}
                     <View>
-                      <Text style={{ color: theme.textPrimary, marginBottom: 8 }}>
-                        Brightness: {adjustments.brightness}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                          <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600' }}>
+                            Brightness
                       </Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+                            {adjustments.brightness}
+                          </Text>
+                        </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                        <Text style={{ color: theme.textSecondary, width: 50 }}>-100</Text>
-                        <View style={{ flex: 1 }}>
+                          <TouchableOpacity
+                            onPress={() => setAdjustments({ ...adjustments, brightness: Math.max(-100, adjustments.brightness - 5) })}
+                            style={{ 
+                              padding: 10, 
+                              backgroundColor: theme.cardSoft, 
+                              borderRadius: 8,
+                              minWidth: 44,
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>−</Text>
+                          </TouchableOpacity>
+                          <View style={{ flex: 1, height: 40, justifyContent: 'center' }}>
                           <View style={{
-                            height: 6,
+                              height: 8,
                             backgroundColor: theme.border,
-                            borderRadius: 3,
+                              borderRadius: 4,
+                              position: 'relative',
+                            }}>
+                              <View style={{
+                                position: 'absolute',
+                                left: `${((adjustments.brightness + 100) / 200) * 100}%`,
+                                top: -6,
+                                width: 20,
+                                height: 20,
+                                borderRadius: 10,
+                                backgroundColor: theme.accent,
+                                borderWidth: 2,
+                                borderColor: '#fff',
                           }} />
                         </View>
-                        <Text style={{ color: theme.textSecondary, width: 50, textAlign: 'right' }}>100</Text>
                       </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
                         <TouchableOpacity
-                          onPress={() => setAdjustments({ ...adjustments, brightness: Math.max(-100, adjustments.brightness - 10) })}
-                          style={{ padding: 8, backgroundColor: theme.cardSoft, borderRadius: 8 }}
-                        >
-                          <Text style={{ color: theme.textPrimary }}>-</Text>
+                            onPress={() => setAdjustments({ ...adjustments, brightness: Math.min(100, adjustments.brightness + 5) })}
+                            style={{ 
+                              padding: 10, 
+                              backgroundColor: theme.cardSoft, 
+                              borderRadius: 8,
+                              minWidth: 44,
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>+</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => setAdjustments({ ...adjustments, brightness: Math.min(100, adjustments.brightness + 10) })}
-                          style={{ padding: 8, backgroundColor: theme.cardSoft, borderRadius: 8 }}
-                        >
-                          <Text style={{ color: theme.textPrimary }}>+</Text>
-                        </TouchableOpacity>
+                      </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>-100</Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>0</Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>100</Text>
                       </View>
                     </View>
 
+                      {/* Contrast */}
                     <View>
-                      <Text style={{ color: theme.textPrimary, marginBottom: 8 }}>
-                        Contrast: {adjustments.contrast.toFixed(1)}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                          <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600' }}>
+                            Contrast
                       </Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+                            {adjustments.contrast.toFixed(1)}
+                          </Text>
+                        </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                        <Text style={{ color: theme.textSecondary, width: 50 }}>0</Text>
-                        <View style={{ flex: 1 }}>
+                          <TouchableOpacity
+                            onPress={() => setAdjustments({ ...adjustments, contrast: Math.max(0, adjustments.contrast - 0.1) })}
+                            style={{ 
+                              padding: 10, 
+                              backgroundColor: theme.cardSoft, 
+                              borderRadius: 8,
+                              minWidth: 44,
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>−</Text>
+                          </TouchableOpacity>
+                          <View style={{ flex: 1, height: 40, justifyContent: 'center' }}>
                           <View style={{
-                            height: 6,
+                              height: 8,
                             backgroundColor: theme.border,
-                            borderRadius: 3,
+                              borderRadius: 4,
+                              position: 'relative',
+                            }}>
+                              <View style={{
+                                position: 'absolute',
+                                left: `${(adjustments.contrast / 2) * 100}%`,
+                                top: -6,
+                                width: 20,
+                                height: 20,
+                                borderRadius: 10,
+                                backgroundColor: theme.accent,
+                                borderWidth: 2,
+                                borderColor: '#fff',
                           }} />
                         </View>
-                        <Text style={{ color: theme.textSecondary, width: 50, textAlign: 'right' }}>2</Text>
                       </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-                        <TouchableOpacity
-                          onPress={() => setAdjustments({ ...adjustments, contrast: Math.max(0, adjustments.contrast - 0.1) })}
-                          style={{ padding: 8, backgroundColor: theme.cardSoft, borderRadius: 8 }}
-                        >
-                          <Text style={{ color: theme.textPrimary }}>-</Text>
-                        </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => setAdjustments({ ...adjustments, contrast: Math.min(2, adjustments.contrast + 0.1) })}
-                          style={{ padding: 8, backgroundColor: theme.cardSoft, borderRadius: 8 }}
-                        >
-                          <Text style={{ color: theme.textPrimary }}>+</Text>
+                            style={{ 
+                              padding: 10, 
+                              backgroundColor: theme.cardSoft, 
+                              borderRadius: 8,
+                              minWidth: 44,
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>+</Text>
                         </TouchableOpacity>
+                      </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>0</Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>1</Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>2</Text>
                       </View>
                     </View>
 
+                      {/* Saturation */}
                     <View>
-                      <Text style={{ color: theme.textPrimary, marginBottom: 8 }}>
-                        Saturation: {adjustments.saturation.toFixed(1)}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                          <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600' }}>
+                            Saturation
                       </Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+                            {adjustments.saturation.toFixed(1)}
+                          </Text>
+                        </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                        <Text style={{ color: theme.textSecondary, width: 50 }}>0</Text>
-                        <View style={{ flex: 1 }}>
+                          <TouchableOpacity
+                            onPress={() => setAdjustments({ ...adjustments, saturation: Math.max(0, adjustments.saturation - 0.1) })}
+                            style={{ 
+                              padding: 10, 
+                              backgroundColor: theme.cardSoft, 
+                              borderRadius: 8,
+                              minWidth: 44,
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>−</Text>
+                          </TouchableOpacity>
+                          <View style={{ flex: 1, height: 40, justifyContent: 'center' }}>
                           <View style={{
-                            height: 6,
+                              height: 8,
                             backgroundColor: theme.border,
-                            borderRadius: 3,
+                              borderRadius: 4,
+                              position: 'relative',
+                            }}>
+                              <View style={{
+                                position: 'absolute',
+                                left: `${(adjustments.saturation / 2) * 100}%`,
+                                top: -6,
+                                width: 20,
+                                height: 20,
+                                borderRadius: 10,
+                                backgroundColor: theme.accent,
+                                borderWidth: 2,
+                                borderColor: '#fff',
                           }} />
                         </View>
-                        <Text style={{ color: theme.textSecondary, width: 50, textAlign: 'right' }}>2</Text>
                       </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-                        <TouchableOpacity
-                          onPress={() => setAdjustments({ ...adjustments, saturation: Math.max(0, adjustments.saturation - 0.1) })}
-                          style={{ padding: 8, backgroundColor: theme.cardSoft, borderRadius: 8 }}
-                        >
-                          <Text style={{ color: theme.textPrimary }}>-</Text>
-                        </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => setAdjustments({ ...adjustments, saturation: Math.min(2, adjustments.saturation + 0.1) })}
-                          style={{ padding: 8, backgroundColor: theme.cardSoft, borderRadius: 8 }}
-                        >
-                          <Text style={{ color: theme.textPrimary }}>+</Text>
+                            style={{ 
+                              padding: 10, 
+                              backgroundColor: theme.cardSoft, 
+                              borderRadius: 8,
+                              minWidth: 44,
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>+</Text>
                         </TouchableOpacity>
                       </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>0</Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>1</Text>
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>2</Text>
                     </View>
                   </View>
+                    </View>
+                  </ScrollView>
 
                   <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
                     <TouchableOpacity
                       onPress={applyAdjustments}
+                      disabled={processingImage}
                       style={{
                         flex: 1,
-                        backgroundColor: theme.accent,
+                        backgroundColor: processingImage ? theme.border : theme.accent,
                         padding: 15,
                         borderRadius: 10,
                         alignItems: 'center',
+                        opacity: processingImage ? 0.6 : 1,
                       }}
                     >
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>Apply</Text>
+                      {processingImage ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Apply</Text>
+                      )}
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => {
                         setAdjustments({ brightness: 0, contrast: 1, saturation: 1, hue: 0 });
+                        resetEdits();
                         setShowAdjustModal(false);
                       }}
                       style={{
@@ -919,9 +1203,11 @@ const Create = () => {
                         padding: 15,
                         borderRadius: 10,
                         alignItems: 'center',
+                        borderWidth: 1,
+                        borderColor: theme.border,
                       }}
                     >
-                      <Text style={{ color: theme.textPrimary, fontWeight: 'bold' }}>Reset</Text>
+                      <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16 }}>Reset</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => setShowAdjustModal(false)}
@@ -931,9 +1217,11 @@ const Create = () => {
                         padding: 15,
                         borderRadius: 10,
                         alignItems: 'center',
+                        borderWidth: 1,
+                        borderColor: theme.border,
                       }}
                     >
-                      <Text style={{ color: theme.textPrimary, fontWeight: 'bold' }}>Cancel</Text>
+                      <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16 }}>Cancel</Text>
                     </TouchableOpacity>
                   </View>
                 </View>

@@ -378,6 +378,7 @@ const Profile = () => {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
         Alert.alert(t('profile.alerts.permissionTitle'), t('profile.alerts.permissionMessage'));
+        setUploadingAvatar(false);
         return;
       }
 
@@ -400,17 +401,13 @@ const Profile = () => {
           size: fileSize,
         };
         
-      
-        
         // Upload image to Appwrite storage
         const avatarUrl = await uploadFile(file, "image");
-        
         
         setNewAvatar(avatarUrl);
         Alert.alert(t('common.success'), t('profile.alerts.uploadAvatarSuccess'));
       }
     } catch (error) {
-     
       Alert.alert(t('common.error'), t('profile.alerts.uploadAvatarError'));
     } finally {
       setUploadingAvatar(false);
@@ -2297,22 +2294,98 @@ const Profile = () => {
 
               {/* Avatar Upload */}
               <Text style={{ color: theme.textPrimary, fontSize: 16, marginBottom: 8 }}>{t('profile.modals.avatarLabel')}</Text>
+              
+              {/* Avatar Preview */}
+              <View style={{ alignItems: "center", marginBottom: 16 }}>
+                <View
+                  style={{
+                    width: 100,
+                    height: 100,
+                    borderRadius: 50,
+                    borderWidth: 2,
+                    borderColor: theme.accent,
+                    backgroundColor: theme.surface,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    marginBottom: 12,
+                  }}
+                >
+                  {newAvatar ? (
+                    <Image
+                      source={{ uri: newAvatar }}
+                      style={{ width: '100%', height: '100%', borderRadius: 50 }}
+                      resizeMode="cover"
+                    />
+                  ) : user?.avatar ? (
+                    <Image
+                      source={{ uri: user.avatar }}
+                      style={{ width: '100%', height: '100%', borderRadius: 50 }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text style={{ color: theme.textPrimary, fontSize: 32, fontWeight: '700' }}>
+                      {getUserInitials(newUsername || user?.username)}
+                    </Text>
+                  )}
+                </View>
+                {uploadingAvatar && (
+                  <ActivityIndicator color={theme.accent} size="small" style={{ marginBottom: 8 }} />
+                )}
+              </View>
+              
               <TouchableOpacity
                 onPress={pickAvatarImage}
+                disabled={uploadingAvatar}
                 style={{
-                  backgroundColor: themedColor('#333', theme.surfaceMuted),
+                  backgroundColor: uploadingAvatar ? theme.border : themedColor('#333', theme.surfaceMuted),
                   padding: 12,
                   borderRadius: 8,
                   marginBottom: 20,
                   alignItems: "center",
                   borderWidth: 1,
                   borderColor: theme.border,
+                  opacity: uploadingAvatar ? 0.6 : 1,
                 }}
               >
                 <Text style={{ color: theme.textPrimary }}>
-                  {uploadingAvatar ? t('profile.modals.uploadingAvatar') : t('profile.modals.uploadAvatar')}
+                  {uploadingAvatar ? t('profile.modals.uploadingAvatar') : newAvatar ? t('Change Avatar') : t('profile.modals.uploadAvatar')}
                 </Text>
               </TouchableOpacity>
+              
+              {/* Remove Avatar Option */}
+              {newAvatar && (
+                <TouchableOpacity
+                  onPress={() => {
+                    Alert.alert(
+                      t('profile.modals.removeAvatarTitle', 'Remove Avatar'),
+                      t('profile.modals.removeAvatarMessage', 'Are you sure you want to remove your avatar?'),
+                      [
+                        {
+                          text: t('common.cancel', 'Cancel'),
+                          style: 'cancel'
+                        },
+                        {
+                          text: t('common.remove', 'Remove'),
+                          style: 'destructive',
+                          onPress: () => setNewAvatar("")
+                        }
+                      ]
+                    );
+                  }}
+                  style={{
+                    backgroundColor: theme.danger || '#ff4757',
+                    padding: 12,
+                    borderRadius: 8,
+                    marginBottom: 20,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "600" }}>
+                    {t('profile.modals.removeAvatar', 'Remove Avatar')}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               {/* Theme Toggle */}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingVertical: 8 }}>
