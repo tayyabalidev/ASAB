@@ -861,6 +861,8 @@ const Home = () => {
   const [trendingModalVideo, setTrendingModalVideo] = useState(null);
   const [isTrendingVideoPlaying, setIsTrendingVideoPlaying] = useState(true);
   const trendingVideoRef = useRef(null);
+  const flatListRef = useRef(null);
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
   
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -1484,6 +1486,7 @@ const Home = () => {
 
         {/* Combined Scrollable Content with Trending and Videos */}
         <FlatList
+            ref={flatListRef}
             data={displayPosts}
             keyExtractor={(item) => item.$id}
             renderItem={renderVideoCard}
@@ -1494,6 +1497,12 @@ const Home = () => {
             decelerationRate="fast"
             onViewableItemsChanged={handleViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
+            onScroll={(event) => {
+              const offsetY = event.nativeEvent.contentOffset.y;
+              // Show button when scrolled down more than 2 screen heights
+              setShowScrollToTop(offsetY > SCREEN_HEIGHT * 2);
+            }}
+            scrollEventThrottle={400}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
             }
@@ -1744,6 +1753,51 @@ const Home = () => {
             </View>
         ), [selectedTab, combinedLatestPosts, trendingCreators, searchQuery, isSearching, searchResults, user, theme, isRTL, isDarkMode, themedColor, t, currentTrendingIndex, renderTrendingItem])}
         />
+        
+        {/* Scroll to Top Button */}
+        {showScrollToTop && (
+          <TouchableOpacity
+            onPress={() => {
+              flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+              setShowScrollToTop(false); // Hide immediately when clicked
+            }}
+            style={{
+              position: 'absolute',
+              bottom: 30,
+              right: 20,
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: themedColor('rgba(138, 43, 226, 0.95)', theme.accent),
+              justifyContent: 'center',
+              alignItems: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.4,
+              shadowRadius: 8,
+              elevation: 10,
+              zIndex: 1000,
+              borderWidth: 2,
+              borderColor: themedColor('rgba(255, 255, 255, 0.3)', 'rgba(255, 255, 255, 0.5)'),
+            }}
+            activeOpacity={0.7}
+          >
+            <LinearGradient
+              colors={isDarkMode ? ['#8A2BE2', '#4B0082'] : [theme.accent || '#8A2BE2', '#6A1B9A']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                width: '100%',
+                height: '100%',
+                borderRadius: 28,
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 28, fontWeight: 'bold' }}>↑</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
         </View>
       </SafeAreaView>
 
