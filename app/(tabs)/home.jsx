@@ -909,22 +909,75 @@ const Home = () => {
   
   const [trendingCreators, setTrendingCreators] = useState({});
   const fetchedTrendingCreatorIds = useRef(new Set());
+  const fetchingRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
+    
     const fetchCreators = async () => {
-      if (!combinedLatestPosts || combinedLatestPosts.length === 0) return;
-      const missingIds = combinedLatestPosts
-        .map((post) => {
-          if (!post?.creator) return null;
-          if (typeof post.creator === "object" && post.creator !== null) return null;
-          if (fetchedTrendingCreatorIds.current.has(post.creator)) return null;
-          return post.creator;
-        })
-        .filter(Boolean);
+      // Prevent multiple simultaneous fetches
+      if (fetchingRef.current) return;
+      
+      if (!combinedLatestPosts || combinedLatestPosts.length === 0) {
+        setTrendingCreators({});
+        fetchedTrendingCreatorIds.current.clear();
+        return;
+      }
+      
+      fetchingRef.current = true;
+      
+      // Process all posts to extract creator IDs and objects
+      const missingIds = [];
+      const creatorObjects = {};
+      
+      combinedLatestPosts.forEach((post) => {
+        if (!post?.creator) return;
+        
+        // If creator is already an object, store it directly
+        if (typeof post.creator === "object" && post.creator !== null && post.creator.$id) {
+          const creatorId = post.creator.$id;
+          if (creatorId && !creatorObjects[creatorId]) {
+            creatorObjects[creatorId] = post.creator;
+          }
+        } 
+        // If creator is a string ID, check if we need to fetch it
+        else if (typeof post.creator === "string" && post.creator.trim() !== '') {
+          const creatorId = post.creator.trim();
+          // Only fetch if not already in state
+          // Check both the ref (attempted) and actual state (successful)
+          const alreadyFetched = fetchedTrendingCreatorIds.current.has(creatorId);
+          const inState = trendingCreators[creatorId];
+          
+          // Only add if not attempted yet OR if attempted but not in state (failed fetch)
+          if (!alreadyFetched || (alreadyFetched && !inState)) {
+            if (!missingIds.includes(creatorId)) {
+              missingIds.push(creatorId);
+            }
+          }
+        }
+      });
 
-      if (missingIds.length === 0) return;
+      // First, add any creator objects we found directly
+      if (Object.keys(creatorObjects).length > 0) {
+        setTrendingCreators((prev) => {
+          const updated = { ...prev };
+          Object.keys(creatorObjects).forEach((creatorId) => {
+            if (creatorId && creatorObjects[creatorId]) {
+              updated[creatorId] = creatorObjects[creatorId];
+              fetchedTrendingCreatorIds.current.add(creatorId);
+            }
+          });
+          return updated;
+        });
+      }
 
+      // Then fetch missing creator IDs
+      if (missingIds.length === 0) {
+        fetchingRef.current = false;
+        return;
+      }
+
+      // Mark IDs as being fetched to prevent duplicate requests
       missingIds.forEach((id) => fetchedTrendingCreatorIds.current.add(id));
 
       try {
@@ -936,20 +989,28 @@ const Home = () => {
                 appwriteConfig.userCollectionId,
                 creatorId
               );
-              return { creatorId, data: userDoc };
+              if (userDoc && userDoc.$id) {
+                return { creatorId, data: userDoc };
+              }
+              return { creatorId, data: null };
             } catch (error) {
-              console.log("Failed to fetch creator for trending post:", creatorId, error);
+              console.log("Failed to fetch creator for trending post:", creatorId, error.message);
+              // Remove from fetched set if fetch failed so we can retry later
+              fetchedTrendingCreatorIds.current.delete(creatorId);
               return { creatorId, data: null };
             }
           })
         );
 
-        if (!isMounted) return;
+        if (!isMounted) {
+          fetchingRef.current = false;
+          return;
+        }
 
         setTrendingCreators((prev) => {
           const updated = { ...prev };
           results.forEach(({ creatorId, data }) => {
-            if (creatorId) {
+            if (creatorId && data && data.$id) {
               updated[creatorId] = data;
             }
           });
@@ -957,6 +1018,10 @@ const Home = () => {
         });
       } catch (error) {
         console.log("Failed to fetch trending creators:", error);
+        // Remove failed IDs from fetched set
+        missingIds.forEach((id) => fetchedTrendingCreatorIds.current.delete(id));
+      } finally {
+        fetchingRef.current = false;
       }
     };
 
@@ -1088,8 +1153,8 @@ const Home = () => {
     [currentVideoIndex, isHomeFocused, theme, isDarkMode]
   );
 
-  // Render trending video item
-  const renderTrendingItem = ({ item, index }) => {
+  // Render trending video item - memoized to update when trendingCreators changes
+  const renderTrendingItem = useCallback(({ item, index }) => {
     // Determine if this is the center video based on currentTrendingIndex
     const isCenterVideo = index === currentTrendingIndex;
 
@@ -1111,25 +1176,70 @@ const Home = () => {
     const videoWidth = getVideoWidth();
     const videoHeight = getVideoHeight();
     const marginHorizontal = getMarginHorizontal();
-    const creatorObject =
-      (typeof item.creator === "object" && item.creator !== null ? item.creator : null) ||
-      (item.creator && trendingCreators[item.creator]) ||
-      {};
-    const creatorId =
-      (typeof item.creator === "object" && item.creator !== null ? item.creator.$id : null) ||
-      (typeof item.creator === "string" ? item.creator : null) ||
-      creatorObject.$id;
+    
+    // Get creator data - handle both object and string ID cases
+    let creatorObject = null;
+    let creatorId = null;
+    
+    if (typeof item.creator === "object" && item.creator !== null && item.creator.$id) {
+      // Creator is already an object
+      creatorObject = item.creator;
+      creatorId = item.creator.$id;
+    } else if (typeof item.creator === "string" && item.creator.trim() !== '') {
+      // Creator is a string ID - look it up in trendingCreators
+      creatorId = item.creator.trim();
+      creatorObject = trendingCreators[creatorId] || null;
+      
+      // Removed debug log to prevent infinite loop
+      
+      // If not found in trendingCreators, try to get it from the post itself
+      if (!creatorObject && item.creatorData) {
+        creatorObject = item.creatorData;
+      }
+    }
+    
+    // Fallback to empty object if no creator found
     const creator = creatorObject || {};
+    
+    // Removed debug logs to prevent infinite loop
+    
+    // Get display name - try multiple fields (prioritize username as it's most common)
+    // If no username found but we have a creatorId, show a loading/placeholder state
     const displayName =
+      creator.username ||
       creator.fullname ||
       creator.displayName ||
       creator.name ||
-      creator.username ||
-      "";
-    const rawHandle = creator.handle || creator.username || "";
+      (creatorId ? "Loading..." : "");
+    
+    // Get handle/username (use username field directly)
+    // If we have creatorId but no username yet, show placeholder
+    const rawHandle = creator.username || creator.handle || (creatorId ? "user" : "");
     const handleLabel = rawHandle ? (rawHandle.startsWith("@") ? rawHandle : `@${rawHandle}`) : "";
-    const hasAvatar = Boolean(creator.avatar && typeof creator.avatar === 'string');
-    const avatarSource = hasAvatar ? { uri: String(creator.avatar) } : null;
+    
+    // Check if avatar exists and is valid
+    // Avatar might be a file ID that needs to be converted to URL, or already a URL
+    let avatarUrl = null;
+    if (creator.avatar) {
+      if (typeof creator.avatar === 'string' && creator.avatar.trim() !== '') {
+        const avatarField = creator.avatar.trim();
+        // If it's already a full URL (starts with http), use it directly
+        if (avatarField.startsWith('http://') || avatarField.startsWith('https://')) {
+          avatarUrl = avatarField;
+        } 
+        // If it's a short string (likely a file ID), construct the preview URL
+        else if (avatarField.length < 50 && !avatarField.includes('/')) {
+          avatarUrl = `${appwriteConfig.endpoint}/storage/buckets/${appwriteConfig.storageId}/files/${avatarField}/preview?width=2000&height=2000&gravity=top&quality=100&project=${appwriteConfig.projectId}`;
+        }
+        // Otherwise, try to use it as-is (might be a truncated URL or other format)
+        else {
+          avatarUrl = avatarField;
+        }
+      }
+    }
+    
+    const hasAvatar = Boolean(avatarUrl && avatarUrl.trim() !== '');
+    const avatarSource = hasAvatar ? { uri: avatarUrl } : null;
 
     const handleCreatorPress = () => {
       if (creatorId) {
@@ -1230,39 +1340,40 @@ const Home = () => {
               </View>
             )}
 
-            {/* Avatar Badge */}
-            {hasAvatar && (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={handleCreatorPress}
-                style={{
-                  position: 'absolute',
-                  top: 14,
-                  left: 14,
-                  width: 50,
-                  height: 50,
-                  borderRadius: 25,
-                  borderWidth: 3,
-                  borderColor: themedColor('#fff', theme.border),
-                  overflow: 'hidden',
-                  shadowColor: themedColor('#000', '#CBD5F5'),
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.3,
-                  shadowRadius: 6,
-                  elevation: 6,
-                  backgroundColor: theme.surface,
+            {/* Avatar Badge - Always show, with fallback */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleCreatorPress}
+              style={{
+                position: 'absolute',
+                top: 14,
+                left: 14,
+                width: 50,
+                height: 50,
+                borderRadius: 25,
+                borderWidth: 3,
+                borderColor: themedColor('#fff', theme.border),
+                overflow: 'hidden',
+                shadowColor: themedColor('#000', '#CBD5F5'),
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 6,
+                elevation: 6,
+                backgroundColor: theme.surface,
+              }}
+            >
+              <Image
+                source={hasAvatar && avatarSource ? avatarSource : images.profile}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+                onError={() => {
+                  // Fallback already handled by default source
                 }}
-              >
-                <Image
-                  source={avatarSource}
-                  style={{ width: '100%', height: '100%' }}
-                  resizeMode="cover"
-                />
-              </TouchableOpacity>
-            )}
+              />
+            </TouchableOpacity>
 
-            {/* Name Banner */}
-            {(displayName || handleLabel) && (
+            {/* Name Banner - Always show, with fallback */}
+            {(displayName || handleLabel || creatorId) && (
               <LinearGradient
                 colors={[
                   themedColor('rgba(0,0,0,0)', 'rgba(255,255,255,0)'),
@@ -1280,7 +1391,8 @@ const Home = () => {
                   paddingVertical: 18,
                 }}
               >
-                {!!displayName && (
+                {/* Show username/display name - prioritize username */}
+                {(displayName && displayName !== "Loading...") && (
                   <Text
                     style={{
                       color: theme.textPrimary,
@@ -1297,18 +1409,33 @@ const Home = () => {
                     {displayName}
                   </Text>
                 )}
-                {!!handleLabel && (
+                {/* Show handle/username */}
+                {handleLabel && (
                   <Text
                     style={{
                       color: themedColor('rgba(255,255,255,0.8)', theme.textSecondary),
                       fontSize: 13,
                       textAlign: 'center',
-                      marginTop: displayName ? 4 : 0,
+                      marginTop: (displayName && displayName !== "Loading...") ? 4 : 0,
                     }}
                     numberOfLines={1}
                     ellipsizeMode="tail"
                   >
                     {handleLabel}
+                  </Text>
+                )}
+                {/* Fallback if no data loaded yet but we have creatorId */}
+                {(!displayName || displayName === "Loading...") && !handleLabel && creatorId && (
+                  <Text
+                    style={{
+                      color: themedColor('rgba(255,255,255,0.8)', theme.textSecondary),
+                      fontSize: 13,
+                      textAlign: 'center',
+                    }}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    Loading user...
                   </Text>
                 )}
               </LinearGradient>
@@ -1317,7 +1444,7 @@ const Home = () => {
         </TouchableOpacity>
       </View>
     );
-  };
+  }, [currentTrendingIndex, trendingCreators, theme, isDarkMode, isRTL, themedColor, t, setTrendingModalVisible]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.background }}>
@@ -1342,6 +1469,7 @@ const Home = () => {
             onError={(error) => {
               console.log('Background image failed to load:', error);
             }}
+            resizeMethod="resize"
           />
           {/* Dark overlay for better text readability */}
           <View style={{
@@ -1371,22 +1499,12 @@ const Home = () => {
             }
             style={{ flex: 1 }}
             contentContainerStyle={{ flexGrow: 1 }}
-          getItemLayout={(data, index) => {
-            // Calculate exact header height based on actual component heights
-            // Welcome section: ~120px, Search: ~80px, Trending: 470px + padding, Tabs: 65px
-            const welcomeHeight = 120; // Welcome back + username
-            const searchHeight = 80;   // Search bar
-            const trendingHeight = 470 + 40; // Trending section + padding
-            const tabsHeight = 65; // Tabs section (15px top + 35px content + 15px bottom)
-            const totalHeaderHeight = welcomeHeight + searchHeight + trendingHeight + tabsHeight;
-            
-            return {
-              length: SCREEN_HEIGHT,
-              offset: totalHeaderHeight + (SCREEN_HEIGHT * index),
-              index,
-            };
-          }}
-          ListHeaderComponent={() => (
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={3}
+            updateCellsBatchingPeriod={50}
+            initialNumToRender={2}
+            windowSize={5}
+            ListHeaderComponent={useMemo(() => (
             // Header Section with User Name and Search
             <View style={{ 
               paddingVertical: 20,
@@ -1532,6 +1650,11 @@ const Home = () => {
                     horizontal 
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={{ paddingHorizontal: 20 }}
+                    removeClippedSubviews={true}
+                    decelerationRate="fast"
+                    snapToInterval={146}
+                    snapToAlignment="center"
+                    pagingEnabled={false}
                   >
                     {combinedLatestPosts.slice(0, 5).map((item, index) => renderTrendingItem({ item, index }))}
                   </ScrollView>
@@ -1595,7 +1718,7 @@ const Home = () => {
                 </View>
               </View>
             </View>
-        )}
+        ), [selectedTab, combinedLatestPosts, trendingCreators, searchQuery, isSearching, searchResults, user, theme, isRTL, isDarkMode, themedColor, t, currentTrendingIndex, renderTrendingItem])}
         />
         </View>
       </SafeAreaView>

@@ -60,11 +60,11 @@ const Friends = () => {
     user.username?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleUserPress = (userId) => {
+  const handleUserPress = useCallback((userId) => {
     router.push(`/profile/${userId}`);
-  };
+  }, []);
 
-  const renderUser = ({ item }) => (
+  const renderUser = useCallback(({ item }) => (
     <TouchableOpacity
       onPress={() => handleUserPress(item.$id)}
       activeOpacity={0.7}
@@ -99,9 +99,12 @@ const Friends = () => {
         }}
       >
         <Image
-          source={{ uri: item.avatar }}
+          source={item.avatar && typeof item.avatar === 'string' && item.avatar.trim() !== '' ? { uri: item.avatar } : images.profile}
           style={{ width: '100%', height: '100%' }}
           resizeMode="cover"
+          onError={() => {
+            // Fallback handled by default source
+          }}
         />
       </View>
 
@@ -134,7 +137,7 @@ const Friends = () => {
         resizeMode="contain"
       />
     </TouchableOpacity>
-  );
+  ), [theme, isRTL, isDarkMode, themedColor, t, handleUserPress, images, icons]);
 
   return (
     <SafeAreaView style={{ backgroundColor: theme.background, flex: 1 }}>
@@ -233,6 +236,11 @@ const Friends = () => {
                   keyExtractor={(item) => item.$id}
                   renderItem={renderUser}
                   showsVerticalScrollIndicator={false}
+                  removeClippedSubviews={true}
+                  maxToRenderPerBatch={10}
+                  updateCellsBatchingPeriod={50}
+                  initialNumToRender={10}
+                  windowSize={10}
                   ListEmptyComponent={() => (
                     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 48 }}>
                       <Text style={{ color: theme.textSecondary, fontSize: 16, textAlign: 'center', lineHeight: 24 }}>
