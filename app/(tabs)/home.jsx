@@ -1521,21 +1521,45 @@ const Home = () => {
                     resizeMode="contain"
                   />
                   
-                  {/* Right ASAB VIDEOS Badge with Beige Back Background */}
-                  <View style={{
-                    width: 120,
-                    height: 120,
-                    borderRadius: 50,
-                    overflow: 'hidden',
-                  }}>
-                    <Image
-                      source={require('../../assets/images/Beige Back.png')}
+                  {/* Right side with Messages button and ASAB Badge */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    {/* Messages List Button */}
+                    <TouchableOpacity 
+                      onPress={() => router.push('/chat')}
                       style={{
-                        width: '100%',
-                        height: '100%',
+                        width: 44,
+                        height: 44,
+                        borderRadius: 22,
+                        backgroundColor: themedColor('rgba(255,255,255,0.1)', theme.accentSoft),
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        borderWidth: 1,
+                        borderColor: themedColor('rgba(255,255,255,0.2)', theme.border),
                       }}
-                      resizeMode="cover"
-                    />
+                    >
+                      <Image
+                        source={icons.messages}
+                        style={{ width: 24, height: 24, tintColor: theme.textPrimary }}
+                        resizeMode="contain"
+                      />
+                    </TouchableOpacity>
+                    
+                    {/* ASAB VIDEOS Badge with Beige Back Background */}
+                    <View style={{
+                      width: 120,
+                      height: 120,
+                      borderRadius: 50,
+                      overflow: 'hidden',
+                    }}>
+                      <Image
+                        source={require('../../assets/images/Beige Back.png')}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                        }}
+                        resizeMode="cover"
+                      />
+                    </View>
                   </View>
                 </View>
                 

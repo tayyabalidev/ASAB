@@ -162,12 +162,12 @@ const Profile = () => {
   
 
   // Refresh bookmarks when screen comes into focus (with debounce)
-  const [lastRefreshTime, setLastRefreshTime] = useState(0);
+  const lastRefreshTimeRef = useRef(0);
   
   useFocusEffect(
     React.useCallback(() => {
       const now = Date.now();
-      const timeSinceLastRefresh = now - lastRefreshTime;
+      const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
       
       // Refresh posts and photos when profile screen comes into focus
       if (refetchPosts) {
@@ -184,13 +184,13 @@ const Profile = () => {
           setIsRefreshingBookmarks(true);
           refetchBookmarks().finally(() => {
             setIsRefreshingBookmarks(false);
-            setLastRefreshTime(now);
+            lastRefreshTimeRef.current = now;
           });
         }
       } else {
        
       }
-    }, [user?.$id, refetchBookmarks, refetchPosts, refetchPhotos, lastRefreshTime])
+    }, [user?.$id, refetchBookmarks, refetchPosts, refetchPhotos, isRefreshingBookmarks])
   );
 
   // Stop videos when profile loses focus
@@ -247,6 +247,7 @@ const Profile = () => {
   // Bookmark videos state
   const [bookmarkVideos, setBookmarkVideos] = useState({});
   const [bookmarkVideosLoading, setBookmarkVideosLoading] = useState(false);
+  const lastProcessedBookmarkIdsRef = useRef('');
  
   // Following/Followers modal state
   const [followModalVisible, setFollowModalVisible] = useState(false);
@@ -752,19 +753,23 @@ const Profile = () => {
     }
   }, [modalVideo, user?.$id]);
 
+  // Memoize bookmark IDs to prevent unnecessary re-renders
+  const bookmarkIdsString = useMemo(() => {
+    if (!bookmarks || bookmarks.length === 0) return '';
+    return bookmarks.map(b => b.$id).sort().join(',');
+  }, [bookmarks]);
+
   // Fetch bookmark videos when bookmarks change
   useEffect(() => {
     if (bookmarks && bookmarks.length > 0) {
       const fetchBookmarkVideos = async () => {
-        // Check if we already have the data to prevent unnecessary fetches
-        const bookmarkIds = bookmarks.map(b => b.$id).sort().join(',');
-        const existingIds = Object.keys(bookmarkVideos).sort().join(',');
-        
-        if (bookmarkIds === existingIds && Object.keys(bookmarkVideos).length > 0) {
-          
+        // Use ref to prevent re-fetching if we've already processed these bookmarks
+        if (bookmarkIdsString === lastProcessedBookmarkIdsRef.current) {
           return;
         }
         
+        // Mark these bookmarks as being processed
+        lastProcessedBookmarkIdsRef.current = bookmarkIdsString;
         
         setBookmarkVideosLoading(true);
         const newBookmarkVideos = {};
@@ -796,8 +801,12 @@ const Profile = () => {
       };
       
       fetchBookmarkVideos();
+    } else {
+      // Clear bookmark videos if bookmarks is empty
+      setBookmarkVideos({});
+      lastProcessedBookmarkIdsRef.current = '';
     }
-  }, [bookmarks]);
+  }, [bookmarkIdsString, bookmarks, t]);
 
   // Fetch unread notification count
   useEffect(() => {
@@ -906,6 +915,13 @@ const Profile = () => {
               />
             </TouchableOpacity>
             <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+              <TouchableOpacity onPress={() => router.push('/chat')} style={{ position: 'relative' }}>
+                <Image
+                  source={icons.messages}
+                  resizeMode="contain"
+                  style={{ width: 24, height: 24, tintColor: theme.textPrimary }}
+                />
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => router.push('/inbox')} style={{ position: 'relative' }}>
                 <Feather name="bell" size={24} color={theme.textPrimary} />
                 {unreadNotificationCount > 0 && (
@@ -1456,23 +1472,40 @@ const Profile = () => {
                            }
                          }}
                        >
-                        <View style={{ width: '100%', height: '100%' }}>
-                          {!bookmarkVideosLoading && videoData.video ? (
-                            <Video
-                              source={{ uri: videoData.video }}
-                              style={{ width: '100%', height: '100%' }}
-                              resizeMode="cover"
-                              shouldPlay={false}
-                              isMuted={true}
-                              useNativeControls={false}
-                              posterSource={videoData.thumbnail && !videoData.thumbnail.includes('placeholder') ? { uri: videoData.thumbnail } : undefined}
-                            />
-                          ) : (
-                            <Image
-                              source={{ uri: videoData.thumbnail || 'https://via.placeholder.com/300x300' }}
-                              style={{ width: '100%', height: '100%' }}
-                              resizeMode="cover"
-                            />
+                        <View style={{ width: '100%', height: '100%', position: 'relative' }}>
+                          {/* Always show thumbnail image instead of Video component to prevent glitching */}
+                          <Image
+                            source={{ uri: videoData.thumbnail || 'https://via.placeholder.com/300x300' }}
+                            style={{ width: '100%', height: '100%' }}
+                            resizeMode="cover"
+                          />
+                          {/* Play icon overlay to indicate it's a video */}
+                          {videoData.video && (
+                            <View
+                              style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                              }}
+                            >
+                              <View
+                                style={{
+                                  width: 48,
+                                  height: 48,
+                                  borderRadius: 24,
+                                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <Text style={{ fontSize: 20, marginLeft: 4 }}>▶</Text>
+                              </View>
+                            </View>
                           )}
                           {/* Bookmark Icon */}
                           <View
@@ -1488,8 +1521,6 @@ const Profile = () => {
                           >
                             <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 12 }}>🔖</Text>
                           </View>
-                                                    {/* Video Title Overlay */}
-                        
                         </View>
                       </TouchableOpacity>
                     );

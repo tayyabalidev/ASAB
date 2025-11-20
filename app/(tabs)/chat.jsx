@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View, Modal as RNModal, Pressable } from "react-native";
 import { Query } from 'react-native-appwrite';
@@ -22,6 +22,7 @@ import { useGlobalContext } from "../../context/GlobalProvider";
 
 const Chat = () => {
   const navigation = useNavigation();
+  const { userId } = useLocalSearchParams();
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
   const [chats, setChats] = useState([]);
@@ -208,6 +209,23 @@ const Chat = () => {
     };
     fetchData();
   }, []);
+
+  // Auto-select user when userId param is provided (e.g., from profile page)
+  useEffect(() => {
+    if (userId && users.length > 0 && currentUser && userId !== currentUser.$id) {
+      const targetUser = users.find(u => u.$id === userId);
+      if (targetUser && (!selectedUser || selectedUser.$id !== userId)) {
+        // Create a user object in the format expected by selectedUser
+        const userForChat = {
+          $id: targetUser.$id,
+          username: targetUser.username,
+          avatar: targetUser.avatar,
+          type: 'private' // Private chat
+        };
+        setSelectedUser(userForChat);
+      }
+    }
+  }, [userId, users, currentUser]);
 
   // 1. Robust polling for allMessages every 2 seconds
   useEffect(() => {
