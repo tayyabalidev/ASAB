@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Platform } from "react-native";
-import { FlatList, Image, RefreshControl, Text, View, TouchableOpacity, Dimensions, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Share, Alert, ScrollView } from "react-native";
+import { FlatList, Image, RefreshControl, Text, View, TouchableOpacity, Dimensions, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Share, Alert, ScrollView, Linking } from "react-native";
 import { ResizeMode, Video } from "expo-av";
 import { router, useFocusEffect } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -618,6 +618,38 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         <Text style={{ color: theme.textPrimary, fontSize: 14, marginBottom: 8 }}>
           {item.title} ♫ ✨
         </Text>
+        {/* Link Display */}
+        {item.link && item.link.trim() !== '' && (
+          <TouchableOpacity
+            onPress={async () => {
+              try {
+                const url = item.link.startsWith('http://') || item.link.startsWith('https://') 
+                  ? item.link 
+                  : `https://${item.link}`;
+                const canOpen = await Linking.canOpenURL(url);
+                if (canOpen) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert('Error', 'Cannot open this link');
+                }
+              } catch (error) {
+                Alert.alert('Error', 'Failed to open link');
+              }
+            }}
+            style={{
+              backgroundColor: theme.accent,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 8,
+              marginBottom: 8,
+              alignSelf: 'flex-start',
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+              🔗 Open Link
+            </Text>
+          </TouchableOpacity>
+        )}
         <Text style={{ color: theme.textSecondary, fontSize: 12, marginBottom: 4 }}>
           …
         </Text>

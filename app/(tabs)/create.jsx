@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { router } from "expo-router";
-import { ResizeMode, Video } from "expo-av";
+import { ResizeMode, Video, Audio } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
+import * as DocumentPicker from "expo-document-picker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   View,
@@ -14,6 +15,9 @@ import {
   ScrollView,
   Modal,
   ActivityIndicator,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from "react-i18next";
@@ -46,12 +50,16 @@ const Create = () => {
     video: null,
     thumbnail: null,
     prompt: "",
+    music: null,
+    filter: "none",
+    link: "",
   });
   const [photoForm, setPhotoForm] = useState({
     title: "",
     photo: null,
     caption: "",
     filter: "none",
+    link: "",
   });
   const [originalImage, setOriginalImage] = useState(null);
   const [editedImage, setEditedImage] = useState(null);
@@ -65,6 +73,11 @@ const Create = () => {
     hue: 0,
   });
   const [processingImage, setProcessingImage] = useState(false);
+  const [showVideoFilterModal, setShowVideoFilterModal] = useState(false);
+  const [showMusicModal, setShowMusicModal] = useState(false);
+  const [videoFilterCSS, setVideoFilterCSS] = useState('none');
+  const scrollViewRef = useRef(null);
+  const linkInputRef = useRef(null);
 
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -300,6 +313,39 @@ const Create = () => {
     setAdjustments({ brightness: 0, contrast: 1, saturation: 1, hue: 0 });
   };
 
+  // Music selection for videos
+  const selectMusic = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['audio/*'],
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const selectedAsset = result.assets[0];
+        const file = {
+          uri: selectedAsset.uri,
+          name: selectedAsset.name || `music_${Date.now()}.mp3`,
+          type: selectedAsset.mimeType || 'audio/mpeg',
+          size: selectedAsset.size,
+        };
+        setForm({ ...form, music: file });
+        setShowMusicModal(false);
+      }
+    } catch (error) {
+      console.error("Music selection error:", error);
+      Alert.alert(t("common.error"), "Failed to select music file");
+    }
+  };
+
+  // Apply video filter
+  const applyVideoFilter = (filterId) => {
+    const filterCSS = getFilterCSS(filterId, null);
+    setVideoFilterCSS(filterCSS);
+    setForm({ ...form, filter: filterId });
+    setShowVideoFilterModal(false);
+  };
+
   // Get CSS filter string based on filter type and adjustments
   const getFilterCSS = useCallback((filterId, adjustmentsData) => {
     let filterCSS = '';
@@ -444,14 +490,36 @@ const Create = () => {
         Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
         router.push("/home");
       } catch (error) {
-        Alert.alert(t("common.error"), error.message || t("alerts.uploadFailed"));
+        // Check for network-related errors and show user-friendly messages
+        const errorMessage = error.message || error.toString();
+        let userMessage = errorMessage;
+
+        if (errorMessage.includes('Network') || 
+            errorMessage.includes('network') || 
+            errorMessage.includes('timeout') || 
+            errorMessage.includes('Network request failed') ||
+            errorMessage.includes('503') ||
+            errorMessage.includes('client read error') ||
+            errorMessage.includes('Service Unavailable')) {
+          userMessage = "Network Error!\n\nPlease check your internet connection and try again.";
+        } else if (errorMessage.includes('too large') || errorMessage.includes('File is too large')) {
+          userMessage = "File Too Large!\n\nPlease select a smaller file or compress it.";
+        } else if (errorMessage.includes('Server is temporarily unavailable')) {
+          userMessage = "Server Busy!\n\nPlease wait a moment and try again.";
+        }
+
+        Alert.alert(t("common.error"), userMessage);
       } finally {
         setForm({
           title: "",
           video: null,
           thumbnail: null,
           prompt: "",
+          music: null,
+          filter: "none",
+          link: "",
         });
+        setVideoFilterCSS('none');
         setUploading(false);
       }
     } else {
@@ -479,13 +547,34 @@ const Create = () => {
         Alert.alert(t("common.success"), "Photo uploaded successfully!");
         router.push("/profile");
       } catch (error) {
-        Alert.alert(t("common.error"), error.message || "Failed to upload photo");
+        // Check for network-related errors and show user-friendly messages
+        const errorMessage = error.message || error.toString();
+        let userMessage = errorMessage;
+
+        if (errorMessage.includes('Network') || 
+            errorMessage.includes('network') || 
+            errorMessage.includes('timeout') || 
+            errorMessage.includes('Network request failed') ||
+            errorMessage.includes('503') ||
+            errorMessage.includes('client read error') ||
+            errorMessage.includes('Service Unavailable')) {
+          userMessage = "Network Error!\n\nPlease check your internet connection and try again.";
+        } else if (errorMessage.includes('too large') || errorMessage.includes('File is too large')) {
+          userMessage = "File Too Large!\n\nPlease select a smaller file or compress it.";
+        } else if (errorMessage.includes('Server is temporarily unavailable')) {
+          userMessage = "Server Busy!\n\nPlease wait a moment and try again.";
+        } else if (!userMessage.includes('Network') && !userMessage.includes('too large')) {
+          userMessage = errorMessage || "Failed to upload photo";
+        }
+
+        Alert.alert(t("common.error"), userMessage);
       } finally {
         setPhotoForm({
           title: "",
           photo: null,
           caption: "",
           filter: "none",
+          link: "",
         });
         setOriginalImage(null);
         setEditedImage(null);
@@ -532,9 +621,17 @@ const Create = () => {
             style={{ flex: 1 }}
             imageStyle={{ opacity: isDarkMode ? 0.45 : 0.85 }}
           >
-            <ScrollView
-              contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              style={{ flex: 1 }}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
             >
+              <ScrollView
+                ref={scrollViewRef}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 24, gap: 24, paddingBottom: 100 }}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={true}
+              >
           <Text
             style={{
               color: theme.textPrimary,
@@ -626,13 +723,45 @@ const Create = () => {
                 <View style={{ position: 'relative' }}>
                   <TouchableOpacity onPress={() => openPicker("video")}>
                     {form.video ? (
-                      <Video
-                        source={{ uri: form.video.uri }}
-                        style={{ width: "100%", height: 256, borderRadius: 16, overflow: "hidden" }}
-                        useNativeControls
-                        resizeMode={ResizeMode.COVER}
-                        isLooping
-                      />
+                      <View style={{ width: "100%", height: 256, borderRadius: 16, overflow: "hidden" }}>
+                        <Video
+                          source={{ uri: form.video.uri }}
+                          style={{ width: "100%", height: "100%" }}
+                          useNativeControls
+                          resizeMode={ResizeMode.COVER}
+                          isLooping
+                        />
+                        {form.filter !== 'none' && (
+                          <View style={{
+                            position: 'absolute',
+                            top: 10,
+                            left: 10,
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            borderRadius: 8,
+                          }}>
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                              Filter: {FILTERS.find(f => f.id === form.filter)?.name || form.filter}
+                            </Text>
+                          </View>
+                        )}
+                        {form.music && (
+                          <View style={{
+                            position: 'absolute',
+                            top: 10,
+                            right: 50,
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            borderRadius: 8,
+                          }}>
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                              🎵 Music
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     ) : (
                     <View
                       style={{
@@ -696,6 +825,104 @@ const Create = () => {
                 placeholder={t("create.aiPromptPlaceholder")}
                 handleChangeText={(e) => setForm({ ...form, prompt: e })}
               />
+
+              {/* Video Editing Options */}
+              {form.video && (
+                <View style={{ gap: 12 }}>
+                  <Text
+                    style={{
+                      color: theme.textPrimary,
+                      fontSize: 16,
+                      fontFamily: "Poppins-Medium",
+                      textAlign: isRTL ? "right" : "left",
+                    }}
+                  >
+                    Video Editing Options
+                  </Text>
+                  
+                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <TouchableOpacity
+                      onPress={() => setShowMusicModal(true)}
+                      style={{
+                        flex: 1,
+                        padding: 12,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        flexDirection: 'row',
+                        justifyContent: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <Text style={{ color: theme.textPrimary, fontSize: 14, fontFamily: 'Poppins-Medium' }}>
+                        {form.music ? '✓ Music' : '🎵 Add Music'}
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => setShowVideoFilterModal(true)}
+                      style={{
+                        flex: 1,
+                        padding: 12,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        flexDirection: 'row',
+                        justifyContent: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <Text style={{ color: theme.textPrimary, fontSize: 14, fontFamily: 'Poppins-Medium' }}>
+                        {form.filter !== 'none' ? `✓ ${FILTERS.find(f => f.id === form.filter)?.name}` : '🎨 Filters'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {form.music && (
+                    <TouchableOpacity
+                      onPress={() => setForm({ ...form, music: null })}
+                      style={{
+                        padding: 8,
+                        borderRadius: 8,
+                        backgroundColor: 'rgba(255, 59, 48, 0.1)',
+                        borderWidth: 1,
+                        borderColor: 'rgba(255, 59, 48, 0.3)',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, flex: 1 }}>
+                        Music: {form.music.name}
+                      </Text>
+                      <Text style={{ color: '#ff3b30', fontSize: 16, marginLeft: 8 }}>×</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {/* Link Field for Videos */}
+              <View
+                onLayout={(event) => {
+                  linkInputRef.current = event.nativeEvent.layout;
+                }}
+              >
+                <FormField
+                  title="Link (Optional)"
+                  value={form.link}
+                  placeholder="Add a link to your video (e.g., https://example.com)"
+                  handleChangeText={(e) => setForm({ ...form, link: e })}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      scrollViewRef.current?.scrollToEnd({ animated: true });
+                    }, 100);
+                  }}
+                />
+              </View>
             </>
           ) : (
             <>
@@ -897,6 +1124,25 @@ const Create = () => {
                 multiline
                 numberOfLines={3}
               />
+
+              {/* Link Field for Photos */}
+              <View
+                onLayout={(event) => {
+                  linkInputRef.current = event.nativeEvent.layout;
+                }}
+              >
+                <FormField
+                  title="Link (Optional)"
+                  value={photoForm.link}
+                  placeholder="Add a link to your photo (e.g., https://example.com)"
+                  handleChangeText={(e) => setPhotoForm({ ...photoForm, link: e })}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      scrollViewRef.current?.scrollToEnd({ animated: true });
+                    }, 100);
+                  }}
+                />
+              </View>
             </>
           )}
 
@@ -907,6 +1153,7 @@ const Create = () => {
             isLoading={uploading}
           />
         </ScrollView>
+            </KeyboardAvoidingView>
 
             {/* Filter Modal */}
             <Modal
@@ -1259,6 +1506,141 @@ const Create = () => {
                       <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16 }}>Cancel</Text>
                     </TouchableOpacity>
                   </View>
+                </View>
+              </View>
+            </Modal>
+
+            {/* Music Selection Modal */}
+            <Modal
+              visible={showMusicModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowMusicModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.8)',
+                justifyContent: 'flex-end',
+              }}>
+                <View style={{
+                  backgroundColor: theme.surface,
+                  borderTopLeftRadius: 20,
+                  borderTopRightRadius: 20,
+                  padding: 20,
+                  maxHeight: '50%',
+                }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <Text style={{
+                      color: theme.textPrimary,
+                      fontSize: 20,
+                      fontWeight: 'bold',
+                    }}>
+                      Add Music
+                    </Text>
+                  </View>
+                  
+                  <Text style={{ color: theme.textSecondary, marginBottom: 20, fontSize: 14 }}>
+                    Select an audio file to add as background music to your video. The music will be mixed with the video's original audio.
+                  </Text>
+
+                  <TouchableOpacity
+                    onPress={selectMusic}
+                    style={{
+                      backgroundColor: theme.accent,
+                      padding: 15,
+                      borderRadius: 10,
+                      alignItems: 'center',
+                      marginBottom: 12,
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Select Music File</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => setShowMusicModal(false)}
+                    style={{
+                      backgroundColor: theme.cardSoft,
+                      padding: 15,
+                      borderRadius: 10,
+                      alignItems: 'center',
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                    }}
+                  >
+                    <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16 }}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+
+            {/* Video Filter Modal */}
+            <Modal
+              visible={showVideoFilterModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowVideoFilterModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.8)',
+                justifyContent: 'flex-end',
+              }}>
+                <View style={{
+                  backgroundColor: theme.surface,
+                  borderTopLeftRadius: 20,
+                  borderTopRightRadius: 20,
+                  padding: 20,
+                  maxHeight: '60%',
+                }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <Text style={{
+                      color: theme.textPrimary,
+                      fontSize: 20,
+                      fontWeight: 'bold',
+                    }}>
+                      Video Filters
+                    </Text>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      {FILTERS.map((filter) => (
+                        <TouchableOpacity
+                          key={filter.id}
+                          onPress={() => applyVideoFilter(filter.id)}
+                          style={{
+                            alignItems: 'center',
+                            padding: 10,
+                            backgroundColor: form.filter === filter.id ? theme.accentSoft : theme.cardSoft,
+                            borderRadius: 10,
+                            minWidth: 80,
+                          }}
+                        >
+                          <Text style={{
+                            color: theme.textPrimary,
+                            fontSize: 14,
+                            fontWeight: form.filter === filter.id ? 'bold' : 'normal',
+                          }}>
+                            {filter.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                  <Text style={{ color: theme.textSecondary, marginTop: 16, fontSize: 12, textAlign: 'center' }}>
+                    Note: Filters are applied as preview. Actual video processing may be done on the server.
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setShowVideoFilterModal(false)}
+                    style={{
+                      marginTop: 20,
+                      backgroundColor: theme.accent,
+                      padding: 15,
+                      borderRadius: 10,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             </Modal>
