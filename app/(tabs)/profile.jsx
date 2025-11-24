@@ -761,52 +761,67 @@ const Profile = () => {
 
   // Fetch bookmark videos when bookmarks change
   useEffect(() => {
-    if (bookmarks && bookmarks.length > 0) {
-      const fetchBookmarkVideos = async () => {
-        // Use ref to prevent re-fetching if we've already processed these bookmarks
-        if (bookmarkIdsString === lastProcessedBookmarkIdsRef.current) {
-          return;
-        }
-        
-        // Mark these bookmarks as being processed
-        lastProcessedBookmarkIdsRef.current = bookmarkIdsString;
-        
-        setBookmarkVideosLoading(true);
-        const newBookmarkVideos = {};
-        
-        for (const bookmark of bookmarks) {
-          if (bookmark.postId) {
-            try {
-              const videoData = await getVideoById(bookmark.postId);
-              newBookmarkVideos[bookmark.$id] = {
-                title: videoData.title || t('profile.general.bookmarkedVideo'),
-                thumbnail: videoData.thumbnail || 'https://via.placeholder.com/300x300',
-                creator: videoData.creator || { username: t('profile.general.unknownUser') },
-                video: videoData.video
-              };
-            } catch (error) {
-              
-              newBookmarkVideos[bookmark.$id] = {
-                title: t('profile.general.bookmarkedVideo'),
-                thumbnail: 'https://via.placeholder.com/300x300',
-                creator: { username: t('profile.general.unknownUser') },
-                video: null
-              };
-            }
+    // Early return if no bookmarks
+    if (!bookmarkIdsString || !bookmarks || bookmarks.length === 0) {
+      if (bookmarkIdsString === '') {
+        setBookmarkVideos({});
+        lastProcessedBookmarkIdsRef.current = '';
+      }
+      return;
+    }
+
+    // Check if we've already processed these exact bookmarks
+    if (bookmarkIdsString === lastProcessedBookmarkIdsRef.current) {
+      return;
+    }
+    
+    // Mark as processing immediately to prevent duplicate calls
+    lastProcessedBookmarkIdsRef.current = bookmarkIdsString;
+    
+    const fetchBookmarkVideos = async () => {
+      setBookmarkVideosLoading(true);
+      const newBookmarkVideos = {};
+      
+      // Process bookmarks sequentially to avoid overwhelming the API
+      for (const bookmark of bookmarks) {
+        if (bookmark.postId) {
+          try {
+            const videoData = await getVideoById(bookmark.postId);
+            newBookmarkVideos[bookmark.$id] = {
+              title: videoData.title || t('profile.general.bookmarkedVideo'),
+              thumbnail: videoData.thumbnail || 'https://via.placeholder.com/300x300',
+              creator: videoData.creator || { username: t('profile.general.unknownUser') },
+              video: videoData.video
+            };
+          } catch (error) {
+            // Use fallback data on error
+            newBookmarkVideos[bookmark.$id] = {
+              title: t('profile.general.bookmarkedVideo'),
+              thumbnail: 'https://via.placeholder.com/300x300',
+              creator: { username: t('profile.general.unknownUser') },
+              video: null
+            };
           }
         }
-        
-        setBookmarkVideos(newBookmarkVideos);
-        setBookmarkVideosLoading(false);
-      };
+      }
       
-      fetchBookmarkVideos();
-    } else {
-      // Clear bookmark videos if bookmarks is empty
-      setBookmarkVideos({});
-      lastProcessedBookmarkIdsRef.current = '';
-    }
-  }, [bookmarkIdsString, bookmarks, t]);
+      // Only update if we still have the same bookmarks (prevent race conditions)
+      if (lastProcessedBookmarkIdsRef.current === bookmarkIdsString) {
+        setBookmarkVideos(prev => {
+          // Only update if data actually changed to prevent unnecessary re-renders
+          const hasChanged = Object.keys(newBookmarkVideos).some(
+            key => JSON.stringify(prev[key]) !== JSON.stringify(newBookmarkVideos[key])
+          ) || Object.keys(prev).length !== Object.keys(newBookmarkVideos).length;
+          
+          return hasChanged ? newBookmarkVideos : prev;
+        });
+      }
+      setBookmarkVideosLoading(false);
+    };
+    
+    fetchBookmarkVideos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookmarkIdsString]); // Only depend on bookmarkIdsString to prevent unnecessary re-runs
 
   // Fetch unread notification count
   useEffect(() => {
@@ -1138,6 +1153,28 @@ const Profile = () => {
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{t('profile.actions.liveStreams')}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push('/advertisements')}
+              style={{
+                borderRadius: 8,
+                shadowColor: themedColor("rgba(127,90,240,0.35)", "rgba(99,102,241,0.35)"),
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.3,
+                shadowRadius: 4,
+                elevation: 3,
+                backgroundColor: theme.accentSoft,
+              }}
+            >
+              <View style={{
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                borderRadius: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+              }}>
+                <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 14 }}>Advertisements</Text>
+              </View>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1428,16 +1465,15 @@ const Profile = () => {
                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
                  {bookmarks.map((bookmark, index) => {
                     // Get the fetched video data for this bookmark
-                    const videoData = bookmarkVideos[bookmark.$id] || {
-                      title: t('common.loading'),
-                      thumbnail: 'https://via.placeholder.com/300x300',
-                      creator: { username: t('profile.general.unknownUser') },
-                      video: null
-                    };
+                    const videoData = bookmarkVideos[bookmark.$id];
+                    
+                    // Use stable thumbnail URI
+                    const thumbnailUri = videoData?.thumbnail || 'https://via.placeholder.com/300x300';
+                    const hasVideo = !!videoData?.video;
                     
                     return (
                       <TouchableOpacity 
-                         key={bookmark.$id}
+                         key={`bookmark-${bookmark.$id}`}
                         style={{
                           width: '48%',
                           aspectRatio: 1,
@@ -1475,12 +1511,12 @@ const Profile = () => {
                         <View style={{ width: '100%', height: '100%', position: 'relative' }}>
                           {/* Always show thumbnail image instead of Video component to prevent glitching */}
                           <Image
-                            source={{ uri: videoData.thumbnail || 'https://via.placeholder.com/300x300' }}
+                            source={{ uri: thumbnailUri }}
                             style={{ width: '100%', height: '100%' }}
                             resizeMode="cover"
                           />
                           {/* Play icon overlay to indicate it's a video */}
-                          {videoData.video && (
+                          {hasVideo && (
                             <View
                               style={{
                                 position: 'absolute',

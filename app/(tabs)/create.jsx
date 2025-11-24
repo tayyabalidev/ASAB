@@ -131,8 +131,43 @@ const Create = () => {
         
         const fileType = selectedAsset.type === 'image' ? 'image/jpeg' : selectedAsset.type === 'video' ? 'video/mp4' : selectedAsset.type;
         const fileSize = selectedAsset.fileSize || selectedAsset.size;
+        
+        // For videos, copy the trimmed video to a permanent location
+        // This ensures the trimmed video persists and is used when posting
+        // The trimmed video from ImagePicker might be in a temporary location
+        // that gets deleted, so we copy it to a permanent location
+        let finalUri = selectedAsset.uri;
+        if (selectType === "video") {
+          try {
+            // Create a permanent file path for the trimmed video
+            const permanentPath = `${FileSystem.documentDirectory}trimmed_video_${Date.now()}.mp4`;
+            
+            // Copy the trimmed video from temporary location to permanent location
+            // This ensures the trimmed video is preserved and used when uploading
+            await FileSystem.copyAsync({
+              from: selectedAsset.uri,
+              to: permanentPath,
+            });
+            
+            // Verify the file was copied successfully
+            const fileInfo = await FileSystem.getInfoAsync(permanentPath);
+            if (fileInfo.exists) {
+              // Use the permanent path - this is the trimmed video
+              finalUri = permanentPath;
+            } else {
+              console.warn('Trimmed video copy verification failed, using original URI');
+              finalUri = selectedAsset.uri;
+            }
+          } catch (copyError) {
+            console.error('Error copying trimmed video:', copyError);
+            // If copy fails, use original URI (might still work on some platforms)
+            // but the trimmed video might not persist
+            finalUri = selectedAsset.uri;
+          }
+        }
+        
         const file = {
-          uri: selectedAsset.uri,
+          uri: finalUri,
           name: fileName,
           type: fileType,
           mimeType: fileType, // Add mimeType for iOS compatibility

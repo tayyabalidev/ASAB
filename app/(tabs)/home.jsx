@@ -10,7 +10,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getLatestPosts, toggleLikePost, getComments, addComment, getPostLikes, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl } from "../../lib/appwrite";
+import { getAllPosts, getLatestPosts, toggleLikePost, getComments, addComment, getPostLikes, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements } from "../../lib/appwrite";
+import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
 import { appwriteConfig } from "../../lib/appwrite";
@@ -881,6 +882,9 @@ const Home = () => {
   const { data: latestPosts, refetch: refetchLatestPosts } = useAppwrite(getLatestPosts, []);
   const { data: latestPhotos, refetch: refetchLatestPhotos } = useAppwrite(getLatestPhotoPosts, []);
   
+  // Get active advertisements
+  const { data: activeAds, refetch: refetchAds } = useAppwrite(getActiveAdvertisements, []);
+  
   // Combine videos and photos into single feed, sorted by date
   const combinedForYouPosts = useMemo(() => {
     const allPosts = [
@@ -1066,8 +1070,38 @@ const Home = () => {
     }, 100);
   };
 
-  // Use search results if searching, otherwise use normal posts
-  const displayPosts = isSearching ? searchResults : posts;
+  // Insert ads into posts every 5 posts
+  const displayPostsWithAds = useMemo(() => {
+    const basePosts = isSearching ? searchResults : posts;
+    if (!activeAds || activeAds.length === 0) return basePosts;
+    
+    const postsWithAds = [];
+    const adInterval = 5; // Show ad every 5 posts
+    
+    basePosts.forEach((post, index) => {
+      postsWithAds.push(post);
+      
+      // Insert ad after every adInterval posts
+      if ((index + 1) % adInterval === 0) {
+        const adIndex = Math.floor((index / adInterval) % activeAds.length);
+        const ad = activeAds[adIndex];
+        if (ad) {
+          // Preserve original ad ID for tracking, but use unique ID for FlatList key
+          postsWithAds.push({ 
+            ...ad, 
+            isAd: true, 
+            $id: `ad_${ad.$id}_${index}`, // Unique ID for FlatList
+            originalAdId: ad.$id // Preserve original ID for tracking
+          });
+        }
+      }
+    });
+    
+    return postsWithAds;
+  }, [isSearching ? searchResults : posts, activeAds]);
+  
+  // Use search results if searching, otherwise use normal posts with ads
+  const displayPosts = displayPostsWithAds;
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -1141,17 +1175,29 @@ const Home = () => {
   };
 
   const renderVideoCard = useCallback(
-    ({ item, index }) => (
-      <StrollVideoCard
-        item={item}
-        index={index}
-        isVisible={index === currentVideoIndex}
-        onVideoStateChange={() => {}} // Empty function since we're not using it anymore
-        isHomeFocused={isHomeFocused}
-        theme={theme}
-        isDarkMode={isDarkMode}
-      />
-    ),
+    ({ item, index }) => {
+      // Render advertisement if it's an ad
+      if (item.isAd) {
+        return (
+          <View style={{ height: SCREEN_HEIGHT, justifyContent: 'center', paddingHorizontal: 16 }}>
+            <AdvertisementCard advertisement={item} />
+          </View>
+        );
+      }
+      
+      // Render regular video card
+      return (
+        <StrollVideoCard
+          item={item}
+          index={index}
+          isVisible={index === currentVideoIndex}
+          onVideoStateChange={() => {}} // Empty function since we're not using it anymore
+          isHomeFocused={isHomeFocused}
+          theme={theme}
+          isDarkMode={isDarkMode}
+        />
+      );
+    },
     [currentVideoIndex, isHomeFocused, theme, isDarkMode]
   );
 
