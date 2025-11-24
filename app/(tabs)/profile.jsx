@@ -1153,9 +1153,14 @@ const Profile = () => {
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{t('profile.actions.liveStreams')}</Text>
               </LinearGradient>
             </TouchableOpacity>
+          </View>
+
+          {/* Advertisement Button - Second Row */}
+          <View style={{ flexDirection: 'row', marginBottom: 16, paddingHorizontal: 16 }}>
             <TouchableOpacity
               onPress={() => router.push('/advertisements')}
               style={{
+                flex: 1,
                 borderRadius: 8,
                 shadowColor: themedColor("rgba(127,90,240,0.35)", "rgba(99,102,241,0.35)"),
                 shadowOffset: { width: 0, height: 2 },
@@ -1171,6 +1176,7 @@ const Profile = () => {
                 borderRadius: 8,
                 flexDirection: 'row',
                 alignItems: 'center',
+                justifyContent: 'center',
               }}>
                 <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 14 }}>Advertisements</Text>
               </View>
