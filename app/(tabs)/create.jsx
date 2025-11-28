@@ -26,7 +26,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { icons, images } from "../../constants";
 import { createVideoPost, createPhotoPost } from "../../lib/appwrite";
-import { CustomButton, FormField } from "../../components";
+import { processVideo, processPhoto, checkProcessingServer } from "../../lib/videoProcessor";
+import { exportEditedMedia } from "../../lib/mediaExporter";
+import { CustomButton, FormField, MediaEditor } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const FILTERS = [
@@ -78,6 +80,11 @@ const Create = () => {
   const [videoFilterCSS, setVideoFilterCSS] = useState('none');
   const scrollViewRef = useRef(null);
   const linkInputRef = useRef(null);
+  const [processingMedia, setProcessingMedia] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [useProcessing, setUseProcessing] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
+  const [editingMedia, setEditingMedia] = useState(null);
 
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -106,6 +113,25 @@ const Create = () => {
     () => (isDarkMode ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.9)"),
     [isDarkMode]
   );
+
+  // Check if processing server is available on mount
+  useEffect(() => {
+    const checkServer = async () => {
+      try {
+        const isAvailable = await checkProcessingServer();
+        setUseProcessing(isAvailable);
+        if (isAvailable) {
+          console.log('✅ Processing server is available');
+        } else {
+          console.log('ℹ️ Processing server not available - using metadata only');
+        }
+      } catch (error) {
+        console.log('Processing server check failed');
+        setUseProcessing(false);
+      }
+    };
+    checkServer();
+  }, []);
 
   const openPicker = async (selectType) => {
     try {
@@ -482,8 +508,59 @@ const Create = () => {
 
       setUploading(true);
       try {
+        let finalVideo = form.video;
+        
+        // Process video if processing server is available and filter/music is selected
+        if (useProcessing && (form.filter !== 'none' || form.music)) {
+          try {
+            setProcessingMedia(true);
+            setProcessingProgress(10);
+            
+            console.log('Processing video with filter:', form.filter);
+            
+            // Process video with filter and music
+            const processedResult = await processVideo({
+              video: form.video,
+              music: form.music || null,
+              filter: form.filter,
+              musicVolume: 0.5
+            });
+            
+            setProcessingProgress(50);
+            
+            // Save processed video to file system
+            if (processedResult && processedResult.base64) {
+              const processedUri = `${FileSystem.documentDirectory}processed_video_${Date.now()}.mp4`;
+              
+              await FileSystem.writeAsStringAsync(processedUri, processedResult.base64, {
+                encoding: FileSystem.EncodingType.Base64,
+              });
+              
+              // Update to use processed video
+              finalVideo = {
+                uri: processedUri,
+                name: 'processed_video.mp4',
+                type: 'video/mp4',
+                size: form.video.size
+              };
+              
+              console.log('✅ Video processed successfully');
+            }
+            
+            setProcessingProgress(100);
+            setProcessingMedia(false);
+          } catch (processError) {
+            console.log('⚠️ Processing failed, using original video:', processError);
+            setProcessingMedia(false);
+            // Continue with original video if processing fails
+          }
+        }
+
+        setProcessingProgress(0);
+        
         await createVideoPost({
           ...form,
+          video: finalVideo,
           userId: user.$id,
         });
 
@@ -538,8 +615,59 @@ const Create = () => {
 
       setUploading(true);
       try {
+        let finalPhoto = photoForm.photo;
+        
+        // Process photo if processing server is available and filter/adjustments are applied
+        if (useProcessing && (photoForm.filter !== 'none' || Object.keys(edits).length > 0)) {
+          try {
+            setProcessingMedia(true);
+            setProcessingProgress(10);
+            
+            console.log('Processing photo with filter:', photoForm.filter);
+            
+            // Process photo with filter and adjustments
+            const processedResult = await processPhoto({
+              photo: photoForm.photo,
+              filter: photoForm.filter,
+              brightness: adjustments.brightness,
+              contrast: adjustments.contrast,
+              saturation: adjustments.saturation
+            });
+            
+            setProcessingProgress(50);
+            
+            // Save processed photo to file system
+            if (processedResult && processedResult.base64) {
+              const processedUri = `${FileSystem.documentDirectory}processed_photo_${Date.now()}.jpg`;
+              
+              await FileSystem.writeAsStringAsync(processedUri, processedResult.base64, {
+                encoding: FileSystem.EncodingType.Base64,
+              });
+              
+              finalPhoto = {
+                uri: processedUri,
+                name: 'processed_photo.jpg',
+                type: 'image/jpeg',
+                size: photoForm.photo.size
+              };
+              
+              console.log('✅ Photo processed successfully');
+            }
+            
+            setProcessingProgress(100);
+            setProcessingMedia(false);
+          } catch (processError) {
+            console.log('⚠️ Processing failed, using original photo:', processError);
+            setProcessingMedia(false);
+            // Continue with original photo if processing fails
+          }
+        }
+
+        setProcessingProgress(0);
+        
         await createPhotoPost({
           ...photoForm,
+          photo: finalPhoto,
           userId: user.$id,
           edits: edits,
         });
@@ -625,13 +753,13 @@ const Create = () => {
               behavior={Platform.OS === "ios" ? "padding" : "height"}
               style={{ flex: 1 }}
               keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
-            >
-              <ScrollView
+          >
+            <ScrollView
                 ref={scrollViewRef}
                 contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 24, gap: 24, paddingBottom: 100 }}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={true}
-              >
+            >
           <Text
             style={{
               color: theme.textPrimary,
@@ -724,13 +852,13 @@ const Create = () => {
                   <TouchableOpacity onPress={() => openPicker("video")}>
                     {form.video ? (
                       <View style={{ width: "100%", height: 256, borderRadius: 16, overflow: "hidden" }}>
-                        <Video
-                          source={{ uri: form.video.uri }}
+                      <Video
+                        source={{ uri: form.video.uri }}
                           style={{ width: "100%", height: "100%" }}
-                          useNativeControls
-                          resizeMode={ResizeMode.COVER}
-                          isLooping
-                        />
+                        useNativeControls
+                        resizeMode={ResizeMode.COVER}
+                        isLooping
+                      />
                         {form.filter !== 'none' && (
                           <View style={{
                             position: 'absolute',
@@ -761,6 +889,30 @@ const Create = () => {
                             </Text>
                           </View>
                         )}
+                        {/* Edit Button for Video */}
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (form.video) {
+                              setEditingMedia({ ...form.video, mediaType: 'video' });
+                              setShowEditor(true);
+                            }
+                          }}
+                          style={{
+                            position: 'absolute',
+                            bottom: 10,
+                            right: 10,
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            padding: 12,
+                            borderRadius: 8,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
+                            ✏️ Edit
+                          </Text>
+                        </TouchableOpacity>
                       </View>
                     ) : (
                     <View
@@ -1074,6 +1226,23 @@ const Create = () => {
                         >
                           <Text style={{ color: '#fff', fontSize: 12 }}>Reset</Text>
                         </TouchableOpacity>
+                        {/* Edit Button */}
+                        <TouchableOpacity
+                          onPress={() => {
+                            setEditingMedia({ ...photoForm.photo, mediaType: 'photo' });
+                            setShowEditor(true);
+                          }}
+                          style={{
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            padding: 12,
+                            borderRadius: 8,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 12 }}>✏️ Edit</Text>
+                        </TouchableOpacity>
                       </View>
                     </View>
                   ) : (
@@ -1147,11 +1316,70 @@ const Create = () => {
           )}
 
           <CustomButton
-            title={uploading ? "Uploading..." : (postType === 'video' ? t("create.submitButton") : "Post Photo")}
+            title={
+              processingMedia 
+                ? `Processing... ${processingProgress}%` 
+                : uploading 
+                  ? "Uploading..." 
+                  : (postType === 'video' ? t("create.submitButton") : "Post Photo")
+            }
             handlePress={submit}
             containerStyles="mt-6"
-            isLoading={uploading}
+            isLoading={uploading || processingMedia}
+            disabled={uploading || processingMedia}
           />
+          
+          {/* Processing Progress Indicator */}
+          {processingMedia && (
+            <View style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 8,
+              backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <ActivityIndicator size="small" color={theme.accent} />
+                <Text style={{ color: theme.textPrimary, fontSize: 14, flex: 1 }}>
+                  Processing {postType === 'video' ? 'video' : 'photo'} with filter and effects...
+                </Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                  {processingProgress}%
+                </Text>
+              </View>
+              <View style={{
+                marginTop: 8,
+                height: 4,
+                backgroundColor: theme.border,
+                borderRadius: 2,
+                overflow: 'hidden',
+              }}>
+                <View style={{
+                  height: '100%',
+                  width: `${processingProgress}%`,
+                  backgroundColor: theme.accent,
+                  borderRadius: 2,
+                }} />
+              </View>
+            </View>
+          )}
+          
+          {/* Processing Server Status Indicator */}
+          {!useProcessing && (
+            <View style={{
+              marginTop: 12,
+              padding: 8,
+              borderRadius: 8,
+              backgroundColor: themedColor("rgba(255,193,7,0.1)", "rgba(255,193,7,0.1)"),
+              borderWidth: 1,
+              borderColor: themedColor("rgba(255,193,7,0.3)", "rgba(255,193,7,0.3)"),
+            }}>
+              <Text style={{ color: theme.textSecondary, fontSize: 12, textAlign: 'center' }}>
+                ℹ️ Processing server not available. Filters will be applied as metadata only.
+              </Text>
+            </View>
+          )}
         </ScrollView>
             </KeyboardAvoidingView>
 
@@ -1644,6 +1872,78 @@ const Create = () => {
                 </View>
               </View>
             </Modal>
+
+            {/* Media Editor Modal */}
+            {editingMedia && (
+              <MediaEditor
+                visible={showEditor}
+                onClose={() => {
+                  setShowEditor(false);
+                  setEditingMedia(null);
+                }}
+                media={editingMedia}
+                mediaType={editingMedia.mediaType || 'photo'}
+              onSave={async (editedData, captureRef) => {
+                try {
+                  // Export edited media with capture function for photos
+                  const exportedMedia = await exportEditedMedia(editedData, captureRef);
+                  
+                  // Update form with exported media
+                  if (editedData.mediaType === 'video') {
+                    setForm({
+                      ...form,
+                      video: exportedMedia,
+                      filter: editedData.filter || form.filter,
+                      music: editedData.music || form.music,
+                    });
+                  } else {
+                    setPhotoForm({
+                      ...photoForm,
+                      photo: exportedMedia,
+                      filter: editedData.filter || photoForm.filter,
+                    });
+                    setEditedImage(exportedMedia);
+                    setOriginalImage(exportedMedia);
+                  }
+                  
+                  setShowEditor(false);
+                  setEditingMedia(null);
+                  Alert.alert('Success', 'Media edited and saved!');
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to export edited media: ' + error.message);
+                }
+              }}
+              onExport={async (editedData, captureRef) => {
+                try {
+                  // Export edited media with capture function for photos
+                  const exportedMedia = await exportEditedMedia(editedData, captureRef);
+                  
+                  // Update form with exported media
+                  if (editedData.mediaType === 'video') {
+                    setForm({
+                      ...form,
+                      video: exportedMedia,
+                      filter: editedData.filter || form.filter,
+                      music: editedData.music || form.music,
+                    });
+                  } else {
+                    setPhotoForm({
+                      ...photoForm,
+                      photo: exportedMedia,
+                      filter: editedData.filter || photoForm.filter,
+                    });
+                    setEditedImage(exportedMedia);
+                    setOriginalImage(exportedMedia);
+                  }
+                  
+                  setShowEditor(false);
+                  setEditingMedia(null);
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to export edited media: ' + error.message);
+                }
+              }}
+              />
+            )}
           </ImageBackground>
         </LinearGradient>
       </View>

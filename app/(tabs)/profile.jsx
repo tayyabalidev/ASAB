@@ -163,6 +163,7 @@ const Profile = () => {
 
   // Refresh bookmarks when screen comes into focus (with debounce)
   const lastRefreshTimeRef = useRef(0);
+  const isRefreshingRef = useRef(false);
   
   useFocusEffect(
     React.useCallback(() => {
@@ -178,19 +179,19 @@ const Profile = () => {
       }
       
       // Only refresh bookmarks if it's been more than 2 seconds since last refresh
-      if (timeSinceLastRefresh > 2000) {
-       
-        if (user?.$id && refetchBookmarks && !isRefreshingBookmarks) {
+      // and we're not already refreshing
+      if (timeSinceLastRefresh > 2000 && !isRefreshingRef.current) {
+        if (user?.$id && refetchBookmarks) {
+          isRefreshingRef.current = true;
           setIsRefreshingBookmarks(true);
           refetchBookmarks().finally(() => {
             setIsRefreshingBookmarks(false);
+            isRefreshingRef.current = false;
             lastRefreshTimeRef.current = now;
           });
         }
-      } else {
-       
       }
-    }, [user?.$id, refetchBookmarks, refetchPosts, refetchPhotos, isRefreshingBookmarks])
+    }, [user?.$id, refetchBookmarks, refetchPosts, refetchPhotos])
   );
 
   // Stop videos when profile loses focus
@@ -339,11 +340,13 @@ const Profile = () => {
   const handleSectionChange = (section) => {
     setActiveSection(section);
     // If switching to bookmarks, refresh the data only if not already on bookmarks
-    if (section === 'bookmarks' && activeSection !== 'bookmarks' && user?.$id && refetchBookmarks && !isRefreshingBookmarks) {
-
+    // and not currently refreshing
+    if (section === 'bookmarks' && activeSection !== 'bookmarks' && user?.$id && refetchBookmarks && !isRefreshingRef.current) {
+      isRefreshingRef.current = true;
       setIsRefreshingBookmarks(true);
       refetchBookmarks().finally(() => {
         setIsRefreshingBookmarks(false);
+        isRefreshingRef.current = false;
       });
     }
   };
@@ -760,6 +763,8 @@ const Profile = () => {
   }, [bookmarks]);
 
   // Fetch bookmark videos when bookmarks change
+  const isFetchingVideosRef = useRef(false);
+  
   useEffect(() => {
     // Early return if no bookmarks
     if (!bookmarkIdsString || !bookmarks || bookmarks.length === 0) {
@@ -775,48 +780,58 @@ const Profile = () => {
       return;
     }
     
+    // Prevent concurrent fetches
+    if (isFetchingVideosRef.current) {
+      return;
+    }
+    
     // Mark as processing immediately to prevent duplicate calls
     lastProcessedBookmarkIdsRef.current = bookmarkIdsString;
+    isFetchingVideosRef.current = true;
     
     const fetchBookmarkVideos = async () => {
       setBookmarkVideosLoading(true);
       const newBookmarkVideos = {};
       
-      // Process bookmarks sequentially to avoid overwhelming the API
-      for (const bookmark of bookmarks) {
-        if (bookmark.postId) {
-          try {
-            const videoData = await getVideoById(bookmark.postId);
-            newBookmarkVideos[bookmark.$id] = {
-              title: videoData.title || t('profile.general.bookmarkedVideo'),
-              thumbnail: videoData.thumbnail || 'https://via.placeholder.com/300x300',
-              creator: videoData.creator || { username: t('profile.general.unknownUser') },
-              video: videoData.video
-            };
-          } catch (error) {
-            // Use fallback data on error
-            newBookmarkVideos[bookmark.$id] = {
-              title: t('profile.general.bookmarkedVideo'),
-              thumbnail: 'https://via.placeholder.com/300x300',
-              creator: { username: t('profile.general.unknownUser') },
-              video: null
-            };
+      try {
+        // Process bookmarks sequentially to avoid overwhelming the API
+        for (const bookmark of bookmarks) {
+          if (bookmark.postId) {
+            try {
+              const videoData = await getVideoById(bookmark.postId);
+              newBookmarkVideos[bookmark.$id] = {
+                title: videoData.title || t('profile.general.bookmarkedVideo'),
+                thumbnail: videoData.thumbnail || 'https://via.placeholder.com/300x300',
+                creator: videoData.creator || { username: t('profile.general.unknownUser') },
+                video: videoData.video
+              };
+            } catch (error) {
+              // Use fallback data on error
+              newBookmarkVideos[bookmark.$id] = {
+                title: t('profile.general.bookmarkedVideo'),
+                thumbnail: 'https://via.placeholder.com/300x300',
+                creator: { username: t('profile.general.unknownUser') },
+                video: null
+              };
+            }
           }
         }
+        
+        // Only update if we still have the same bookmarks (prevent race conditions)
+        if (lastProcessedBookmarkIdsRef.current === bookmarkIdsString) {
+          setBookmarkVideos(prev => {
+            // Only update if data actually changed to prevent unnecessary re-renders
+            const hasChanged = Object.keys(newBookmarkVideos).some(
+              key => JSON.stringify(prev[key]) !== JSON.stringify(newBookmarkVideos[key])
+            ) || Object.keys(prev).length !== Object.keys(newBookmarkVideos).length;
+            
+            return hasChanged ? newBookmarkVideos : prev;
+          });
+        }
+      } finally {
+        setBookmarkVideosLoading(false);
+        isFetchingVideosRef.current = false;
       }
-      
-      // Only update if we still have the same bookmarks (prevent race conditions)
-      if (lastProcessedBookmarkIdsRef.current === bookmarkIdsString) {
-        setBookmarkVideos(prev => {
-          // Only update if data actually changed to prevent unnecessary re-renders
-          const hasChanged = Object.keys(newBookmarkVideos).some(
-            key => JSON.stringify(prev[key]) !== JSON.stringify(newBookmarkVideos[key])
-          ) || Object.keys(prev).length !== Object.keys(newBookmarkVideos).length;
-          
-          return hasChanged ? newBookmarkVideos : prev;
-        });
-      }
-      setBookmarkVideosLoading(false);
     };
     
     fetchBookmarkVideos();
