@@ -85,6 +85,7 @@ const Create = () => {
   const [useProcessing, setUseProcessing] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [editingMedia, setEditingMedia] = useState(null);
+  const [isMediaEdited, setIsMediaEdited] = useState(false); // Track if media was edited via MediaEditor
 
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -226,12 +227,14 @@ const Create = () => {
               ...form,
               video: file,
             });
+            setIsMediaEdited(false); // Reset edit flag when new video is selected
           }
         } else {
           // Photo mode
           setOriginalImage(file);
           setEditedImage(file);
           setPhotoForm({ ...photoForm, photo: file });
+          setIsMediaEdited(false); // Reset edit flag when new photo is selected
         }
       }
     } catch (error) {
@@ -445,7 +448,13 @@ const Create = () => {
       }
 
       // Skip if we've already converted this URI or are currently converting
+      // Also check if the URI hasn't actually changed
       if (lastConvertedUri.current === currentUri || isConvertingRef.current) {
+        return;
+      }
+      
+      // Additional guard: if we're already converting the same URI, skip
+      if (isConvertingRef.current && lastConvertedUri.current === currentUri) {
         return;
       }
 
@@ -510,8 +519,9 @@ const Create = () => {
       try {
         let finalVideo = form.video;
         
-        // Process video if processing server is available and filter/music is selected
-        if (useProcessing && (form.filter !== 'none' || form.music)) {
+        // Skip processing if media was already edited via MediaEditor (it already has all edits applied)
+        // Process video if processing server is available and filter/music is selected AND media wasn't already edited
+        if (!isMediaEdited && useProcessing && (form.filter !== 'none' || form.music)) {
           try {
             setProcessingMedia(true);
             setProcessingProgress(10);
@@ -597,6 +607,7 @@ const Create = () => {
           link: "",
         });
         setVideoFilterCSS('none');
+        setIsMediaEdited(false); // Reset edit flag
         setUploading(false);
       }
     } else {
@@ -617,8 +628,9 @@ const Create = () => {
       try {
         let finalPhoto = photoForm.photo;
         
-        // Process photo if processing server is available and filter/adjustments are applied
-        if (useProcessing && (photoForm.filter !== 'none' || Object.keys(edits).length > 0)) {
+        // Skip processing if media was already edited via MediaEditor (it already has all edits applied)
+        // Process photo if processing server is available and filter/adjustments are applied AND media wasn't already edited
+        if (!isMediaEdited && useProcessing && (photoForm.filter !== 'none' || Object.keys(edits).length > 0)) {
           try {
             setProcessingMedia(true);
             setProcessingProgress(10);
@@ -707,6 +719,7 @@ const Create = () => {
         setOriginalImage(null);
         setEditedImage(null);
         setEdits({});
+        setIsMediaEdited(false); // Reset edit flag
         setUploading(false);
       }
     }
@@ -1888,6 +1901,9 @@ const Create = () => {
                   // Export edited media with capture function for photos
                   const exportedMedia = await exportEditedMedia(editedData, captureRef);
                   
+                  // Mark media as edited so we don't process it again during upload
+                  setIsMediaEdited(true);
+                  
                   // Update form with exported media
                   if (editedData.mediaType === 'video') {
                     setForm({
@@ -1903,7 +1919,10 @@ const Create = () => {
                       filter: editedData.filter || photoForm.filter,
                     });
                     setEditedImage(exportedMedia);
-                    setOriginalImage(exportedMedia);
+                    // Only update originalImage if URI changed to avoid triggering unnecessary useEffect
+                    if (originalImage?.uri !== exportedMedia?.uri) {
+                      setOriginalImage(exportedMedia);
+                    }
                   }
                   
                   setShowEditor(false);
@@ -1918,6 +1937,9 @@ const Create = () => {
                   // Export edited media with capture function for photos
                   const exportedMedia = await exportEditedMedia(editedData, captureRef);
                   
+                  // Mark media as edited so we don't process it again during upload
+                  setIsMediaEdited(true);
+                  
                   // Update form with exported media
                   if (editedData.mediaType === 'video') {
                     setForm({
@@ -1933,7 +1955,10 @@ const Create = () => {
                       filter: editedData.filter || photoForm.filter,
                     });
                     setEditedImage(exportedMedia);
-                    setOriginalImage(exportedMedia);
+                    // Only update originalImage if URI changed to avoid triggering unnecessary useEffect
+                    if (originalImage?.uri !== exportedMedia?.uri) {
+                      setOriginalImage(exportedMedia);
+                    }
                   }
                   
                   setShowEditor(false);
