@@ -116,18 +116,33 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [creatorData, setCreatorData] = useState(null);
   
   // Fetch creator data if creator is a string ID
+  // Use a ref to track the creator ID we've already processed to prevent infinite loops
+  const processedCreatorIdRef = useRef(null);
+  
+  // Get stable creator ID for dependency - extract just the ID string
+  const creatorIdString = typeof item?.creator === 'object' && item?.creator !== null 
+    ? item.creator.$id 
+    : (typeof item?.creator === 'string' ? item.creator : null);
+  
   useEffect(() => {
     const fetchCreator = async () => {
-      if (!item?.creator) return;
+      if (!item?.creator || !creatorIdString) return;
+      
+      // If we've already processed this creator ID, skip
+      if (processedCreatorIdRef.current === creatorIdString) {
+        return;
+      }
       
       // If creator is already an object, use it
       if (typeof item.creator === 'object' && item.creator !== null) {
+        processedCreatorIdRef.current = creatorIdString;
         setCreatorData(item.creator);
         return;
       }
       
       // If creator is a string ID, fetch the user document
       if (typeof item.creator === 'string') {
+        processedCreatorIdRef.current = creatorIdString;
         try {
           const userDoc = await databases.getDocument(
             appwriteConfig.databaseId,
@@ -143,7 +158,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     };
     
     fetchCreator();
-  }, [item?.creator]);
+  }, [creatorIdString]);
   
   // Use creatorData if available, otherwise fall back to item.creator
   const creator = creatorData || (typeof item.creator === 'object' ? item.creator : { username: 'Unknown', avatar: images.profile, $id: item.creator });
@@ -505,16 +520,21 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 const edits = typeof item.edits === 'string' ? JSON.parse(item.edits) : item.edits;
                 adjustments = edits.adjustments || null;
               } catch (e) {
-                console.log('Error parsing edits:', e);
+                // Silently handle parse errors
               }
             }
             const filterCSS = getFilterCSS(filterId, adjustments);
             
             // Apply filter using WebView for photos (similar to create screen)
             if (filterCSS !== 'none') {
+              const photoUri = String(item.photo);
+              // Create stable key based on photo URI and filter to prevent unnecessary re-renders
+              const webViewKey = `photo-${item.$id || photoUri}-${filterCSS}`;
+              
               return (
                 <View style={{ width: '100%', height: '100%' }}>
                   <WebView
+                    key={webViewKey}
                     source={{
                       html: `
                         <!DOCTYPE html>
@@ -541,7 +561,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                             </style>
                           </head>
                           <body>
-                            <img src="${String(item.photo)}" alt="Filtered Photo" />
+                            <img src="${photoUri}" alt="Filtered Photo" />
                           </body>
                         </html>
                       `
@@ -550,6 +570,12 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                     scrollEnabled={false}
                     showsVerticalScrollIndicator={false}
                     showsHorizontalScrollIndicator={false}
+                    javaScriptEnabled={false}
+                    domStorageEnabled={false}
+                    onError={(syntheticEvent) => {
+                      const { nativeEvent } = syntheticEvent;
+                      console.log('WebView error: ', nativeEvent);
+                    }}
                   />
                 </View>
               );
@@ -1504,14 +1530,88 @@ const Home = () => {
             }}
           >
             {item.postType === 'photo' && item.photo && typeof item.photo === 'string' && item.photo.trim() !== '' ? (
-              <Image
-                source={{ uri: String(item.photo) }}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
-                onError={(error) => {
-                  console.log('Trending photo error:', error);
-                }}
-              />
+              (() => {
+                // Get filter and adjustments from item
+                const filterId = item.filter || 'none';
+                let adjustments = null;
+                if (item.edits) {
+                  try {
+                    const edits = typeof item.edits === 'string' ? JSON.parse(item.edits) : item.edits;
+                    adjustments = edits.adjustments || null;
+                  } catch (e) {
+                    // Silently handle parse errors
+                  }
+                }
+                const filterCSS = getFilterCSS(filterId, adjustments);
+                
+                // Apply filter using WebView for photos
+                if (filterCSS !== 'none') {
+                  const photoUri = String(item.photo);
+                  // Create stable key based on photo URI and filter to prevent unnecessary re-renders
+                  const webViewKey = `trending-photo-${item.$id || photoUri}-${filterCSS}`;
+                  
+                  return (
+                    <View style={{ width: '100%', height: '100%' }}>
+                      <WebView
+                        key={webViewKey}
+                        source={{
+                          html: `
+                            <!DOCTYPE html>
+                            <html>
+                              <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                <style>
+                                  * {
+                                    margin: 0;
+                                    padding: 0;
+                                    box-sizing: border-box;
+                                  }
+                                  body {
+                                    width: 100%;
+                                    height: 100%;
+                                    overflow: hidden;
+                                  }
+                                  img {
+                                    width: 100%;
+                                    height: 100%;
+                                    object-fit: cover;
+                                    filter: ${filterCSS};
+                                  }
+                                </style>
+                              </head>
+                              <body>
+                                <img src="${photoUri}" alt="Filtered Photo" />
+                              </body>
+                            </html>
+                          `
+                        }}
+                        style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                        scrollEnabled={false}
+                        showsVerticalScrollIndicator={false}
+                        showsHorizontalScrollIndicator={false}
+                        javaScriptEnabled={false}
+                        domStorageEnabled={false}
+                        onError={(syntheticEvent) => {
+                          const { nativeEvent } = syntheticEvent;
+                          console.log('Trending WebView error: ', nativeEvent);
+                        }}
+                      />
+                    </View>
+                  );
+                }
+                
+                // No filter, use regular Image
+                return (
+                  <Image
+                    source={{ uri: String(item.photo) }}
+                    style={{ width: '100%', height: '100%' }}
+                    resizeMode="cover"
+                    onError={(error) => {
+                      console.log('Trending photo error:', error);
+                    }}
+                  />
+                );
+              })()
             ) : item.video ? (
               <Video
                 source={{

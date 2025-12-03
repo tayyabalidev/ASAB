@@ -69,6 +69,7 @@ const MediaEditor = ({
   const [videoEndTime, setVideoEndTime] = useState(60);
   const [selectedMusic, setSelectedMusic] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false); // Track when capturing to hide UI elements
   
   const videoRef = useRef(null);
   const previewRef = useRef(null);
@@ -202,13 +203,28 @@ const MediaEditor = ({
       if (mediaType === 'photo' && previewRef.current && (stickers.length > 0 || texts.length > 0 || drawingPaths.length > 0)) {
         captureFunction = async () => {
           try {
+            // Hide delete buttons during capture
+            setIsCapturing(true);
+            
+            // Wait for React to update the UI (hide delete buttons)
+            // Use requestAnimationFrame to ensure the UI has updated
+            await new Promise(resolve => {
+              requestAnimationFrame(() => {
+                setTimeout(resolve, 150); // Additional delay to ensure render completes
+              });
+            });
+            
             const uri = await captureRef(previewRef, {
               format: 'jpg',
               quality: 0.9,
             });
+            
+            // Show delete buttons again after capture
+            setIsCapturing(false);
             return uri;
           } catch (error) {
             console.log('Capture failed:', error);
+            setIsCapturing(false);
             return null;
           }
         };
@@ -318,12 +334,14 @@ const MediaEditor = ({
                     ]}
                   >
                     <Text style={styles.stickerEmoji}>{sticker.emoji}</Text>
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={() => deleteElement('sticker', sticker.id)}
-                    >
-                      <Text style={styles.deleteButtonText}>×</Text>
-                    </TouchableOpacity>
+                    {!isCapturing && (
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => deleteElement('sticker', sticker.id)}
+                      >
+                        <Text style={styles.deleteButtonText}>×</Text>
+                      </TouchableOpacity>
+                    )}
                   </Animated.View>
                 </GestureDetector>
               );
@@ -370,12 +388,14 @@ const MediaEditor = ({
                     >
                       {text.text}
                     </Text>
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={() => deleteElement('text', text.id)}
-                    >
-                      <Text style={styles.deleteButtonText}>×</Text>
-                    </TouchableOpacity>
+                    {!isCapturing && (
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => deleteElement('text', text.id)}
+                      >
+                        <Text style={styles.deleteButtonText}>×</Text>
+                      </TouchableOpacity>
+                    )}
                   </Animated.View>
                 </GestureDetector>
               );

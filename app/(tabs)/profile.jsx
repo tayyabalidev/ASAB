@@ -8,6 +8,7 @@ import * as ImagePicker from "expo-image-picker";
 import { Video, ResizeMode } from "expo-av";
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
@@ -16,6 +17,81 @@ import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
 import { images } from "../../constants";
 import { useTranslation } from "react-i18next";
+
+// Get CSS filter string based on filter type and adjustments (same as in create.jsx and home.jsx)
+const getFilterCSS = (filterId, adjustmentsData = null) => {
+  if (!filterId || filterId === 'none') {
+    // Apply adjustments only if no filter
+    if (adjustmentsData) {
+      const parts = [];
+      if (adjustmentsData.brightness !== 0) {
+        parts.push(`brightness(${1 + (adjustmentsData.brightness / 100)})`);
+      }
+      if (adjustmentsData.contrast !== 1) {
+        parts.push(`contrast(${adjustmentsData.contrast})`);
+      }
+      if (adjustmentsData.saturation !== 1) {
+        parts.push(`saturate(${adjustmentsData.saturation})`);
+      }
+      if (adjustmentsData.hue !== 0) {
+        parts.push(`hue-rotate(${adjustmentsData.hue}deg)`);
+      }
+      return parts.length > 0 ? parts.join(' ') : 'none';
+    }
+    return 'none';
+  }
+  
+  let filterCSS = '';
+  
+  // Apply filter effects
+  switch (filterId) {
+    case 'vintage':
+      filterCSS += 'brightness(1.1) contrast(0.9) saturate(0.8) sepia(0.2)';
+      break;
+    case 'blackwhite':
+      filterCSS += 'grayscale(100%)';
+      break;
+    case 'sepia':
+      filterCSS += 'sepia(1) brightness(1.1) contrast(0.9)';
+      break;
+    case 'cool':
+      filterCSS += 'hue-rotate(30deg) saturate(0.9)';
+      break;
+    case 'warm':
+      filterCSS += 'hue-rotate(-30deg) saturate(1.1)';
+      break;
+    case 'contrast':
+      filterCSS += 'contrast(1.3)';
+      break;
+    case 'bright':
+      filterCSS += 'brightness(1.2) contrast(1.1)';
+      break;
+    default:
+      break;
+  }
+  
+  // Apply manual adjustments on top of filter
+  if (adjustmentsData) {
+    const parts = [];
+    if (adjustmentsData.brightness !== 0) {
+      parts.push(`brightness(${1 + (adjustmentsData.brightness / 100)})`);
+    }
+    if (adjustmentsData.contrast !== 1) {
+      parts.push(`contrast(${adjustmentsData.contrast})`);
+    }
+    if (adjustmentsData.saturation !== 1) {
+      parts.push(`saturate(${adjustmentsData.saturation})`);
+    }
+    if (adjustmentsData.hue !== 0) {
+      parts.push(`hue-rotate(${adjustmentsData.hue}deg)`);
+    }
+    if (parts.length > 0) {
+      filterCSS = filterCSS ? `${filterCSS} ${parts.join(' ')}` : parts.join(' ');
+    }
+  }
+  
+  return filterCSS || 'none';
+};
 
 // Component to display pending request with user details
 const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
@@ -1405,11 +1481,74 @@ const Profile = () => {
                           setPhotoModalVisible(true);
                         }}
                       >
-                        <Image
-                          source={{ uri: photo.photo || 'https://via.placeholder.com/300x300' }}
-                          style={{ width: '100%', height: '100%' }}
-                          resizeMode="cover"
-                        />
+                        {(() => {
+                          // Get filter and adjustments from photo
+                          const filterId = photo.filter || 'none';
+                          let adjustments = null;
+                          if (photo.edits) {
+                            try {
+                              const edits = typeof photo.edits === 'string' ? JSON.parse(photo.edits) : photo.edits;
+                              adjustments = edits.adjustments || null;
+                            } catch (e) {
+                              console.log('Error parsing edits:', e);
+                            }
+                          }
+                          const filterCSS = getFilterCSS(filterId, adjustments);
+                          
+                          // Apply filter using WebView for photos
+                          if (filterCSS !== 'none') {
+                            return (
+                              <View style={{ width: '100%', height: '100%' }}>
+                                <WebView
+                                  source={{
+                                    html: `
+                                      <!DOCTYPE html>
+                                      <html>
+                                        <head>
+                                          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                          <style>
+                                            * {
+                                              margin: 0;
+                                              padding: 0;
+                                              box-sizing: border-box;
+                                            }
+                                            body {
+                                              width: 100%;
+                                              height: 100%;
+                                              overflow: hidden;
+                                            }
+                                            img {
+                                              width: 100%;
+                                              height: 100%;
+                                              object-fit: cover;
+                                              filter: ${filterCSS};
+                                            }
+                                          </style>
+                                        </head>
+                                        <body>
+                                          <img src="${photo.photo || 'https://via.placeholder.com/300x300'}" alt="Filtered Photo" />
+                                        </body>
+                                      </html>
+                                    `
+                                  }}
+                                  style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                                  scrollEnabled={false}
+                                  showsVerticalScrollIndicator={false}
+                                  showsHorizontalScrollIndicator={false}
+                                />
+                              </View>
+                            );
+                          }
+                          
+                          // No filter, use regular Image
+                          return (
+                            <Image
+                              source={{ uri: photo.photo || 'https://via.placeholder.com/300x300' }}
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="cover"
+                            />
+                          );
+                        })()}
                       </TouchableOpacity>
                       {/* Delete Button */}
                       <TouchableOpacity
