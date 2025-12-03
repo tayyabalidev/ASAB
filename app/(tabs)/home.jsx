@@ -7,6 +7,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { GestureHandlerRootView, PanGestureHandler, State, Gesture } from "react-native-gesture-handler";
 import { LinearGradient } from 'expo-linear-gradient';
+import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
@@ -17,6 +18,81 @@ import { databases } from "../../lib/appwrite";
 import { appwriteConfig } from "../../lib/appwrite";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Get CSS filter string based on filter type and adjustments (same as in create.jsx)
+const getFilterCSS = (filterId, adjustmentsData = null) => {
+  if (!filterId || filterId === 'none') {
+    // Apply adjustments only if no filter
+    if (adjustmentsData) {
+      const parts = [];
+      if (adjustmentsData.brightness !== 0) {
+        parts.push(`brightness(${1 + (adjustmentsData.brightness / 100)})`);
+      }
+      if (adjustmentsData.contrast !== 1) {
+        parts.push(`contrast(${adjustmentsData.contrast})`);
+      }
+      if (adjustmentsData.saturation !== 1) {
+        parts.push(`saturate(${adjustmentsData.saturation})`);
+      }
+      if (adjustmentsData.hue !== 0) {
+        parts.push(`hue-rotate(${adjustmentsData.hue}deg)`);
+      }
+      return parts.length > 0 ? parts.join(' ') : 'none';
+    }
+    return 'none';
+  }
+  
+  let filterCSS = '';
+  
+  // Apply filter effects
+  switch (filterId) {
+    case 'vintage':
+      filterCSS += 'brightness(1.1) contrast(0.9) saturate(0.8) sepia(0.2)';
+      break;
+    case 'blackwhite':
+      filterCSS += 'grayscale(100%)';
+      break;
+    case 'sepia':
+      filterCSS += 'sepia(1) brightness(1.1) contrast(0.9)';
+      break;
+    case 'cool':
+      filterCSS += 'hue-rotate(30deg) saturate(0.9)';
+      break;
+    case 'warm':
+      filterCSS += 'hue-rotate(-30deg) saturate(1.1)';
+      break;
+    case 'contrast':
+      filterCSS += 'contrast(1.3)';
+      break;
+    case 'bright':
+      filterCSS += 'brightness(1.2) contrast(1.1)';
+      break;
+    default:
+      break;
+  }
+  
+  // Apply manual adjustments on top of filter
+  if (adjustmentsData) {
+    const parts = [];
+    if (adjustmentsData.brightness !== 0) {
+      parts.push(`brightness(${1 + (adjustmentsData.brightness / 100)})`);
+    }
+    if (adjustmentsData.contrast !== 1) {
+      parts.push(`contrast(${adjustmentsData.contrast})`);
+    }
+    if (adjustmentsData.saturation !== 1) {
+      parts.push(`saturate(${adjustmentsData.saturation})`);
+    }
+    if (adjustmentsData.hue !== 0) {
+      parts.push(`hue-rotate(${adjustmentsData.hue}deg)`);
+    }
+    if (parts.length > 0) {
+      filterCSS = filterCSS ? `${filterCSS} ${parts.join(' ')}` : parts.join(' ');
+    }
+  }
+  
+  return filterCSS || 'none';
+};
 
 const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused, theme, isDarkMode }) => {
   const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
@@ -420,14 +496,77 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         }}
       >
         {item.postType === 'photo' && item.photo && typeof item.photo === 'string' && item.photo.trim() !== '' ? (
-          <Image
-            source={{ uri: String(item.photo) }}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
-            onError={(error) => {
-              console.log('Photo error:', error);
-            }}
-          />
+          (() => {
+            // Get filter and adjustments from item
+            const filterId = item.filter || 'none';
+            let adjustments = null;
+            if (item.edits) {
+              try {
+                const edits = typeof item.edits === 'string' ? JSON.parse(item.edits) : item.edits;
+                adjustments = edits.adjustments || null;
+              } catch (e) {
+                console.log('Error parsing edits:', e);
+              }
+            }
+            const filterCSS = getFilterCSS(filterId, adjustments);
+            
+            // Apply filter using WebView for photos (similar to create screen)
+            if (filterCSS !== 'none') {
+              return (
+                <View style={{ width: '100%', height: '100%' }}>
+                  <WebView
+                    source={{
+                      html: `
+                        <!DOCTYPE html>
+                        <html>
+                          <head>
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                            <style>
+                              * {
+                                margin: 0;
+                                padding: 0;
+                                box-sizing: border-box;
+                              }
+                              body {
+                                width: 100%;
+                                height: 100%;
+                                overflow: hidden;
+                              }
+                              img {
+                                width: 100%;
+                                height: 100%;
+                                object-fit: cover;
+                                filter: ${filterCSS};
+                              }
+                            </style>
+                          </head>
+                          <body>
+                            <img src="${String(item.photo)}" alt="Filtered Photo" />
+                          </body>
+                        </html>
+                      `
+                    }}
+                    style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                    scrollEnabled={false}
+                    showsVerticalScrollIndicator={false}
+                    showsHorizontalScrollIndicator={false}
+                  />
+                </View>
+              );
+            }
+            
+            // No filter, use regular Image
+            return (
+              <Image
+                source={{ uri: String(item.photo) }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+                onError={(error) => {
+                  console.log('Photo error:', error);
+                }}
+              />
+            );
+          })()
         ) : item.video ? (
           <Video
             source={{ 
