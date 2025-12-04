@@ -19,6 +19,8 @@ import beigeBack from "../assets/images/Beige Back.png";
 import textBackgroundDark from "../assets/images/text_background_dark.png";
 import textBackgroundLight from "../assets/images/text_background_light.png";
 import usersPage from "../assets/images/users_page.png";
+import messageDarkmood from "../assets/images/messageDarkmood.png";
+import messageLightmood from "../assets/images/messageLightmood.png";
 export default {
   profile,
   thumbnail,
@@ -41,5 +43,7 @@ export default {
   textBackgroundDark,
   textBackgroundLight,
   usersPage,
+  messageDarkmood,
+  messageLightmood,
   backgroundImage: require("../assets/images/backgroundImage.png"),
 };

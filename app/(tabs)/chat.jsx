@@ -19,6 +19,7 @@ import { Video } from 'expo-av';
 import CallInterface from '../../components/CallInterface';
 import { useTranslation } from "react-i18next";
 import { useGlobalContext } from "../../context/GlobalProvider";
+import { images } from "../../constants";
 
 const Chat = () => {
   const navigation = useNavigation();
@@ -1645,8 +1646,35 @@ const Chat = () => {
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
           >
+            {/* Background Image */}
+            <Image
+              source={isDarkMode ? images.messageDarkmood : images.messageLightmood}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100%',
+                height: '100%',
+                opacity: 0.4,
+              }}
+              resizeMode="cover"
+            />
+            {/* Semi-transparent overlay to make background more subtle */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.3)' : 'rgba(255, 255, 255, 0.2)',
+              }}
+            />
             {/* Messages */}
             <FlatList
+              style={{ flex: 1, backgroundColor: 'transparent' }}
               data={messages?.filter(m => m?.content) || []}
               keyExtractor={item => item.$id}
               renderItem={({ item, index }) => {
