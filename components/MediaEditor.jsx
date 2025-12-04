@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  BackHandler,
+  PanResponder,
 } from 'react-native';
 import { ResizeMode, Video } from 'expo-av';
 import * as DocumentPicker from 'expo-document-picker';
@@ -76,6 +78,18 @@ const MediaEditor = ({
   const previewRef = useRef(null);
   const [videoDuration, setVideoDuration] = useState(60);
 
+  // Prevent back button from closing the modal
+  useEffect(() => {
+    if (visible) {
+      const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+        // Prevent default back button behavior
+        return true;
+      });
+
+      return () => backHandler.remove();
+    }
+  }, [visible]);
+
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
     [isDarkMode]
@@ -112,6 +126,44 @@ const MediaEditor = ({
         : s
     ));
   }, []);
+
+  // Store start positions for each sticker
+  const stickerStartPositions = useRef({});
+  
+  // Create PanResponder for stickers - this prevents system gesture conflicts
+  const createStickerPanResponder = useCallback((sticker) => {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const { pageX, pageY } = evt.nativeEvent;
+        stickerStartPositions.current[sticker.id] = {
+          startX: pageX - sticker.x,
+          startY: pageY - sticker.y,
+        };
+        setSelectedSticker(sticker.id);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const { pageX, pageY } = evt.nativeEvent;
+        const startPos = stickerStartPositions.current[sticker.id];
+        if (startPos) {
+          const newX = pageX - startPos.startX;
+          const newY = pageY - startPos.startY;
+          updateStickerPosition(sticker.id, newX, newY);
+        }
+      },
+      onPanResponderRelease: () => {
+        delete stickerStartPositions.current[sticker.id];
+        setSelectedSticker(null);
+      },
+      onPanResponderTerminate: () => {
+        delete stickerStartPositions.current[sticker.id];
+        setSelectedSticker(null);
+      },
+      onPanResponderTerminationRequest: () => false, // Prevent system from taking over
+      onShouldBlockNativeResponder: () => true, // Block native responder
+    });
+  }, [updateStickerPosition]);
   
   // Update text position - using functional update to avoid stale state
   const updateTextPosition = useCallback((textId, x, y) => {
@@ -121,6 +173,44 @@ const MediaEditor = ({
         : t
     ));
   }, []);
+
+  // Store start positions for each text
+  const textStartPositions = useRef({});
+  
+  // Create PanResponder for texts - this prevents system gesture conflicts
+  const createTextPanResponder = useCallback((text) => {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const { pageX, pageY } = evt.nativeEvent;
+        textStartPositions.current[text.id] = {
+          startX: pageX - text.x,
+          startY: pageY - text.y,
+        };
+        setSelectedText(text.id);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const { pageX, pageY } = evt.nativeEvent;
+        const startPos = textStartPositions.current[text.id];
+        if (startPos) {
+          const newX = pageX - startPos.startX;
+          const newY = pageY - startPos.startY;
+          updateTextPosition(text.id, newX, newY);
+        }
+      },
+      onPanResponderRelease: () => {
+        delete textStartPositions.current[text.id];
+        setSelectedText(null);
+      },
+      onPanResponderTerminate: () => {
+        delete textStartPositions.current[text.id];
+        setSelectedText(null);
+      },
+      onPanResponderTerminationRequest: () => false, // Prevent system from taking over
+      onShouldBlockNativeResponder: () => true, // Block native responder
+    });
+  }, [updateTextPosition]);
 
   // Add text
   const addText = () => {
@@ -143,35 +233,75 @@ const MediaEditor = ({
     setTexts(texts.map(t => t.id === id ? { ...t, ...updates } : t));
   };
 
-  // Drawing gesture
-  const drawingGesture = Gesture.Pan()
-    .minDistance(1)
-    .activeOffsetX([-5, 5])
-    .activeOffsetY([-5, 5])
-    .failOffsetX([-100, 100]) // Prevent back gesture conflicts
-    .failOffsetY([-100, 100])
-    .onStart((e) => {
-      setIsDrawing(true);
-      setCurrentPath(`M${e.x},${e.y}`);
-    })
-    .onUpdate((e) => {
-      setCurrentPath(prev => `${prev} L${e.x},${e.y}`);
-    })
-    .onEnd(() => {
-      if (currentPath) {
-        setDrawingPaths([
-          ...drawingPaths,
-          {
-            id: Date.now(),
-            path: currentPath,
-            color: drawingColor,
-            width: drawingWidth,
+  // Track activeTab, drawingColor, and drawingWidth in refs to access current values in PanResponder
+  const activeTabRef = useRef(activeTab);
+  const drawingColorRef = useRef(drawingColor);
+  const drawingWidthRef = useRef(drawingWidth);
+  
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+  
+  useEffect(() => {
+    drawingColorRef.current = drawingColor;
+  }, [drawingColor]);
+  
+  useEffect(() => {
+    drawingWidthRef.current = drawingWidth;
+  }, [drawingWidth]);
+
+  // Drawing PanResponder - prevents system gesture conflicts
+  const drawingPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: (evt, gestureState) => {
+        return activeTabRef.current === 'draw';
+      },
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        return activeTabRef.current === 'draw';
+      },
+      onPanResponderGrant: (evt) => {
+        if (activeTabRef.current === 'draw') {
+          const { locationX, locationY } = evt.nativeEvent;
+          setIsDrawing(true);
+          setCurrentPath(`M${locationX},${locationY}`);
+        }
+      },
+      onPanResponderMove: (evt) => {
+        if (activeTabRef.current === 'draw') {
+          const { locationX, locationY } = evt.nativeEvent;
+          setCurrentPath(prev => {
+            if (!prev) {
+              return `M${locationX},${locationY}`;
+            }
+            return `${prev} L${locationX},${locationY}`;
+          });
+        }
+      },
+      onPanResponderRelease: () => {
+        setCurrentPath(prev => {
+          if (activeTabRef.current === 'draw' && prev) {
+            setDrawingPaths(drawingPaths => [
+              ...drawingPaths,
+              {
+                id: Date.now(),
+                path: prev,
+                color: drawingColorRef.current,
+                width: drawingWidthRef.current,
+              }
+            ]);
           }
-        ]);
+          setIsDrawing(false);
+          return '';
+        });
+      },
+      onPanResponderTerminate: () => {
+        setIsDrawing(false);
         setCurrentPath('');
-      }
-      setIsDrawing(false);
-    });
+      },
+      onPanResponderTerminationRequest: () => false, // Prevent system from taking over
+      onShouldBlockNativeResponder: () => true, // Block native responder
+    })
+  ).current;
 
   // Delete element
   const deleteElement = (type, id) => {
@@ -257,13 +387,21 @@ const MediaEditor = ({
       visible={visible}
       animationType="slide"
       transparent={false}
-      onRequestClose={onClose}
+      onRequestClose={() => {
+        // Only allow closing via Cancel button, not back gesture
+        // This prevents accidental closes
+      }}
       presentationStyle="fullScreen"
       hardwareAccelerated={true}
       statusBarTranslucent={false}
     >
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <GestureHandlerRootView style={{ flex: 1 }} shouldCancelWhenOutside={false}>
+        <View 
+          style={[styles.container, { backgroundColor: theme.background }]}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderTerminationRequest={() => false}
+        >
         {/* Header - Fixed at top with safe area */}
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border, paddingTop: 50 }]}>
           <TouchableOpacity onPress={onClose}>
@@ -293,7 +431,16 @@ const MediaEditor = ({
         </TouchableOpacity>
 
         {/* Media Preview */}
-        <View style={styles.previewContainer} collapsable={false}>
+        <View 
+          style={styles.previewContainer} 
+          collapsable={false}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={() => {
+            // Prevent system gestures when touching preview area
+          }}
+          onResponderTerminationRequest={() => false}
+        >
           <View ref={previewRef} collapsable={false} style={styles.previewWrapper}>
             {!media || !media.uri ? (
               <View style={[styles.media, { justifyContent: 'center', alignItems: 'center' }]}>
@@ -313,145 +460,138 @@ const MediaEditor = ({
             )}
           
           {/* Overlay for stickers, text, drawings */}
-          <GestureHandlerRootView style={styles.overlay} pointerEvents="box-none">
-            {/* Stickers - Draggable */}
+          <View
+            style={styles.overlay}
+            pointerEvents="box-none"
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderTerminationRequest={() => false}
+            onShouldBlockNativeResponder={() => true}
+          >
+            <GestureHandlerRootView 
+              style={StyleSheet.absoluteFill} 
+              pointerEvents="box-none"
+              shouldCancelWhenOutside={false}
+            >
+            {/* Stickers - Draggable using PanResponder */}
             {stickers.map(sticker => {
-              const panGesture = Gesture.Pan()
-                .minDistance(5) // Require minimum movement to activate
-                .activeOffsetX([-10, 10]) // Activate when moved horizontally
-                .activeOffsetY([-10, 10]) // Activate when moved vertically
-                .failOffsetX([-50, 50]) // Fail if moved too far horizontally (prevents back gesture)
-                .failOffsetY([-50, 50]) // Fail if moved too far vertically
-                .onStart(() => {
-                  setSelectedSticker(sticker.id);
-                })
-                .onUpdate((e) => {
-                  updateStickerPosition(sticker.id, e.x - 20, e.y - 20);
-                })
-                .onEnd(() => {
-                  setSelectedSticker(null);
-                });
+              const panResponder = createStickerPanResponder(sticker);
               
               return (
-                <GestureDetector key={sticker.id} gesture={panGesture}>
-                  <Animated.View
-                    style={[
-                      styles.stickerContainer,
-                      {
-                        left: sticker.x,
-                        top: sticker.y,
-                        transform: [
-                          { scale: sticker.scale },
-                          { rotate: `${sticker.rotation}deg` }
-                        ],
-                        zIndex: selectedSticker === sticker.id ? 1000 : 1,
-                      }
-                    ]}
-                  >
-                    <Text style={styles.stickerEmoji}>{sticker.emoji}</Text>
-                    {!isCapturing && (
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => deleteElement('sticker', sticker.id)}
-                      >
-                        <Text style={styles.deleteButtonText}>×</Text>
-                      </TouchableOpacity>
-                    )}
-                  </Animated.View>
-                </GestureDetector>
+                <Animated.View
+                  key={sticker.id}
+                  {...panResponder.panHandlers}
+                  style={[
+                    styles.stickerContainer,
+                    {
+                      left: sticker.x,
+                      top: sticker.y,
+                      transform: [
+                        { scale: sticker.scale },
+                        { rotate: `${sticker.rotation}deg` }
+                      ],
+                      zIndex: selectedSticker === sticker.id ? 1000 : 1,
+                    }
+                  ]}
+                >
+                  <Text style={styles.stickerEmoji}>{sticker.emoji}</Text>
+                  {!isCapturing && (
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        deleteElement('sticker', sticker.id);
+                      }}
+                    >
+                      <Text style={styles.deleteButtonText}>×</Text>
+                    </TouchableOpacity>
+                  )}
+                </Animated.View>
               );
             })}
             
-            {/* Texts - Draggable */}
+            {/* Texts - Draggable using PanResponder */}
             {texts.map(text => {
-              const textPanGesture = Gesture.Pan()
-                .minDistance(5) // Require minimum movement to activate
-                .activeOffsetX([-10, 10]) // Activate when moved horizontally
-                .activeOffsetY([-10, 10]) // Activate when moved vertically
-                .failOffsetX([-50, 50]) // Fail if moved too far horizontally (prevents back gesture)
-                .failOffsetY([-50, 50]) // Fail if moved too far vertically
-                .onStart(() => {
-                  setSelectedText(text.id);
-                })
-                .onUpdate((e) => {
-                  updateTextPosition(text.id, e.x - 50, e.y - 15);
-                })
-                .onEnd(() => {
-                  setSelectedText(null);
-                });
+              const textPanResponder = createTextPanResponder(text);
               
               return (
-                <GestureDetector key={text.id} gesture={textPanGesture}>
-                  <Animated.View
+                <Animated.View
+                  key={text.id}
+                  {...textPanResponder.panHandlers}
+                  style={[
+                    styles.textContainer,
+                    {
+                      left: text.x,
+                      top: text.y,
+                      transform: [
+                        { scale: text.scale },
+                        { rotate: `${text.rotation}deg` }
+                      ],
+                      zIndex: selectedText === text.id ? 1000 : 1,
+                    }
+                  ]}
+                >
+                  <Text
                     style={[
-                      styles.textContainer,
+                      styles.textOverlay,
                       {
-                        left: text.x,
-                        top: text.y,
-                        transform: [
-                          { scale: text.scale },
-                          { rotate: `${text.rotation}deg` }
-                        ],
-                        zIndex: selectedText === text.id ? 1000 : 1,
+                        fontSize: text.fontSize,
+                        color: text.color,
+                        fontFamily: text.fontFamily,
                       }
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.textOverlay,
-                        {
-                          fontSize: text.fontSize,
-                          color: text.color,
-                          fontFamily: text.fontFamily,
-                        }
-                      ]}
+                    {text.text}
+                  </Text>
+                  {!isCapturing && (
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        deleteElement('text', text.id);
+                      }}
                     >
-                      {text.text}
-                    </Text>
-                    {!isCapturing && (
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => deleteElement('text', text.id)}
-                      >
-                        <Text style={styles.deleteButtonText}>×</Text>
-                      </TouchableOpacity>
-                    )}
-                  </Animated.View>
-                </GestureDetector>
+                      <Text style={styles.deleteButtonText}>×</Text>
+                    </TouchableOpacity>
+                  )}
+                </Animated.View>
               );
             })}
             
             {/* Drawings */}
             {mediaType === 'photo' && (
-              <GestureHandlerRootView style={StyleSheet.absoluteFill} pointerEvents="box-none">
-                <GestureDetector gesture={drawingGesture.minDistance(1)}>
-                  <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
-                    {drawingPaths.map(drawing => (
-                      <Path
-                        key={drawing.id}
-                        d={drawing.path}
-                        stroke={drawing.color}
-                        strokeWidth={drawing.width}
-                        fill="none"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    ))}
-                    {currentPath && (
-                      <Path
-                        d={currentPath}
-                        stroke={drawingColor}
-                        strokeWidth={drawingWidth}
-                        fill="none"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    )}
-                  </Svg>
-                </GestureDetector>
-              </GestureHandlerRootView>
+              <View
+                style={StyleSheet.absoluteFill}
+                pointerEvents={activeTab === 'draw' ? 'auto' : 'none'}
+                {...drawingPanResponder.panHandlers}
+              >
+                <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+                  {drawingPaths.map(drawing => (
+                    <Path
+                      key={drawing.id}
+                      d={drawing.path}
+                      stroke={drawing.color}
+                      strokeWidth={drawing.width}
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  ))}
+                  {currentPath && (
+                    <Path
+                      d={currentPath}
+                      stroke={drawingColor}
+                      strokeWidth={drawingWidth}
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  )}
+                </Svg>
+              </View>
             )}
-          </GestureHandlerRootView>
+            </GestureHandlerRootView>
+          </View>
           </View>
         </View>
 
