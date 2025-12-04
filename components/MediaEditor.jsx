@@ -11,6 +11,7 @@ import {
   Dimensions,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { ResizeMode, Video } from 'expo-av';
 import * as DocumentPicker from 'expo-document-picker';
@@ -144,6 +145,11 @@ const MediaEditor = ({
 
   // Drawing gesture
   const drawingGesture = Gesture.Pan()
+    .minDistance(1)
+    .activeOffsetX([-5, 5])
+    .activeOffsetY([-5, 5])
+    .failOffsetX([-100, 100]) // Prevent back gesture conflicts
+    .failOffsetY([-100, 100])
     .onStart((e) => {
       setIsDrawing(true);
       setCurrentPath(`M${e.x},${e.y}`);
@@ -252,8 +258,12 @@ const MediaEditor = ({
       animationType="slide"
       transparent={false}
       onRequestClose={onClose}
+      presentationStyle="fullScreen"
+      hardwareAccelerated={true}
+      statusBarTranslucent={false}
     >
-      <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={[styles.container, { backgroundColor: theme.background }]}>
         {/* Header - Fixed at top with safe area */}
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border, paddingTop: 50 }]}>
           <TouchableOpacity onPress={onClose}>
@@ -307,6 +317,11 @@ const MediaEditor = ({
             {/* Stickers - Draggable */}
             {stickers.map(sticker => {
               const panGesture = Gesture.Pan()
+                .minDistance(5) // Require minimum movement to activate
+                .activeOffsetX([-10, 10]) // Activate when moved horizontally
+                .activeOffsetY([-10, 10]) // Activate when moved vertically
+                .failOffsetX([-50, 50]) // Fail if moved too far horizontally (prevents back gesture)
+                .failOffsetY([-50, 50]) // Fail if moved too far vertically
                 .onStart(() => {
                   setSelectedSticker(sticker.id);
                 })
@@ -350,6 +365,11 @@ const MediaEditor = ({
             {/* Texts - Draggable */}
             {texts.map(text => {
               const textPanGesture = Gesture.Pan()
+                .minDistance(5) // Require minimum movement to activate
+                .activeOffsetX([-10, 10]) // Activate when moved horizontally
+                .activeOffsetY([-10, 10]) // Activate when moved vertically
+                .failOffsetX([-50, 50]) // Fail if moved too far horizontally (prevents back gesture)
+                .failOffsetY([-50, 50]) // Fail if moved too far vertically
                 .onStart(() => {
                   setSelectedText(text.id);
                 })
@@ -404,7 +424,7 @@ const MediaEditor = ({
             {/* Drawings */}
             {mediaType === 'photo' && (
               <GestureHandlerRootView style={StyleSheet.absoluteFill} pointerEvents="box-none">
-                <GestureDetector gesture={drawingGesture}>
+                <GestureDetector gesture={drawingGesture.minDistance(1)}>
                   <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
                     {drawingPaths.map(drawing => (
                       <Path
@@ -679,6 +699,7 @@ const MediaEditor = ({
           )}
         </View>
       </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 };
@@ -704,6 +725,11 @@ const styles = StyleSheet.create({
   },
   previewContainer: {
     flex: 1,
+    position: 'relative',
+  },
+  previewWrapper: {
+    width: '100%',
+    height: '100%',
     position: 'relative',
   },
   media: {
@@ -885,6 +911,25 @@ const styles = StyleSheet.create({
   musicInfo: {
     fontSize: 14,
     textAlign: 'center',
+  },
+  floatingSaveButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+    zIndex: 1000,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  floatingSaveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 
