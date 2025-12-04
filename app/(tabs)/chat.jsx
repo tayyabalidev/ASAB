@@ -127,7 +127,7 @@ const Chat = () => {
         // Check for session first
         const session = await account.getSession('current');
         if (!session) {
-          Alert.alert(t('common.error'), t('chat.authRequired'));
+          Alert.alert(t('error'), t('chat.authRequired'));
           router.replace('/sign-in');
           return;
         }
@@ -202,7 +202,7 @@ const Chat = () => {
         setChatReads(chatReadRes.documents);
 
       } catch (e) {
-        Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+        Alert.alert(t('error'), e.message || t('chat.generalError'));
       } finally {
         setLoading(false);
       }
@@ -404,7 +404,7 @@ const Chat = () => {
       // Trigger a refresh to ensure both users see the message
       // The polling will handle this, but we can also trigger manually if needed
     } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
       // Remove optimistic message if sending fails
       setMessages(prev => prev.filter(m => !m.optimistic || m.$id !== tempId));
       setAllMessages(prev => prev.filter(m => !m.optimistic || m.$id !== tempId));
@@ -452,7 +452,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -495,7 +495,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -527,7 +527,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -581,7 +581,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -612,7 +612,7 @@ const Chat = () => {
       });
       setShowAttachmentOptions(false);
     } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -644,7 +644,7 @@ const Chat = () => {
         setShowAttachmentOptions(false);
       }
     } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -835,7 +835,7 @@ const Chat = () => {
         }
         return;
       } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
         return;
       }
     }
@@ -855,7 +855,7 @@ const Chat = () => {
         prev.map(g => (g.$id === item.$id ? { ...g, isFavourite: isFavourite } : g))
       );
     } catch (e) {
-      Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
   };
 
@@ -896,7 +896,7 @@ const Chat = () => {
       setRecording(recording);
       setIsRecording(true);
     } catch (err) {
-      Alert.alert(t('common.error'), t('chat.recordingError', { message: err.message || '' }));
+      Alert.alert(t('error'), t('chat.recordingError', { message: err.message || '' }));
     }
   };
 
@@ -928,7 +928,7 @@ const Chat = () => {
         });
       }
     } catch (err) {
-      Alert.alert(t('common.error'), t('chat.recordingSaveError', { message: err.message || '' }));
+      Alert.alert(t('error'), t('chat.recordingSaveError', { message: err.message || '' }));
     }
   };
 
@@ -963,7 +963,7 @@ const Chat = () => {
         }
       });
     } catch (err) {
-      Alert.alert(t('common.error'), t('chat.audioPlaybackError', { message: err.message || '' }));
+      Alert.alert(t('error'), t('chat.audioPlaybackError', { message: err.message || '' }));
     }
   };
 
@@ -978,7 +978,7 @@ const Chat = () => {
   const handleAudioCall = async () => {
     try {
       if (!selectedUser || !selectedUser.$id) {
-        Alert.alert(t('common.error'), t('chat.noUserSelected'));
+        Alert.alert(t('error'), t('chat.noUserSelected'));
         return;
       }
       
@@ -989,31 +989,31 @@ const Chat = () => {
           startCall();
         } catch (callError) {
          
-          Alert.alert(t('common.error'), t('chat.callError'));
+          Alert.alert(t('error'), t('chat.callError'));
         }
       }, 100);
       
     } catch (error) {
      
-      Alert.alert(t('common.error'), t('chat.audioCallError', { message: error.message || '' }));
+      Alert.alert(t('error'), t('chat.audioCallError', { message: error.message || '' }));
     }
   };
 
   const handleVideoCall = async () => {
     try {
       if (!selectedUser || !selectedUser.$id) {
-        Alert.alert(t('common.error'), t('chat.noUserSelected'));
+        Alert.alert(t('error'), t('chat.noUserSelected'));
         return;
       }
       
 
       
       // Video calling functionality has been removed
-      Alert.alert(t('common.info'), t('chat.videoCallUnavailable'));
+      Alert.alert(t('info'), t('chat.videoCallUnavailable'));
       
     } catch (error) {
       
-      Alert.alert(t('common.error'), t('chat.videoCallError', { message: error.message || '' }));
+      Alert.alert(t('error'), t('chat.videoCallError', { message: error.message || '' }));
     }
   };
 
@@ -1094,6 +1094,107 @@ const Chat = () => {
   const handleSpeakerToggle = () => {
     setIsSpeakerOn(!isSpeakerOn);
     // Note: Speaker control might need additional implementation
+  };
+
+  // Delete message function
+  const deleteMessage = async (messageId) => {
+    try {
+      await databases.deleteDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.messagesCollectionId,
+        messageId
+      );
+      // Remove from local state
+      setMessages(prev => prev.filter(m => m.$id !== messageId));
+      setAllMessages(prev => prev.filter(m => m.$id !== messageId));
+    } catch (e) {
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
+    }
+  };
+
+  // Leave group function
+  const leaveGroup = async (groupId) => {
+    try {
+      const group = groups.find(g => g.$id === groupId);
+      if (!group) return;
+      
+      const updatedMembers = group.members.filter(m => m !== currentUser.$id);
+      
+      await databases.updateDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.chatsCollectionId,
+        groupId,
+        { members: updatedMembers }
+      );
+      
+      // Remove from local state
+      setGroups(prev => prev.filter(g => g.$id !== groupId));
+      
+      // If this was the selected group, go back to chat list
+      if (selectedUser?.$id === groupId) {
+        setSelectedUser(null);
+      }
+      
+      Alert.alert(t('success'), t('chat.leftGroup'));
+    } catch (e) {
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
+    }
+  };
+
+  // Delete group function (only for creator)
+  const deleteGroup = async (groupId) => {
+    try {
+      const group = groups.find(g => g.$id === groupId);
+      if (!group) return;
+      
+      // Check if current user is the creator
+      const isCreator = group.creatorId === currentUser.$id || 
+                       (group.members && group.members[0] === currentUser.$id && !group.creatorId);
+      
+      if (!isCreator) {
+        Alert.alert(t('error'), t('chat.onlyCreatorCanDelete'));
+        return;
+      }
+      
+      // Delete all messages in the group first
+      const groupMessages = await databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.messagesCollectionId,
+        [Query.equal('chatId', [groupId])]
+      );
+      
+      for (const msg of groupMessages.documents) {
+        try {
+          await databases.deleteDocument(
+            appwriteConfig.databaseId,
+            appwriteConfig.messagesCollectionId,
+            msg.$id
+          );
+        } catch (e) {
+          console.error('Error deleting message:', e);
+        }
+      }
+      
+      // Delete the group
+      await databases.deleteDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.chatsCollectionId,
+        groupId
+      );
+      
+      // Remove from local state
+      setGroups(prev => prev.filter(g => g.$id !== groupId));
+      setAllMessages(prev => prev.filter(m => m.chatId !== groupId));
+      
+      // If this was the selected group, go back to chat list
+      if (selectedUser?.$id === groupId) {
+        setSelectedUser(null);
+      }
+      
+      Alert.alert(t('success'), t('chat.groupDeleted'));
+    } catch (e) {
+      Alert.alert(t('error'), e.message || t('chat.generalError'));
+    }
   };
 
   // Debug function to check ZEGO status
@@ -1466,6 +1567,61 @@ const Chat = () => {
               <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16 }}>{selectedUser?.name || selectedUser?.username || selectedUser?.email || 'Unknown'}</Text>
               <Text style={{ color: theme.textSecondary, fontSize: 13 }}>{selectedUser?.type === 'group' ? 'Group chat' : 'User'}</Text>
             </View>
+            {/* Group actions menu */}
+            {selectedUser?.type === 'group' && (
+              <TouchableOpacity 
+                onPress={() => {
+                  Alert.alert(
+                    t('chat.groupActions'),
+                    '',
+                    [
+                      {
+                        text: t('chat.leaveGroup'),
+                        style: 'destructive',
+                        onPress: () => {
+                          Alert.alert(
+                            t('chat.confirmLeaveGroup'),
+                            t('chat.confirmLeaveGroupMessage'),
+                            [
+                              { text: t('cancel'), style: 'cancel' },
+                              {
+                                text: t('chat.leave'),
+                                style: 'destructive',
+                                onPress: () => leaveGroup(selectedUser.$id)
+                              }
+                            ]
+                          );
+                        }
+                      },
+                      {
+                        text: (selectedUser.creatorId === currentUser.$id || 
+                               (selectedUser.members && selectedUser.members[0] === currentUser.$id && !selectedUser.creatorId)) 
+                          ? t('chat.deleteGroup') : null,
+                        style: 'destructive',
+                        onPress: () => {
+                          Alert.alert(
+                            t('chat.confirmDeleteGroup'),
+                            t('chat.confirmDeleteGroupMessage'),
+                            [
+                              { text: t('cancel'), style: 'cancel' },
+                              {
+                                text: t('delete'),
+                                style: 'destructive',
+                                onPress: () => deleteGroup(selectedUser.$id)
+                              }
+                            ]
+                          );
+                        }
+                      },
+                      { text: t('cancel'), style: 'cancel' }
+                    ].filter(Boolean)
+                  );
+                }}
+                style={{ marginRight: 8, padding: 8 }}
+              >
+                <MaterialCommunityIcons name="dots-vertical" size={24} color={theme.textPrimary} />
+              </TouchableOpacity>
+            )}
             {/* Audio and Video Call Icons in Header */}
             {selectedUser?.type !== 'group' && (
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -1506,13 +1662,44 @@ const Chat = () => {
                 const now = new Date();
                 const showDate = d.toDateString() !== now.toDateString();
                 return (
-                  <View style={{
-                    flexDirection: isMe ? 'row-reverse' : 'row',
-                    alignItems: 'flex-end',
-                    marginTop: isFirstOfGroup ? 12 : 2,
-                    marginBottom: 2,
-                    marginHorizontal: 8,
-                  }}>
+                  <Pressable
+                    onLongPress={() => {
+                      if (isMe) {
+                        Alert.alert(
+                          t('chat.messageActions'),
+                          '',
+                          [
+                            {
+                              text: t('delete'),
+                              style: 'destructive',
+                              onPress: () => {
+                                Alert.alert(
+                                  t('chat.confirmDeleteMessage'),
+                                  t('chat.confirmDeleteMessageText'),
+                                  [
+                                    { text: t('cancel'), style: 'cancel' },
+                                    {
+                                      text: t('delete'),
+                                      style: 'destructive',
+                                      onPress: () => deleteMessage(item.$id)
+                                    }
+                                  ]
+                                );
+                              }
+                            },
+                            { text: t('cancel'), style: 'cancel' }
+                          ]
+                        );
+                      }
+                    }}
+                    style={{
+                      flexDirection: isMe ? 'row-reverse' : 'row',
+                      alignItems: 'flex-end',
+                      marginTop: isFirstOfGroup ? 12 : 2,
+                      marginBottom: 2,
+                      marginHorizontal: 8,
+                    }}
+                  >
                     <Image
                       source={{ uri: sender?.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(sender?.username || sender?.email || 'User') }}
                       style={{ width: 0, height: 0, marginHorizontal: 0, display: 'none' }} // Hide avatar for now
@@ -1623,7 +1810,7 @@ const Chat = () => {
                           : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
                       </Text>
                     </View>
-                  </View>
+                  </Pressable>
                 );
               }}
               contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', padding: 8 }}
@@ -1731,7 +1918,7 @@ const Chat = () => {
           <View style={{ backgroundColor: '#232533', borderRadius: 16, padding: 24, width: '100%', height: '100%' }}>
             {/* Cancel button in top right */}
             <TouchableOpacity onPress={() => setShowUserSearch(false)} style={{ position: 'absolute', top: 24, right: 24, zIndex: 10 }}>
-              <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('common.cancel')}</Text>
+              <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('cancel')}</Text>
             </TouchableOpacity>
             <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, marginTop: 24, textAlign: 'center' }}>
               {t('chat.startNewChat')}
@@ -1784,7 +1971,7 @@ const Chat = () => {
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }}>
           <View style={{ backgroundColor: '#232533', borderRadius: 16, padding: 24, width: '100%', height: '100%' }}>
             <TouchableOpacity onPress={() => setShowCreateGroup(false)} style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
-              <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('common.cancel')}</Text>
+              <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('cancel')}</Text>
             </TouchableOpacity>
             <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, marginTop: 8, textAlign: 'center' }}>
               {t('chat.createGroupTitle')}
@@ -1817,7 +2004,7 @@ const Chat = () => {
               <TouchableOpacity
                 onPress={async () => {
                   if (!groupName.trim() || groupMembers.length === 0) {
-                    Alert.alert(t('common.error'), t('chat.groupNameRequired'));
+                    Alert.alert(t('error'), t('chat.groupNameRequired'));
                     return;
                   }
                   setCreatingGroup(true);
@@ -1831,6 +2018,7 @@ const Chat = () => {
                         name: groupName.trim(),
                         type: 'group',
                         members: [currentUser.$id, ...groupMembers],
+                        creatorId: currentUser.$id,
                       }
                     );
                     setGroups(prev => [...prev, newGroup]);
@@ -1840,7 +2028,7 @@ const Chat = () => {
                     setSelectedUser(newGroup);
                     fetchMessagesForChat(newGroup);
                   } catch (e) {
-                    Alert.alert(t('common.error'), e.message || t('chat.generalError'));
+                    Alert.alert(t('error'), e.message || t('chat.generalError'));
                   } finally {
                     setCreatingGroup(false);
                   }

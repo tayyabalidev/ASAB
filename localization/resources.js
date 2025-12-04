@@ -1924,7 +1924,21 @@ export const resources = {
         confirm: "OK",
         messages: {
           empty: "No messages yet"
-        }
+        },
+        messageActions: "Message Actions",
+        confirmDeleteMessage: "Delete Message",
+        confirmDeleteMessageText: "Are you sure you want to delete this message?",
+        groupActions: "Group Actions",
+        leaveGroup: "Leave Group",
+        confirmLeaveGroup: "Leave Group",
+        confirmLeaveGroupMessage: "Are you sure you want to leave this group?",
+        leave: "Leave",
+        leftGroup: "You have left the group",
+        deleteGroup: "Delete Group",
+        confirmDeleteGroup: "Delete Group",
+        confirmDeleteGroupMessage: "Are you sure you want to delete this group? This action cannot be undone.",
+        groupDeleted: "Group deleted successfully",
+        onlyCreatorCanDelete: "Only the group creator can delete the group"
       },
       profile: profileBase,
       inbox: {
