@@ -1647,24 +1647,22 @@ const Profile = () => {
                          onPress={() => {
                            // For bookmarks, we need to fetch the actual video data first
                            if (bookmark.postId) {
-                             // Import the function to get video by ID
-                             import('../../lib/appwrite').then(({ getVideoById }) => {
-                               getVideoById(bookmark.postId)
-                                 .then((videoData) => {
-                                   const completePost = {
-                                     $id: bookmark.postId,
-                                     title: videoData.title || videoData.title || t('profile.general.bookmarkedVideo'),
-                                     video: videoData.video,
-                                    
-                                     creator: videoData.creator || videoData.creator || { username: t('profile.general.unknownUser') }
-                                   };
-                                   openVideoModal(completePost, index);
-                                 })
-                                 .catch((error) => {
+                             // Get video by ID using the already imported function
+                             getVideoById(bookmark.postId)
+                               .then((videoData) => {
+                                 const completePost = {
+                                   $id: bookmark.postId,
+                                   title: videoData.title || videoData.title || t('profile.general.bookmarkedVideo'),
+                                   video: videoData.video,
                                   
-                                   Alert.alert(t('common.error'), t('profile.alerts.videoLoadError'));
-                                 });
-                             });
+                                   creator: videoData.creator || videoData.creator || { username: t('profile.general.unknownUser') }
+                                 };
+                                 openVideoModal(completePost, index);
+                               })
+                               .catch((error) => {
+                                
+                                 Alert.alert(t('common.error'), t('profile.alerts.videoLoadError'));
+                               });
                            }
                          }}
                        >
