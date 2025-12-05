@@ -58,11 +58,11 @@ const TabLayout = () => {
             height: 80,
             borderTopWidth: 0,
             paddingBottom: 0,
-            paddingTop: 0,
+            paddingTop: 18,
           },
           tabBarItemStyle: {
             paddingHorizontal: 35,
-            marginHorizontal: 10,
+            marginHorizontal: 15,
           },
         }}
       >
