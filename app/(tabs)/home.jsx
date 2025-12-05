@@ -1856,16 +1856,16 @@ const Home = () => {
                         width: 44,
                         height: 44,
                         borderRadius: 22,
-                        backgroundColor: themedColor('rgba(255,255,255,0.1)', theme.accentSoft),
+                        backgroundColor: themedColor('rgba(255, 255, 255, 0)', theme.accentSoft),
                         justifyContent: 'center',
                         alignItems: 'center',
                         borderWidth: 1,
-                        borderColor: themedColor('rgba(255,255,255,0.2)', theme.border),
+                        borderColor: themedColor('rgba(255, 255, 255, 0)', theme.border),
                       }}
                     >
                       <Image
                         source={icons.messages}
-                        style={{ width: 24, height: 24, tintColor: theme.textPrimary }}
+                        style={{ width: 75, height: 75, tintColor: theme.textPrimary }}
                         resizeMode="contain"
                       />
                     </TouchableOpacity>
@@ -2031,7 +2031,7 @@ const Home = () => {
               ) : null}
               
               {/* For You / Following Tabs - TikTok Style */}
-              <View style={{ paddingVertical: 15, backgroundColor: theme.background }}>
+              <View style={{ paddingVertical: 8, backgroundColor: theme.background }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
                   <TouchableOpacity 
                     onPress={() => setSelectedTab('forYou')}
