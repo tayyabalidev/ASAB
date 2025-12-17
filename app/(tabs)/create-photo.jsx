@@ -513,8 +513,8 @@ const CreatePhoto = () => {
                         <TouchableOpacity
                           key={filter.id}
                           onPress={() => {
+                            // Apply filter immediately without closing modal
                             applyFilter(filter.id);
-                            setShowFilterModal(false);
                           }}
                           style={{
                             alignItems: 'center',
@@ -522,6 +522,8 @@ const CreatePhoto = () => {
                             backgroundColor: form.filter === filter.id ? theme.accentSoft : theme.cardSoft,
                             borderRadius: 10,
                             minWidth: 80,
+                            borderWidth: form.filter === filter.id ? 2 : 0,
+                            borderColor: theme.accent,
                           }}
                         >
                           <Text style={{

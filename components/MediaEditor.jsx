@@ -15,10 +15,12 @@ import {
   BackHandler,
   PanResponder,
 } from 'react-native';
+import { WebView } from 'react-native-webview';
 import Slider from '@react-native-community/slider';
 import { ResizeMode, Video } from 'expo-av';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system';
 import { captureRef } from 'react-native-view-shot';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, {
@@ -32,6 +34,67 @@ import { useGlobalContext } from '../context/GlobalProvider';
 import { useTranslation } from 'react-i18next';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Filter CSS generator function
+const getFilterCSS = (filterId) => {
+  if (!filterId || filterId === 'none') {
+    return 'none';
+  }
+  
+  let filterCSS = '';
+  
+  switch (filterId) {
+    case 'vintage':
+      filterCSS = 'brightness(1.1) contrast(0.9) saturate(0.8) sepia(0.2)';
+      break;
+    case 'blackwhite':
+      filterCSS = 'grayscale(100%)';
+      break;
+    case 'sepia':
+      filterCSS = 'sepia(1) brightness(1.1) contrast(0.9)';
+      break;
+    case 'cool':
+      filterCSS = 'hue-rotate(30deg) saturate(0.9)';
+      break;
+    case 'warm':
+      filterCSS = 'hue-rotate(-30deg) saturate(1.1)';
+      break;
+    case 'contrast':
+      filterCSS = 'contrast(1.3)';
+      break;
+    case 'bright':
+      filterCSS = 'brightness(1.2) contrast(1.1)';
+      break;
+    case 'dramatic':
+      filterCSS = 'contrast(1.4) saturate(1.2) brightness(0.95)';
+      break;
+    case 'portrait':
+      filterCSS = 'contrast(1.1) saturate(1.05) brightness(1.05)';
+      break;
+    case 'cinema':
+      filterCSS = 'contrast(1.2) saturate(0.85) brightness(0.9)';
+      break;
+    case 'noir':
+      filterCSS = 'grayscale(100%) contrast(1.3) brightness(0.9)';
+      break;
+    case 'vivid':
+      filterCSS = 'saturate(1.3) contrast(1.2) brightness(1.05)';
+      break;
+    case 'fade':
+      filterCSS = 'brightness(1.1) contrast(0.85) saturate(0.7)';
+      break;
+    case 'chrome':
+      filterCSS = 'contrast(1.2) saturate(1.1) brightness(1.05)';
+      break;
+    case 'process':
+      filterCSS = 'contrast(1.15) saturate(1.1) brightness(1.02)';
+      break;
+    default:
+      filterCSS = 'none';
+  }
+  
+  return filterCSS || 'none';
+};
 
 const FILTERS = [
   { id: 'none', name: 'Original' },
@@ -119,7 +182,8 @@ const MediaEditor = ({
   
   const [activeTab, setActiveTab] = useState('filters'); // filters, adjust, crop, stickers, text, draw, trim, music, transitions, clips
   const [selectedFilter, setSelectedFilter] = useState('none');
-  const [filterIntensity, setFilterIntensity] = useState(100); // 0-100%
+  const [filteredImageUri, setFilteredImageUri] = useState(null); // Store filtered image URI
+  const [isApplyingFilter, setIsApplyingFilter] = useState(false); // Track filter application
   const [stickers, setStickers] = useState([]);
   const [texts, setTexts] = useState([]);
   const [drawingPaths, setDrawingPaths] = useState([]);
@@ -179,6 +243,73 @@ const MediaEditor = ({
   const videoRef = useRef(null);
   const previewRef = useRef(null);
   const [videoDuration, setVideoDuration] = useState(60);
+  const [filterThumbnails, setFilterThumbnails] = useState({}); // Cache for filter thumbnails
+  const [imageBase64, setImageBase64] = useState(null); // Base64 encoded image for WebView
+  const [isLoadingBase64, setIsLoadingBase64] = useState(false); // Track base64 loading state
+  
+  // Helper function to convert filter ID to ImageManipulator actions (for thumbnails only)
+  // Note: ImageManipulator doesn't support brightness/contrast/saturation directly
+  // So we use CSS filters via WebView for main preview
+  const getFilterActions = useCallback((filterId) => {
+    // Return empty array - we'll use CSS filters instead via WebView
+    // This function is kept for thumbnail generation which uses a different approach
+    return [];
+  }, []);
+  
+  // Convert image to base64 for WebView and generate filter thumbnails
+  useEffect(() => {
+    const loadImageForWebView = async () => {
+      if (!media || !media.uri || mediaType !== 'photo') {
+        setFilterThumbnails({});
+        setImageBase64(null);
+        setIsLoadingBase64(false);
+        return;
+      }
+
+      setIsLoadingBase64(true);
+      try {
+        // First, resize the image to a reasonable size for WebView (to reduce base64 size)
+        const resized = await ImageManipulator.manipulateAsync(
+          media.uri,
+          [{ resize: { width: 800 } }], // Resize to max 800px width for performance
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+        );
+
+        // Convert resized image to base64 for WebView
+        const base64 = await FileSystem.readAsStringAsync(resized.uri, {
+          encoding: 'base64',
+        });
+        const base64Uri = `data:image/jpeg;base64,${base64}`;
+        setImageBase64(base64Uri);
+
+        // For thumbnails, we'll use the base64 URI
+        const thumbnails = {};
+        FILTERS.forEach(filter => {
+          thumbnails[filter.id] = base64Uri;
+        });
+        setFilterThumbnails(thumbnails);
+      } catch (error) {
+        console.log('Error converting image to base64:', error);
+        // Fallback to original URI
+        const thumbnails = {};
+        FILTERS.forEach(filter => {
+          thumbnails[filter.id] = media.uri;
+        });
+        setFilterThumbnails(thumbnails);
+        setImageBase64(null);
+      } finally {
+        setIsLoadingBase64(false);
+      }
+    };
+
+    if (visible && media && media.uri && mediaType === 'photo') {
+      loadImageForWebView();
+    } else {
+      setFilterThumbnails({});
+      setImageBase64(null);
+      setIsLoadingBase64(false);
+    }
+  }, [media, mediaType, visible]);
 
   // Prevent back button from closing the modal
   useEffect(() => {
@@ -439,12 +570,30 @@ const MediaEditor = ({
     isEraserRef.current = isEraser;
   }, [isEraser]);
   
-  // Store original media URI when component mounts
+  // Store original media URI when component mounts or media changes
   useEffect(() => {
-    if (media && media.uri && !originalMediaUri) {
+    if (media && media.uri) {
+      // Always update originalMediaUri when media changes
       setOriginalMediaUri(media.uri);
+      setFilteredImageUri(null); // Reset filtered image when media changes
+      setSelectedFilter('none'); // Reset filter selection when media changes
     }
-  }, [media]);
+  }, [media?.uri]);
+
+  // Apply filter to main preview image when filter is selected (preview only, no auto-save)
+  // We use CSS filters via getFilterCSS function, so no need to process image
+  // The filteredImageUri will be null and we'll use WebView with CSS filters for preview
+  useEffect(() => {
+    // Reset filtered image URI - we'll use CSS filters in WebView instead
+    if (selectedFilter === 'none') {
+      setFilteredImageUri(null);
+      setIsApplyingFilter(false);
+    } else {
+      // For non-none filters, we'll use WebView with CSS filters
+      // No need to process the image, just set a flag
+      setIsApplyingFilter(false);
+    }
+  }, [selectedFilter]);
   
   // Debounced adjustment update to prevent excessive re-renders
   const adjustmentTimeoutRef = useRef({});
@@ -616,8 +765,10 @@ const MediaEditor = ({
     
     setIsExporting(true);
     try {
+      // Use filtered image if available, otherwise use original
+      let finalMedia = filteredImageUri ? { ...media, uri: filteredImageUri } : media;
+      
       // Apply crop/rotate if needed
-      let finalMedia = media;
       if (mediaType === 'photo' && (rotation !== 0 || flipHorizontal || flipVertical)) {
         finalMedia = await handleCrop();
       }
@@ -626,7 +777,7 @@ const MediaEditor = ({
         media: finalMedia,
         mediaType,
         filter: selectedFilter,
-        filterIntensity,
+        filterIntensity: 100, // Always 100% intensity
         adjustments,
         crop: mediaType === 'photo' ? { rotation, flipHorizontal, flipVertical, aspectRatio } : null,
         stickers,
@@ -767,20 +918,83 @@ const MediaEditor = ({
                 isLooping
               />
             ) : (
-              <Image 
-                source={{ uri: media.uri }} 
-                style={[
-                  styles.media,
-                  {
-                    transform: [
-                      { rotate: `${rotation}deg` },
-                      { scaleX: flipHorizontal ? -1 : 1 },
-                      { scaleY: flipVertical ? -1 : 1 },
-                    ],
-                  }
-                ]} 
-                resizeMode="cover"
-              />
+              <View style={styles.media}>
+                {selectedFilter !== 'none' && getFilterCSS(selectedFilter) !== 'none' && imageBase64 ? (
+                  <WebView
+                    source={{
+                      html: `
+                        <!DOCTYPE html>
+                        <html>
+                          <head>
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                            <style>
+                              * {
+                                margin: 0;
+                                padding: 0;
+                                box-sizing: border-box;
+                              }
+                              html, body {
+                                width: 100%;
+                                height: 100%;
+                                overflow: hidden;
+                                background: #000;
+                              }
+                              img {
+                                width: 100%;
+                                height: 100%;
+                                object-fit: cover;
+                                display: block;
+                                filter: ${getFilterCSS(selectedFilter)};
+                                transform: rotate(${rotation}deg) scaleX(${flipHorizontal ? -1 : 1}) scaleY(${flipVertical ? -1 : 1});
+                              }
+                            </style>
+                          </head>
+                          <body>
+                            <img src="${imageBase64}" onerror="this.style.display='none'; document.body.innerHTML='<div style=\\'width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;\\'>Image failed to load</div>';" />
+                          </body>
+                        </html>
+                      `,
+                    }}
+                    style={styles.media}
+                    scrollEnabled={false}
+                    showsVerticalScrollIndicator={false}
+                    showsHorizontalScrollIndicator={false}
+                    bounces={false}
+                    overScrollMode="never"
+                    androidLayerType="hardware"
+                    originWhitelist={['*']}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    onError={(syntheticEvent) => {
+                      const { nativeEvent } = syntheticEvent;
+                      console.log('WebView error: ', nativeEvent);
+                    }}
+                    onHttpError={(syntheticEvent) => {
+                      const { nativeEvent } = syntheticEvent;
+                      console.log('WebView HTTP error: ', nativeEvent);
+                    }}
+                  />
+                ) : isLoadingBase64 ? (
+                  <View style={[styles.media, { justifyContent: 'center', alignItems: 'center', backgroundColor: theme.background }]}>
+                    <ActivityIndicator size="large" color={theme.accent} />
+                  </View>
+                ) : (
+                  <Image 
+                    source={{ uri: media.uri }} 
+                    style={[
+                      styles.media,
+                      {
+                        transform: [
+                          { rotate: `${rotation}deg` },
+                          { scaleX: flipHorizontal ? -1 : 1 },
+                          { scaleY: flipVertical ? -1 : 1 },
+                        ],
+                      }
+                    ]} 
+                    resizeMode="cover"
+                  />
+                )}
+              </View>
             )}
             
             {/* Adjustment overlay for real-time preview - only show when adjustments tab is active */}
@@ -1281,67 +1495,120 @@ const MediaEditor = ({
           </View>
           {activeTab === 'filters' && (
             <View>
-              <ScrollView 
+              {media && media.uri && mediaType === 'photo' ? (
+                <>
+                  <ScrollView 
                 horizontal 
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.filterScrollContent}
               >
-                {FILTERS.map(filter => (
-                  <TouchableOpacity
-                    key={filter.id}
-                    style={[
-                      styles.filterButtonNew,
-                      selectedFilter === filter.id && {
-                        backgroundColor: theme.accent,
-                        borderColor: theme.accent,
-                        borderWidth: 3,
-                      },
-                      { borderColor: theme.border }
-                    ]}
-                    onPress={() => setSelectedFilter(filter.id)}
-                  >
-                    <View style={[
-                      styles.filterPreview,
-                      { backgroundColor: theme.cardSoft }
-                    ]}>
-                      <MaterialCommunityIcons 
-                        name="image-filter" 
-                        size={32} 
-                        color={selectedFilter === filter.id ? '#fff' : theme.textSecondary} 
-                      />
-                    </View>
-                    <Text style={[
-                      styles.filterButtonTextNew,
-                      { color: selectedFilter === filter.id ? '#fff' : theme.textPrimary }
-                    ]}>
-                      {filter.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {FILTERS.map(filter => {
+                  const filterCSS = getFilterCSS(filter.id);
+                  const isSelected = selectedFilter === filter.id;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={filter.id}
+                      style={styles.filterButtonInstagram}
+                      onPress={() => setSelectedFilter(filter.id)}
+                    >
+                      <View style={[
+                        styles.filterThumbnailContainer,
+                        isSelected && {
+                          borderColor: theme.accent,
+                          borderWidth: 3,
+                        },
+                        !isSelected && { borderColor: 'transparent' }
+                      ]}>
+                        {filterThumbnails[filter.id] ? (
+                          filter.id === 'none' || getFilterCSS(filter.id) === 'none' ? (
+                            <Image
+                              source={{ uri: filterThumbnails[filter.id] }}
+                              style={styles.filterThumbnail}
+                              resizeMode="cover"
+                            />
+                          ) : filterThumbnails[filter.id] && filterThumbnails[filter.id].startsWith('data:') ? (
+                            <WebView
+                              source={{
+                                html: `
+                                  <!DOCTYPE html>
+                                  <html>
+                                    <head>
+                                      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                                      <style>
+                                        * {
+                                          margin: 0;
+                                          padding: 0;
+                                          box-sizing: border-box;
+                                        }
+                                        html, body {
+                                          width: 100%;
+                                          height: 100%;
+                                          overflow: hidden;
+                                          background: transparent;
+                                        }
+                                        img {
+                                          width: 100%;
+                                          height: 100%;
+                                          object-fit: cover;
+                                          display: block;
+                                          filter: ${getFilterCSS(filter.id)};
+                                        }
+                                      </style>
+                                    </head>
+                                    <body>
+                                      <img src="${filterThumbnails[filter.id]}" onerror="this.style.display='none';" />
+                                    </body>
+                                  </html>
+                                `,
+                              }}
+                              style={styles.filterThumbnail}
+                              scrollEnabled={false}
+                              showsVerticalScrollIndicator={false}
+                              showsHorizontalScrollIndicator={false}
+                              bounces={false}
+                              overScrollMode="never"
+                              androidLayerType="hardware"
+                              originWhitelist={['*']}
+                              javaScriptEnabled={true}
+                            />
+                          ) : (
+                            <Image
+                              source={{ uri: filterThumbnails[filter.id] || media.uri }}
+                              style={styles.filterThumbnail}
+                              resizeMode="cover"
+                            />
+                          )
+                        ) : (
+                          <View style={[styles.filterThumbnail, { justifyContent: 'center', alignItems: 'center', backgroundColor: theme.cardSoft }]}>
+                            <ActivityIndicator size="small" color={theme.accent} />
+                          </View>
+                        )}
+                        {isSelected && (
+                          <View style={[styles.filterSelectedIndicator, { backgroundColor: theme.accent }]}>
+                            <MaterialCommunityIcons name="check" size={16} color="#fff" />
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[
+                        styles.filterButtonTextInstagram,
+                        { color: isSelected ? theme.accent : theme.textPrimary }
+                      ]}>
+                        {filter.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
-              {selectedFilter !== 'none' && (
-                <View style={[styles.filterIntensityContainer, { borderTopColor: theme.border }]}>
-                  <View style={styles.filterIntensityHeader}>
-                    <MaterialCommunityIcons 
-                      name="tune-variant" 
-                      size={20} 
-                      color={theme.textPrimary} 
-                    />
-                    <Text style={[styles.filterIntensityLabel, { color: theme.textPrimary }]}>
-                      Intensity: {filterIntensity}%
-                    </Text>
-                  </View>
-                  <Slider
-                    style={styles.slider}
-                    minimumValue={0}
-                    maximumValue={100}
-                    value={filterIntensity}
-                    onValueChange={setFilterIntensity}
-                    minimumTrackTintColor={theme.accent}
-                    maximumTrackTintColor={theme.border}
-                    thumbTintColor={theme.accent}
-                    thumbStyle={styles.sliderThumb}
-                  />
+                </>
+              ) : (
+                <View style={styles.filterPlaceholder}>
+                  <MaterialCommunityIcons name="image-filter" size={48} color={theme.textSecondary} />
+                  <Text style={[styles.filterPlaceholderText, { color: theme.textSecondary }]}>
+                    {mediaType === 'video' 
+                      ? 'Filters are only available for photos' 
+                      : 'Please select an image to preview filters'}
+                  </Text>
                 </View>
               )}
             </View>
@@ -2188,6 +2455,57 @@ const styles = StyleSheet.create({
   filterButtonTextNew: {
     fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
+  },
+  filterButtonInstagram: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+    paddingBottom: 8,
+  },
+  filterThumbnailContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    overflow: 'hidden',
+    borderWidth: 3,
+    borderColor: 'transparent',
+    marginBottom: 8,
+    position: 'relative',
+    backgroundColor: '#f0f0f0',
+  },
+  filterThumbnail: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 40,
+  },
+  filterSelectedIndicator: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  filterButtonTextInstagram: {
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  filterPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  filterPlaceholderText: {
+    fontSize: 14,
+    marginTop: 12,
     textAlign: 'center',
   },
   stickerScrollContent: {
