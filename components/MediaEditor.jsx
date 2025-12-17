@@ -15,8 +15,10 @@ import {
   BackHandler,
   PanResponder,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { ResizeMode, Video } from 'expo-av';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { captureRef } from 'react-native-view-shot';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, {
@@ -25,6 +27,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { useTranslation } from 'react-i18next';
 
@@ -39,6 +42,33 @@ const FILTERS = [
   { id: 'warm', name: 'Warm' },
   { id: 'contrast', name: 'Contrast' },
   { id: 'bright', name: 'Bright' },
+  { id: 'dramatic', name: 'Dramatic' },
+  { id: 'portrait', name: 'Portrait' },
+  { id: 'cinema', name: 'Cinema' },
+  { id: 'noir', name: 'Noir' },
+  { id: 'vivid', name: 'Vivid' },
+  { id: 'fade', name: 'Fade' },
+  { id: 'chrome', name: 'Chrome' },
+  { id: 'process', name: 'Process' },
+];
+
+// Available fonts
+const TEXT_FONTS = [
+  { id: 'Poppins-Regular', name: 'Regular' },
+  { id: 'Poppins-Bold', name: 'Bold' },
+  { id: 'Poppins-Light', name: 'Light' },
+  { id: 'Poppins-Medium', name: 'Medium' },
+  { id: 'Poppins-SemiBold', name: 'SemiBold' },
+  { id: 'Poppins-ExtraBold', name: 'ExtraBold' },
+  { id: 'Poppins-Thin', name: 'Thin' },
+  { id: 'Poppins-Black', name: 'Black' },
+];
+
+// Text alignment options
+const TEXT_ALIGNMENTS = [
+  { id: 'left', name: 'Left' },
+  { id: 'center', name: 'Center' },
+  { id: 'right', name: 'Right' },
 ];
 
 const STICKERS = [
@@ -47,6 +77,34 @@ const STICKERS = [
   '⭐', '🌟', '✨', '💫', '🔥', '💯', '👍', '👏',
   '🎉', '🎊', '🎈', '🎁', '🏆', '🥇', '🥈', '🥉',
 ];
+
+// Memoized Filter Button Component
+const FilterButton = React.memo(({ filter, isSelected, onPress, theme }) => (
+  <TouchableOpacity
+    style={[
+      styles.filterButton,
+      isSelected && { backgroundColor: theme.accent }
+    ]}
+    onPress={onPress}
+  >
+    <Text style={[
+      styles.filterButtonText,
+      { color: isSelected ? '#fff' : theme.textPrimary }
+    ]}>
+      {filter.name}
+    </Text>
+  </TouchableOpacity>
+));
+
+// Memoized Sticker Item Component
+const StickerItem = React.memo(({ emoji, onPress }) => (
+  <TouchableOpacity
+    style={styles.stickerItem}
+    onPress={onPress}
+  >
+    <Text style={styles.stickerEmojiLarge}>{emoji}</Text>
+  </TouchableOpacity>
+));
 
 const MediaEditor = ({ 
   visible, 
@@ -59,20 +117,64 @@ const MediaEditor = ({
   const { theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
   
-  const [activeTab, setActiveTab] = useState('filters'); // filters, stickers, text, draw, trim, music
+  const [activeTab, setActiveTab] = useState('filters'); // filters, adjust, crop, stickers, text, draw, trim, music, transitions, clips
   const [selectedFilter, setSelectedFilter] = useState('none');
+  const [filterIntensity, setFilterIntensity] = useState(100); // 0-100%
   const [stickers, setStickers] = useState([]);
   const [texts, setTexts] = useState([]);
   const [drawingPaths, setDrawingPaths] = useState([]);
+  const [drawingHistory, setDrawingHistory] = useState([]); // For undo/redo
   const [currentPath, setCurrentPath] = useState('');
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingColor, setDrawingColor] = useState('#FF0000');
   const [drawingWidth, setDrawingWidth] = useState(5);
+  const [drawingOpacity, setDrawingOpacity] = useState(1);
+  const [brushType, setBrushType] = useState('pen'); // pen, marker, neon, highlight
+  const [isEraser, setIsEraser] = useState(false);
   const [videoStartTime, setVideoStartTime] = useState(0);
   const [videoEndTime, setVideoEndTime] = useState(60);
   const [selectedMusic, setSelectedMusic] = useState(null);
+  const [videoSpeed, setVideoSpeed] = useState(1.0); // 0.25, 0.5, 1.0, 1.5, 2.0
+  const [musicVolume, setMusicVolume] = useState(0.5); // 0 to 1
+  const [audioFadeIn, setAudioFadeIn] = useState(false);
+  const [audioFadeOut, setAudioFadeOut] = useState(false);
+  const [audioDucking, setAudioDucking] = useState(false);
+  
+  // Phase 3: Video Transitions
+  const [videoTransition, setVideoTransition] = useState('none'); // none, fade, crossfade, slide
+  const [transitionDuration, setTransitionDuration] = useState(0.5); // 0.1 to 2.0 seconds
+  
+  // Phase 3: Multiple Video Clips
+  const [videoClips, setVideoClips] = useState([]); // Array of video clips
+  const [selectedClipIndex, setSelectedClipIndex] = useState(0);
+  
+  // Phase 3: Interactive Crop
+  const [cropArea, setCropArea] = useState(null); // { x, y, width, height }
+  const [isCropping, setIsCropping] = useState(false);
+  
   const [isExporting, setIsExporting] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false); // Track when capturing to hide UI elements
+  
+  // Advanced Adjustments
+  const [adjustments, setAdjustments] = useState({
+    brightness: 0,      // -100 to 100
+    contrast: 0,         // -100 to 100
+    saturation: 0,       // -100 to 100
+    warmth: 0,          // -100 to 100
+    shadows: 0,         // -100 to 100
+    highlights: 0,      // -100 to 100
+    structure: 0,       // -100 to 100
+    vignette: 0,       // 0 to 100
+  });
+  
+  // Crop & Rotate
+  const [showCrop, setShowCrop] = useState(false);
+  const [cropData, setCropData] = useState(null);
+  const [rotation, setRotation] = useState(0);
+  const [aspectRatio, setAspectRatio] = useState('free'); // free, 1:1, 4:5, 16:9, 4:3
+  const [flipHorizontal, setFlipHorizontal] = useState(false);
+  const [flipVertical, setFlipVertical] = useState(false);
+  const [originalMediaUri, setOriginalMediaUri] = useState(null);
   
   const videoRef = useRef(null);
   const previewRef = useRef(null);
@@ -89,6 +191,15 @@ const MediaEditor = ({
       return () => backHandler.remove();
     }
   }, [visible]);
+  
+  // Cleanup adjustment timeouts on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(adjustmentTimeoutRef.current).forEach(timeout => {
+        if (timeout) clearTimeout(timeout);
+      });
+    };
+  }, []);
 
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -126,44 +237,73 @@ const MediaEditor = ({
         : s
     ));
   }, []);
+  
+  // Update sticker transform
+  const updateStickerTransform = useCallback((stickerId, updates) => {
+    setStickers(prev => prev.map(s => 
+      s.id === stickerId 
+        ? { 
+            ...s, 
+            scale: Math.max(0.5, Math.min(3, updates.scale !== undefined ? updates.scale : s.scale)),
+            rotation: updates.rotation !== undefined ? updates.rotation : s.rotation,
+          }
+        : s
+    ));
+  }, []);
 
   // Store start positions for each sticker
   const stickerStartPositions = useRef({});
   
-  // Create PanResponder for stickers - this prevents system gesture conflicts
-  const createStickerPanResponder = useCallback((sticker) => {
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        const { pageX, pageY } = evt.nativeEvent;
-        stickerStartPositions.current[sticker.id] = {
-          startX: pageX - sticker.x,
-          startY: pageY - sticker.y,
-        };
-        setSelectedSticker(sticker.id);
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        const { pageX, pageY } = evt.nativeEvent;
-        const startPos = stickerStartPositions.current[sticker.id];
-        if (startPos) {
-          const newX = pageX - startPos.startX;
-          const newY = pageY - startPos.startY;
-          updateStickerPosition(sticker.id, newX, newY);
-        }
-      },
-      onPanResponderRelease: () => {
-        delete stickerStartPositions.current[sticker.id];
-        setSelectedSticker(null);
-      },
-      onPanResponderTerminate: () => {
-        delete stickerStartPositions.current[sticker.id];
-        setSelectedSticker(null);
-      },
-      onPanResponderTerminationRequest: () => false, // Prevent system from taking over
-      onShouldBlockNativeResponder: () => true, // Block native responder
-    });
+  // Store PanResponders in ref to avoid recreation
+  const stickerPanRespondersRef = useRef({});
+  
+  // Create or get PanResponder for a sticker
+  const getStickerPanResponder = useCallback((sticker) => {
+    if (!stickerPanRespondersRef.current[sticker.id]) {
+      stickerPanRespondersRef.current[sticker.id] = PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          const { pageX, pageY } = evt.nativeEvent;
+          stickerStartPositions.current[sticker.id] = {
+            startX: pageX - sticker.x,
+            startY: pageY - sticker.y,
+          };
+          setSelectedSticker(sticker.id);
+        },
+        onPanResponderMove: (evt) => {
+          const { pageX, pageY } = evt.nativeEvent;
+          const startPos = stickerStartPositions.current[sticker.id];
+          if (startPos) {
+            const newX = pageX - startPos.startX;
+            const newY = pageY - startPos.startY;
+            updateStickerPosition(sticker.id, newX, newY);
+          }
+        },
+        onPanResponderRelease: () => {
+          delete stickerStartPositions.current[sticker.id];
+          setSelectedSticker(null);
+        },
+        onPanResponderTerminate: () => {
+          delete stickerStartPositions.current[sticker.id];
+          setSelectedSticker(null);
+        },
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+      });
+    }
+    return stickerPanRespondersRef.current[sticker.id];
   }, [updateStickerPosition]);
+  
+  // Clean up PanResponders for deleted stickers
+  useEffect(() => {
+    const currentIds = new Set(stickers.map(s => s.id));
+    Object.keys(stickerPanRespondersRef.current).forEach(id => {
+      if (!currentIds.has(parseInt(id))) {
+        delete stickerPanRespondersRef.current[id];
+      }
+    });
+  }, [stickers]);
   
   // Update text position - using functional update to avoid stale state
   const updateTextPosition = useCallback((textId, x, y) => {
@@ -173,44 +313,73 @@ const MediaEditor = ({
         : t
     ));
   }, []);
+  
+  // Update text transform
+  const updateTextTransform = useCallback((textId, updates) => {
+    setTexts(prev => prev.map(t => 
+      t.id === textId 
+        ? { 
+            ...t, 
+            scale: Math.max(0.5, Math.min(3, updates.scale !== undefined ? updates.scale : t.scale)),
+            rotation: updates.rotation !== undefined ? updates.rotation : t.rotation,
+          }
+        : t
+    ));
+  }, []);
 
   // Store start positions for each text
   const textStartPositions = useRef({});
   
-  // Create PanResponder for texts - this prevents system gesture conflicts
-  const createTextPanResponder = useCallback((text) => {
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        const { pageX, pageY } = evt.nativeEvent;
-        textStartPositions.current[text.id] = {
-          startX: pageX - text.x,
-          startY: pageY - text.y,
-        };
-        setSelectedText(text.id);
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        const { pageX, pageY } = evt.nativeEvent;
-        const startPos = textStartPositions.current[text.id];
-        if (startPos) {
-          const newX = pageX - startPos.startX;
-          const newY = pageY - startPos.startY;
-          updateTextPosition(text.id, newX, newY);
-        }
-      },
-      onPanResponderRelease: () => {
-        delete textStartPositions.current[text.id];
-        setSelectedText(null);
-      },
-      onPanResponderTerminate: () => {
-        delete textStartPositions.current[text.id];
-        setSelectedText(null);
-      },
-      onPanResponderTerminationRequest: () => false, // Prevent system from taking over
-      onShouldBlockNativeResponder: () => true, // Block native responder
-    });
+  // Store PanResponders in ref to avoid recreation
+  const textPanRespondersRef = useRef({});
+  
+  // Create or get PanResponder for a text
+  const getTextPanResponder = useCallback((text) => {
+    if (!textPanRespondersRef.current[text.id]) {
+      textPanRespondersRef.current[text.id] = PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          const { pageX, pageY } = evt.nativeEvent;
+          textStartPositions.current[text.id] = {
+            startX: pageX - text.x,
+            startY: pageY - text.y,
+          };
+          setSelectedText(text.id);
+        },
+        onPanResponderMove: (evt) => {
+          const { pageX, pageY } = evt.nativeEvent;
+          const startPos = textStartPositions.current[text.id];
+          if (startPos) {
+            const newX = pageX - startPos.startX;
+            const newY = pageY - startPos.startY;
+            updateTextPosition(text.id, newX, newY);
+          }
+        },
+        onPanResponderRelease: () => {
+          delete textStartPositions.current[text.id];
+          setSelectedText(null);
+        },
+        onPanResponderTerminate: () => {
+          delete textStartPositions.current[text.id];
+          setSelectedText(null);
+        },
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+      });
+    }
+    return textPanRespondersRef.current[text.id];
   }, [updateTextPosition]);
+  
+  // Clean up PanResponders for deleted texts
+  useEffect(() => {
+    const currentIds = new Set(texts.map(t => t.id));
+    Object.keys(textPanRespondersRef.current).forEach(id => {
+      if (!currentIds.has(parseInt(id))) {
+        delete textPanRespondersRef.current[id];
+      }
+    });
+  }, [texts]);
 
   // Add text
   const addText = () => {
@@ -224,6 +393,16 @@ const MediaEditor = ({
       fontFamily: 'Poppins-Bold',
       rotation: 0,
       scale: 1,
+      alignment: 'center',
+      backgroundColor: null, // null, '#000000', '#FFFFFF', etc.
+      backgroundOpacity: 0.5,
+      hasOutline: false,
+      outlineColor: '#000000',
+      outlineWidth: 2,
+      hasShadow: true,
+      shadowColor: 'rgba(0,0,0,0.5)',
+      shadowOffset: { width: 1, height: 1 },
+      shadowBlur: 2,
     };
     setTexts([...texts, newText]);
   };
@@ -237,6 +416,8 @@ const MediaEditor = ({
   const activeTabRef = useRef(activeTab);
   const drawingColorRef = useRef(drawingColor);
   const drawingWidthRef = useRef(drawingWidth);
+  const drawingOpacityRef = useRef(drawingOpacity);
+  const isEraserRef = useRef(isEraser);
   
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -249,6 +430,116 @@ const MediaEditor = ({
   useEffect(() => {
     drawingWidthRef.current = drawingWidth;
   }, [drawingWidth]);
+  
+  useEffect(() => {
+    drawingOpacityRef.current = drawingOpacity;
+  }, [drawingOpacity]);
+  
+  useEffect(() => {
+    isEraserRef.current = isEraser;
+  }, [isEraser]);
+  
+  // Store original media URI when component mounts
+  useEffect(() => {
+    if (media && media.uri && !originalMediaUri) {
+      setOriginalMediaUri(media.uri);
+    }
+  }, [media]);
+  
+  // Debounced adjustment update to prevent excessive re-renders
+  const adjustmentTimeoutRef = useRef({});
+  const updateAdjustment = useCallback((key, value) => {
+    // Clear existing timeout for this key
+    if (adjustmentTimeoutRef.current[key]) {
+      clearTimeout(adjustmentTimeoutRef.current[key]);
+    }
+    
+    // Update immediately for UI feedback
+    setAdjustments(prev => ({ ...prev, [key]: value }));
+    
+    // Debounce the actual processing (if needed for server updates)
+    adjustmentTimeoutRef.current[key] = setTimeout(() => {
+      // Any server-side updates can go here if needed
+    }, 100);
+  }, []);
+  
+  // Reset adjustments
+  const resetAdjustments = useCallback(() => {
+    setAdjustments({
+      brightness: 0,
+      contrast: 0,
+      saturation: 0,
+      warmth: 0,
+      shadows: 0,
+      highlights: 0,
+      structure: 0,
+      vignette: 0,
+    });
+  }, []);
+  
+  // Crop & Rotate functions
+  const handleCrop = useCallback(async () => {
+    if (!media || mediaType !== 'photo') return;
+    
+    try {
+      const result = await ImageManipulator.manipulateAsync(
+        media.uri,
+        [
+          { rotate: rotation },
+          { flip: flipHorizontal ? ImageManipulator.FlipType.Horizontal : undefined },
+          { flip: flipVertical ? ImageManipulator.FlipType.Vertical : undefined },
+        ].filter(action => action.rotate !== undefined || action.flip !== undefined),
+        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      
+      // Update media URI with cropped/rotated version
+      const updatedMedia = { ...media, uri: result.uri };
+      setCropData({ rotation, flipHorizontal, flipVertical });
+      return updatedMedia;
+    } catch (error) {
+      console.error('Crop/Rotate error:', error);
+      Alert.alert('Error', 'Failed to crop/rotate image');
+      return media;
+    }
+  }, [media, rotation, flipHorizontal, flipVertical, mediaType]);
+  
+  const rotateImage = useCallback(async (degrees) => {
+    if (!media || mediaType !== 'photo') return;
+    setRotation(prev => (prev + degrees) % 360);
+  }, [media, mediaType]);
+  
+  const flipImage = useCallback((direction) => {
+    if (direction === 'horizontal') {
+      setFlipHorizontal(prev => !prev);
+    } else {
+      setFlipVertical(prev => !prev);
+    }
+  }, []);
+  
+  // Drawing undo/redo
+  const undoDrawing = useCallback(() => {
+    if (drawingPaths.length > 0) {
+      const lastPath = drawingPaths[drawingPaths.length - 1];
+      setDrawingHistory(prev => [...prev, lastPath]);
+      setDrawingPaths(prev => prev.slice(0, -1));
+    }
+  }, [drawingPaths]);
+  
+  const redoDrawing = useCallback(() => {
+    if (drawingHistory.length > 0) {
+      const lastHistory = drawingHistory[drawingHistory.length - 1];
+      setDrawingPaths(prev => [...prev, lastHistory]);
+      setDrawingHistory(prev => prev.slice(0, -1));
+    }
+  }, [drawingHistory]);
+  
+  // Brush types
+  const brushTypes = [
+    { id: 'pen', name: 'Pen' },
+    { id: 'marker', name: 'Marker' },
+    { id: 'neon', name: 'Neon' },
+    { id: 'highlight', name: 'Highlight' },
+  ];
 
   // Drawing PanResponder - prevents system gesture conflicts
   const drawingPanResponder = useRef(
@@ -280,15 +571,17 @@ const MediaEditor = ({
       onPanResponderRelease: () => {
         setCurrentPath(prev => {
           if (activeTabRef.current === 'draw' && prev) {
-            setDrawingPaths(drawingPaths => [
-              ...drawingPaths,
-              {
-                id: Date.now(),
-                path: prev,
-                color: drawingColorRef.current,
-                width: drawingWidthRef.current,
-              }
-            ]);
+            const newPath = {
+              id: Date.now(),
+              path: prev,
+              color: isEraserRef.current ? 'transparent' : drawingColorRef.current,
+              width: drawingWidthRef.current,
+              opacity: drawingOpacityRef.current,
+              brushType: brushType,
+              isEraser: isEraserRef.current,
+            };
+            setDrawingPaths(drawingPaths => [...drawingPaths, newPath]);
+            setDrawingHistory([]); // Clear redo history when new drawing is made
           }
           setIsDrawing(false);
           return '';
@@ -323,15 +616,33 @@ const MediaEditor = ({
     
     setIsExporting(true);
     try {
+      // Apply crop/rotate if needed
+      let finalMedia = media;
+      if (mediaType === 'photo' && (rotation !== 0 || flipHorizontal || flipVertical)) {
+        finalMedia = await handleCrop();
+      }
+      
       const editedData = {
-        media,
+        media: finalMedia,
         mediaType,
         filter: selectedFilter,
+        filterIntensity,
+        adjustments,
+        crop: mediaType === 'photo' ? { rotation, flipHorizontal, flipVertical, aspectRatio } : null,
         stickers,
         texts,
         drawings: drawingPaths,
         videoTrim: mediaType === 'video' ? { start: videoStartTime, end: videoEndTime } : null,
+        videoSpeed: mediaType === 'video' ? videoSpeed : null,
+        videoTransition: mediaType === 'video' ? videoTransition : null,
+        transitionDuration: mediaType === 'video' ? transitionDuration : null,
+        videoClips: mediaType === 'video' && videoClips.length > 0 ? videoClips : null,
+        cropArea: mediaType === 'photo' && cropArea ? cropArea : null,
         music: selectedMusic,
+        musicVolume,
+        audioFadeIn,
+        audioFadeOut,
+        audioDucking,
       };
       
       // For photos, capture the view with overlays using view-shot
@@ -456,7 +767,37 @@ const MediaEditor = ({
                 isLooping
               />
             ) : (
-              <Image source={{ uri: media.uri }} style={styles.media} resizeMode="cover" />
+              <Image 
+                source={{ uri: media.uri }} 
+                style={[
+                  styles.media,
+                  {
+                    transform: [
+                      { rotate: `${rotation}deg` },
+                      { scaleX: flipHorizontal ? -1 : 1 },
+                      { scaleY: flipVertical ? -1 : 1 },
+                    ],
+                  }
+                ]} 
+                resizeMode="cover"
+              />
+            )}
+            
+            {/* Adjustment overlay for real-time preview - only show when adjustments tab is active */}
+            {mediaType === 'photo' && activeTab === 'adjust' && Math.abs(adjustments.brightness) > 0 && (
+              <View
+                style={[
+                  StyleSheet.absoluteFill,
+                  {
+                    opacity: Math.abs(adjustments.brightness) / 200,
+                    ...(adjustments.brightness > 0 
+                      ? { backgroundColor: 'rgba(255, 255, 255, 0.3)' }
+                      : { backgroundColor: 'rgba(0, 0, 0, 0.3)' }
+                    ),
+                  }
+                ]}
+                pointerEvents="none"
+              />
             )}
           
           {/* Overlay for stickers, text, drawings */}
@@ -473,9 +814,9 @@ const MediaEditor = ({
               pointerEvents="box-none"
               shouldCancelWhenOutside={false}
             >
-            {/* Stickers - Draggable using PanResponder */}
+            {/* Stickers - Draggable using PanResponder with Transform Gestures */}
             {stickers.map(sticker => {
-              const panResponder = createStickerPanResponder(sticker);
+              const panResponder = getStickerPanResponder(sticker);
               
               return (
                 <Animated.View
@@ -495,29 +836,49 @@ const MediaEditor = ({
                   ]}
                 >
                   <Text style={styles.stickerEmoji}>{sticker.emoji}</Text>
-                  {!isCapturing && (
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        deleteElement('sticker', sticker.id);
-                      }}
-                    >
-                      <Text style={styles.deleteButtonText}>×</Text>
-                    </TouchableOpacity>
+                  {!isCapturing && selectedSticker === sticker.id && (
+                    <>
+                      <TouchableOpacity
+                        style={[styles.transformButton, { top: -30, right: 0 }]}
+                        onPress={() => updateStickerTransform(sticker.id, { scale: Math.min(3, sticker.scale + 0.1) })}
+                      >
+                        <Text style={styles.transformButtonText}>+</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.transformButton, { top: -30, right: 25 }]}
+                        onPress={() => updateStickerTransform(sticker.id, { scale: Math.max(0.5, sticker.scale - 0.1) })}
+                      >
+                        <Text style={styles.transformButtonText}>−</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.transformButton, { top: -30, right: 50 }]}
+                        onPress={() => updateStickerTransform(sticker.id, { rotation: sticker.rotation + 15 })}
+                      >
+                        <Text style={styles.transformButtonText}>↻</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          deleteElement('sticker', sticker.id);
+                        }}
+                      >
+                        <Text style={styles.deleteButtonText}>×</Text>
+                      </TouchableOpacity>
+                    </>
                   )}
                 </Animated.View>
               );
             })}
             
-            {/* Texts - Draggable using PanResponder */}
+            {/* Texts - Draggable using PanResponder with Transform Gestures */}
             {texts.map(text => {
-              const textPanResponder = createTextPanResponder(text);
+              const panResponder = getTextPanResponder(text);
               
               return (
                 <Animated.View
                   key={text.id}
-                  {...textPanResponder.panHandlers}
+                  {...panResponder.panHandlers}
                   style={[
                     styles.textContainer,
                     {
@@ -531,28 +892,84 @@ const MediaEditor = ({
                     }
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.textOverlay,
-                      {
-                        fontSize: text.fontSize,
-                        color: text.color,
-                        fontFamily: text.fontFamily,
-                      }
-                    ]}
-                  >
-                    {text.text}
-                  </Text>
-                  {!isCapturing && (
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        deleteElement('text', text.id);
-                      }}
+                  <View style={[
+                    text.backgroundColor && {
+                      backgroundColor: text.backgroundColor,
+                      opacity: text.backgroundOpacity || 0.5,
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      borderRadius: 4,
+                    }
+                  ]}>
+                    {/* Outline layer (rendered behind main text) */}
+                    {text.hasOutline && (
+                      <Text
+                        style={[
+                          styles.textOverlay,
+                          {
+                            position: 'absolute',
+                            fontSize: text.fontSize,
+                            fontFamily: text.fontFamily,
+                            textAlign: text.alignment || 'center',
+                            color: text.outlineColor || '#000000',
+                            textShadowColor: text.outlineColor || '#000000',
+                            textShadowOffset: { width: (text.outlineWidth || 2) * 0.5, height: (text.outlineWidth || 2) * 0.5 },
+                            textShadowRadius: (text.outlineWidth || 2) * 2,
+                          }
+                        ]}
+                      >
+                        {text.text}
+                      </Text>
+                    )}
+                    {/* Main text */}
+                    <Text
+                      style={[
+                        styles.textOverlay,
+                        {
+                          fontSize: text.fontSize,
+                          color: text.color,
+                          fontFamily: text.fontFamily,
+                          textAlign: text.alignment || 'center',
+                          // Text shadow
+                          textShadowColor: text.hasShadow !== false ? (text.shadowColor || 'rgba(0,0,0,0.5)') : 'transparent',
+                          textShadowOffset: text.hasShadow !== false ? (text.shadowOffset || { width: 1, height: 1 }) : { width: 0, height: 0 },
+                          textShadowRadius: text.hasShadow !== false ? (text.shadowBlur || 2) : 0,
+                        }
+                      ]}
                     >
-                      <Text style={styles.deleteButtonText}>×</Text>
-                    </TouchableOpacity>
+                      {text.text}
+                    </Text>
+                  </View>
+                  {!isCapturing && selectedText === text.id && (
+                    <>
+                      <TouchableOpacity
+                        style={[styles.transformButton, { top: -30, right: 0 }]}
+                        onPress={() => updateTextTransform(text.id, { scale: Math.min(3, text.scale + 0.1) })}
+                      >
+                        <Text style={styles.transformButtonText}>+</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.transformButton, { top: -30, right: 25 }]}
+                        onPress={() => updateTextTransform(text.id, { scale: Math.max(0.5, text.scale - 0.1) })}
+                      >
+                        <Text style={styles.transformButtonText}>−</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.transformButton, { top: -30, right: 50 }]}
+                        onPress={() => updateTextTransform(text.id, { rotation: text.rotation + 15 })}
+                      >
+                        <Text style={styles.transformButtonText}>↻</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          deleteElement('text', text.id);
+                        }}
+                      >
+                        <Text style={styles.deleteButtonText}>×</Text>
+                      </TouchableOpacity>
+                    </>
                   )}
                 </Animated.View>
               );
@@ -570,21 +987,25 @@ const MediaEditor = ({
                     <Path
                       key={drawing.id}
                       d={drawing.path}
-                      stroke={drawing.color}
+                      stroke={drawing.isEraser ? 'transparent' : drawing.color}
                       strokeWidth={drawing.width}
                       fill="none"
                       strokeLinecap="round"
                       strokeLinejoin="round"
+                      opacity={drawing.opacity || 1}
+                      strokeDasharray={drawing.brushType === 'neon' ? '5,5' : undefined}
                     />
                   ))}
                   {currentPath && (
                     <Path
                       d={currentPath}
-                      stroke={drawingColor}
+                      stroke={isEraser ? 'transparent' : drawingColor}
                       strokeWidth={drawingWidth}
                       fill="none"
                       strokeLinecap="round"
                       strokeLinejoin="round"
+                      opacity={drawingOpacity}
+                      strokeDasharray={brushType === 'neon' ? '5,5' : undefined}
                     />
                   )}
                 </Svg>
@@ -595,42 +1016,156 @@ const MediaEditor = ({
           </View>
         </View>
 
-        {/* Toolbar */}
+        {/* Toolbar - Instagram-style with icons */}
         <View style={[styles.toolbar, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolbarContent}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            contentContainerStyle={styles.toolbarContent}
+          >
             <TouchableOpacity
-              style={[styles.toolButton, activeTab === 'filters' && { backgroundColor: theme.accent }]}
+              style={[
+                styles.toolButtonNew, 
+                activeTab === 'filters' && { 
+                  backgroundColor: theme.accent,
+                  borderColor: theme.accent,
+                },
+                { borderColor: theme.border }
+              ]}
               onPress={() => setActiveTab('filters')}
             >
-              <Text style={[styles.toolButtonText, { color: activeTab === 'filters' ? '#fff' : theme.textPrimary }]}>
+              <MaterialCommunityIcons 
+                name="image-filter" 
+                size={24} 
+                color={activeTab === 'filters' ? '#fff' : theme.textPrimary} 
+              />
+              <Text style={[
+                styles.toolButtonTextNew, 
+                { color: activeTab === 'filters' ? '#fff' : theme.textPrimary }
+              ]}>
                 Filters
               </Text>
             </TouchableOpacity>
             
             <TouchableOpacity
-              style={[styles.toolButton, activeTab === 'stickers' && { backgroundColor: theme.accent }]}
+              style={[
+                styles.toolButtonNew, 
+                activeTab === 'adjust' && { 
+                  backgroundColor: theme.accent,
+                  borderColor: theme.accent,
+                },
+                { borderColor: theme.border }
+              ]}
+              onPress={() => setActiveTab('adjust')}
+            >
+              <MaterialCommunityIcons 
+                name="tune" 
+                size={24} 
+                color={activeTab === 'adjust' ? '#fff' : theme.textPrimary} 
+              />
+              <Text style={[
+                styles.toolButtonTextNew, 
+                { color: activeTab === 'adjust' ? '#fff' : theme.textPrimary }
+              ]}>
+                Adjust
+              </Text>
+            </TouchableOpacity>
+            
+            {mediaType === 'photo' && (
+              <TouchableOpacity
+                style={[
+                  styles.toolButtonNew, 
+                  activeTab === 'crop' && { 
+                    backgroundColor: theme.accent,
+                    borderColor: theme.accent,
+                  },
+                  { borderColor: theme.border }
+                ]}
+                onPress={() => setActiveTab('crop')}
+              >
+                <MaterialCommunityIcons 
+                  name="crop" 
+                  size={24} 
+                  color={activeTab === 'crop' ? '#fff' : theme.textPrimary} 
+                />
+                <Text style={[
+                  styles.toolButtonTextNew, 
+                  { color: activeTab === 'crop' ? '#fff' : theme.textPrimary }
+                ]}>
+                  Crop
+                </Text>
+              </TouchableOpacity>
+            )}
+            
+            <TouchableOpacity
+              style={[
+                styles.toolButtonNew, 
+                activeTab === 'stickers' && { 
+                  backgroundColor: theme.accent,
+                  borderColor: theme.accent,
+                },
+                { borderColor: theme.border }
+              ]}
               onPress={() => setActiveTab('stickers')}
             >
-              <Text style={[styles.toolButtonText, { color: activeTab === 'stickers' ? '#fff' : theme.textPrimary }]}>
+              <MaterialCommunityIcons 
+                name="emoticon-happy" 
+                size={24} 
+                color={activeTab === 'stickers' ? '#fff' : theme.textPrimary} 
+              />
+              <Text style={[
+                styles.toolButtonTextNew, 
+                { color: activeTab === 'stickers' ? '#fff' : theme.textPrimary }
+              ]}>
                 Stickers
               </Text>
             </TouchableOpacity>
             
             <TouchableOpacity
-              style={[styles.toolButton, activeTab === 'text' && { backgroundColor: theme.accent }]}
+              style={[
+                styles.toolButtonNew, 
+                activeTab === 'text' && { 
+                  backgroundColor: theme.accent,
+                  borderColor: theme.accent,
+                },
+                { borderColor: theme.border }
+              ]}
               onPress={() => setActiveTab('text')}
             >
-              <Text style={[styles.toolButtonText, { color: activeTab === 'text' ? '#fff' : theme.textPrimary }]}>
+              <MaterialCommunityIcons 
+                name="format-text" 
+                size={24} 
+                color={activeTab === 'text' ? '#fff' : theme.textPrimary} 
+              />
+              <Text style={[
+                styles.toolButtonTextNew, 
+                { color: activeTab === 'text' ? '#fff' : theme.textPrimary }
+              ]}>
                 Text
               </Text>
             </TouchableOpacity>
             
             {mediaType === 'photo' && (
               <TouchableOpacity
-                style={[styles.toolButton, activeTab === 'draw' && { backgroundColor: theme.accent }]}
+                style={[
+                  styles.toolButtonNew, 
+                  activeTab === 'draw' && { 
+                    backgroundColor: theme.accent,
+                    borderColor: theme.accent,
+                  },
+                  { borderColor: theme.border }
+                ]}
                 onPress={() => setActiveTab('draw')}
               >
-                <Text style={[styles.toolButtonText, { color: activeTab === 'draw' ? '#fff' : theme.textPrimary }]}>
+                <MaterialCommunityIcons 
+                  name="draw-pen" 
+                  size={24} 
+                  color={activeTab === 'draw' ? '#fff' : theme.textPrimary} 
+                />
+                <Text style={[
+                  styles.toolButtonTextNew, 
+                  { color: activeTab === 'draw' ? '#fff' : theme.textPrimary }
+                ]}>
                   Draw
                 </Text>
               </TouchableOpacity>
@@ -639,19 +1174,97 @@ const MediaEditor = ({
             {mediaType === 'video' && (
               <>
                 <TouchableOpacity
-                  style={[styles.toolButton, activeTab === 'trim' && { backgroundColor: theme.accent }]}
+                  style={[
+                    styles.toolButtonNew, 
+                    activeTab === 'trim' && { 
+                      backgroundColor: theme.accent,
+                      borderColor: theme.accent,
+                    },
+                    { borderColor: theme.border }
+                  ]}
                   onPress={() => setActiveTab('trim')}
                 >
-                  <Text style={[styles.toolButtonText, { color: activeTab === 'trim' ? '#fff' : theme.textPrimary }]}>
+                  <MaterialCommunityIcons 
+                    name="scissors-cutting" 
+                    size={24} 
+                    color={activeTab === 'trim' ? '#fff' : theme.textPrimary} 
+                  />
+                  <Text style={[
+                    styles.toolButtonTextNew, 
+                    { color: activeTab === 'trim' ? '#fff' : theme.textPrimary }
+                  ]}>
                     Trim
                   </Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity
-                  style={[styles.toolButton, activeTab === 'music' && { backgroundColor: theme.accent }]}
+                  style={[
+                    styles.toolButtonNew, 
+                    activeTab === 'transitions' && { 
+                      backgroundColor: theme.accent,
+                      borderColor: theme.accent,
+                    },
+                    { borderColor: theme.border }
+                  ]}
+                  onPress={() => setActiveTab('transitions')}
+                >
+                  <MaterialCommunityIcons 
+                    name="transition" 
+                    size={24} 
+                    color={activeTab === 'transitions' ? '#fff' : theme.textPrimary} 
+                  />
+                  <Text style={[
+                    styles.toolButtonTextNew, 
+                    { color: activeTab === 'transitions' ? '#fff' : theme.textPrimary }
+                  ]}>
+                    Transitions
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.toolButtonNew, 
+                    activeTab === 'clips' && { 
+                      backgroundColor: theme.accent,
+                      borderColor: theme.accent,
+                    },
+                    { borderColor: theme.border }
+                  ]}
+                  onPress={() => setActiveTab('clips')}
+                >
+                  <MaterialCommunityIcons 
+                    name="filmstrip" 
+                    size={24} 
+                    color={activeTab === 'clips' ? '#fff' : theme.textPrimary} 
+                  />
+                  <Text style={[
+                    styles.toolButtonTextNew, 
+                    { color: activeTab === 'clips' ? '#fff' : theme.textPrimary }
+                  ]}>
+                    Clips
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.toolButtonNew, 
+                    activeTab === 'music' && { 
+                      backgroundColor: theme.accent,
+                      borderColor: theme.accent,
+                    },
+                    { borderColor: theme.border }
+                  ]}
                   onPress={() => setActiveTab('music')}
                 >
-                  <Text style={[styles.toolButtonText, { color: activeTab === 'music' ? '#fff' : theme.textPrimary }]}>
+                  <MaterialCommunityIcons 
+                    name="music" 
+                    size={24} 
+                    color={activeTab === 'music' ? '#fff' : theme.textPrimary} 
+                  />
+                  <Text style={[
+                    styles.toolButtonTextNew, 
+                    { color: activeTab === 'music' ? '#fff' : theme.textPrimary }
+                  ]}>
                     Music
                   </Text>
                 </TouchableOpacity>
@@ -662,42 +1275,401 @@ const MediaEditor = ({
 
         {/* Tool Panels */}
         <View style={[styles.panel, { backgroundColor: theme.surface }]}>
+          {/* Active Tab Indicator */}
+          <View style={styles.activeTabIndicator}>
+            <View style={[styles.activeTabLine, { backgroundColor: theme.accent }]} />
+          </View>
           {activeTab === 'filters' && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {FILTERS.map(filter => (
-                <TouchableOpacity
-                  key={filter.id}
-                  style={[
-                    styles.filterButton,
-                    selectedFilter === filter.id && { backgroundColor: theme.accent }
-                  ]}
-                  onPress={() => setSelectedFilter(filter.id)}
-                >
-                  <Text style={[
-                    styles.filterButtonText,
-                    { color: selectedFilter === filter.id ? '#fff' : theme.textPrimary }
-                  ]}>
-                    {filter.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <View>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.filterScrollContent}
+              >
+                {FILTERS.map(filter => (
+                  <TouchableOpacity
+                    key={filter.id}
+                    style={[
+                      styles.filterButtonNew,
+                      selectedFilter === filter.id && {
+                        backgroundColor: theme.accent,
+                        borderColor: theme.accent,
+                        borderWidth: 3,
+                      },
+                      { borderColor: theme.border }
+                    ]}
+                    onPress={() => setSelectedFilter(filter.id)}
+                  >
+                    <View style={[
+                      styles.filterPreview,
+                      { backgroundColor: theme.cardSoft }
+                    ]}>
+                      <MaterialCommunityIcons 
+                        name="image-filter" 
+                        size={32} 
+                        color={selectedFilter === filter.id ? '#fff' : theme.textSecondary} 
+                      />
+                    </View>
+                    <Text style={[
+                      styles.filterButtonTextNew,
+                      { color: selectedFilter === filter.id ? '#fff' : theme.textPrimary }
+                    ]}>
+                      {filter.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              {selectedFilter !== 'none' && (
+                <View style={[styles.filterIntensityContainer, { borderTopColor: theme.border }]}>
+                  <View style={styles.filterIntensityHeader}>
+                    <MaterialCommunityIcons 
+                      name="tune-variant" 
+                      size={20} 
+                      color={theme.textPrimary} 
+                    />
+                    <Text style={[styles.filterIntensityLabel, { color: theme.textPrimary }]}>
+                      Intensity: {filterIntensity}%
+                    </Text>
+                  </View>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={0}
+                    maximumValue={100}
+                    value={filterIntensity}
+                    onValueChange={setFilterIntensity}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                </View>
+              )}
+            </View>
+          )}
+
+          {activeTab === 'adjust' && (
+            <ScrollView style={styles.adjustPanel} showsVerticalScrollIndicator={false}>
+              <View style={styles.adjustRow}>
+                <View style={styles.adjustLabelContainer}>
+                  <MaterialCommunityIcons name="brightness-6" size={20} color={theme.textPrimary} />
+                  <Text style={[styles.adjustLabel, { color: theme.textPrimary }]}>Brightness</Text>
+                </View>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={-100}
+                    maximumValue={100}
+                    value={adjustments.brightness}
+                    onValueChange={(value) => updateAdjustment('brightness', value)}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                  <View style={styles.sliderValueContainer}>
+                    <Text style={[styles.sliderValue, { color: theme.textPrimary }]}>
+                      {Math.round(adjustments.brightness)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.adjustRow}>
+                <View style={styles.adjustLabelContainer}>
+                  <MaterialCommunityIcons name="contrast-circle" size={20} color={theme.textPrimary} />
+                  <Text style={[styles.adjustLabel, { color: theme.textPrimary }]}>Contrast</Text>
+                </View>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={-100}
+                    maximumValue={100}
+                    value={adjustments.contrast}
+                    onValueChange={(value) => updateAdjustment('contrast', value)}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                  <View style={styles.sliderValueContainer}>
+                    <Text style={[styles.sliderValue, { color: theme.textPrimary }]}>
+                      {Math.round(adjustments.contrast)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.adjustRow}>
+                <View style={styles.adjustLabelContainer}>
+                  <MaterialCommunityIcons name="palette" size={20} color={theme.textPrimary} />
+                  <Text style={[styles.adjustLabel, { color: theme.textPrimary }]}>Saturation</Text>
+                </View>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={-100}
+                    maximumValue={100}
+                    value={adjustments.saturation}
+                    onValueChange={(value) => updateAdjustment('saturation', value)}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                  <View style={styles.sliderValueContainer}>
+                    <Text style={[styles.sliderValue, { color: theme.textPrimary }]}>
+                      {Math.round(adjustments.saturation)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.adjustRow}>
+                <View style={styles.adjustLabelContainer}>
+                  <MaterialCommunityIcons name="thermometer" size={20} color={theme.textPrimary} />
+                  <Text style={[styles.adjustLabel, { color: theme.textPrimary }]}>Warmth</Text>
+                </View>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={-100}
+                    maximumValue={100}
+                    value={adjustments.warmth}
+                    onValueChange={(value) => updateAdjustment('warmth', value)}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                  <View style={styles.sliderValueContainer}>
+                    <Text style={[styles.sliderValue, { color: theme.textPrimary }]}>
+                      {Math.round(adjustments.warmth)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.adjustRow}>
+                <View style={styles.adjustLabelContainer}>
+                  <MaterialCommunityIcons name="weather-night" size={20} color={theme.textPrimary} />
+                  <Text style={[styles.adjustLabel, { color: theme.textPrimary }]}>Shadows</Text>
+                </View>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={-100}
+                    maximumValue={100}
+                    value={adjustments.shadows}
+                    onValueChange={(value) => updateAdjustment('shadows', value)}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                  <View style={styles.sliderValueContainer}>
+                    <Text style={[styles.sliderValue, { color: theme.textPrimary }]}>
+                      {Math.round(adjustments.shadows)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.adjustRow}>
+                <View style={styles.adjustLabelContainer}>
+                  <MaterialCommunityIcons name="white-balance-sunny" size={20} color={theme.textPrimary} />
+                  <Text style={[styles.adjustLabel, { color: theme.textPrimary }]}>Highlights</Text>
+                </View>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={-100}
+                    maximumValue={100}
+                    value={adjustments.highlights}
+                    onValueChange={(value) => updateAdjustment('highlights', value)}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                  <View style={styles.sliderValueContainer}>
+                    <Text style={[styles.sliderValue, { color: theme.textPrimary }]}>
+                      {Math.round(adjustments.highlights)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.adjustRow}>
+                <View style={styles.adjustLabelContainer}>
+                  <MaterialCommunityIcons name="image-edit" size={20} color={theme.textPrimary} />
+                  <Text style={[styles.adjustLabel, { color: theme.textPrimary }]}>Structure</Text>
+                </View>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={-100}
+                    maximumValue={100}
+                    value={adjustments.structure}
+                    onValueChange={(value) => updateAdjustment('structure', value)}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                  <View style={styles.sliderValueContainer}>
+                    <Text style={[styles.sliderValue, { color: theme.textPrimary }]}>
+                      {Math.round(adjustments.structure)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.adjustRow}>
+                <View style={styles.adjustLabelContainer}>
+                  <MaterialCommunityIcons name="circle-outline" size={20} color={theme.textPrimary} />
+                  <Text style={[styles.adjustLabel, { color: theme.textPrimary }]}>Vignette</Text>
+                </View>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={0}
+                    maximumValue={100}
+                    value={adjustments.vignette}
+                    onValueChange={(value) => updateAdjustment('vignette', value)}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                    thumbStyle={styles.sliderThumb}
+                  />
+                  <View style={styles.sliderValueContainer}>
+                    <Text style={[styles.sliderValue, { color: theme.textPrimary }]}>
+                      {Math.round(adjustments.vignette)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              
+              <TouchableOpacity
+                style={[styles.resetButton, { backgroundColor: theme.cardSoft, borderColor: theme.border }]}
+                onPress={resetAdjustments}
+              >
+                <MaterialCommunityIcons name="restore" size={18} color={theme.textPrimary} />
+                <Text style={[styles.resetButtonText, { color: theme.textPrimary }]}>Reset All</Text>
+              </TouchableOpacity>
             </ScrollView>
           )}
 
-          {activeTab === 'stickers' && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.stickerGrid}>
-                {STICKERS.map((emoji, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.stickerItem}
-                    onPress={() => addSticker(emoji)}
-                  >
-                    <Text style={styles.stickerEmojiLarge}>{emoji}</Text>
-                  </TouchableOpacity>
-                ))}
+          {activeTab === 'crop' && mediaType === 'photo' && (
+            <View style={styles.cropPanel}>
+              <View style={styles.cropControls}>
+                <TouchableOpacity
+                  style={[styles.cropButton, { backgroundColor: theme.cardSoft }]}
+                  onPress={() => rotateImage(-90)}
+                >
+                  <Text style={[styles.cropButtonText, { color: theme.textPrimary }]}>↺ Rotate Left</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.cropButton, { backgroundColor: theme.cardSoft }]}
+                  onPress={() => rotateImage(90)}
+                >
+                  <Text style={[styles.cropButtonText, { color: theme.textPrimary }]}>↻ Rotate Right</Text>
+                </TouchableOpacity>
               </View>
-            </ScrollView>
+              
+              <View style={styles.cropControls}>
+                <TouchableOpacity
+                  style={[styles.cropButton, { backgroundColor: theme.cardSoft }]}
+                  onPress={() => flipImage('horizontal')}
+                >
+                  <Text style={[styles.cropButtonText, { color: theme.textPrimary }]}>↔ Flip H</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.cropButton, { backgroundColor: theme.cardSoft }]}
+                  onPress={() => flipImage('vertical')}
+                >
+                  <Text style={[styles.cropButtonText, { color: theme.textPrimary }]}>↕ Flip V</Text>
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.aspectRatioContainer}>
+                <Text style={[styles.aspectRatioLabel, { color: theme.textSecondary }]}>Aspect Ratio:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.aspectRatioScroll}>
+                  {['free', '1:1', '4:5', '16:9', '4:3'].map(ratio => (
+                    <TouchableOpacity
+                      key={ratio}
+                      style={[
+                        styles.aspectRatioButton,
+                        { backgroundColor: aspectRatio === ratio ? theme.accent : theme.cardSoft },
+                      ]}
+                      onPress={() => setAspectRatio(ratio)}
+                    >
+                      <Text style={[
+                        styles.aspectRatioButtonText,
+                        { color: aspectRatio === ratio ? '#fff' : theme.textPrimary }
+                      ]}>
+                        {ratio}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              
+              <Text style={[styles.cropInfo, { color: theme.textSecondary }]}>
+                Rotation: {rotation}° | H: {flipHorizontal ? 'Yes' : 'No'} | V: {flipVertical ? 'Yes' : 'No'}
+              </Text>
+              
+              {/* Interactive Crop Area Selection */}
+              <View style={styles.interactiveCropSection}>
+                <Text style={[styles.controlLabel, { color: theme.textPrimary, marginTop: 16, marginBottom: 8 }]}>
+                  Crop Area
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.cropAreaToggle,
+                    { backgroundColor: isCropping ? theme.accent : theme.cardSoft }
+                  ]}
+                  onPress={() => setIsCropping(!isCropping)}
+                >
+                  <Text style={[
+                    styles.cropAreaToggleText,
+                    { color: isCropping ? '#fff' : theme.textPrimary }
+                  ]}>
+                    {isCropping ? '✓ Crop Mode On' : 'Enable Crop Selection'}
+                  </Text>
+                </TouchableOpacity>
+                {isCropping && (
+                  <Text style={[styles.cropAreaInfo, { color: theme.textSecondary, fontSize: 12, marginTop: 8 }]}>
+                    Drag on image to select crop area. Aspect ratio will be maintained.
+                  </Text>
+                )}
+              </View>
+            </View>
+          )}
+
+          {activeTab === 'stickers' && (
+            <View>
+              <View style={styles.sectionHeader}>
+                <MaterialCommunityIcons name="emoticon-happy" size={20} color={theme.textPrimary} />
+                <Text style={[styles.sectionHeaderText, { color: theme.textPrimary }]}>
+                  Choose a Sticker
+                </Text>
+              </View>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.stickerScrollContent}
+              >
+                <View style={styles.stickerGrid}>
+                  {STICKERS.map((emoji, index) => (
+                    <StickerItem
+                      key={index}
+                      emoji={emoji}
+                      onPress={() => addSticker(emoji)}
+                    />
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
           )}
 
           {activeTab === 'text' && (
@@ -706,6 +1678,7 @@ const MediaEditor = ({
                 style={[styles.addTextButton, { backgroundColor: theme.accent }]}
                 onPress={addText}
               >
+                <MaterialCommunityIcons name="format-text" size={20} color="#fff" />
                 <Text style={styles.addTextButtonText}>Add Text</Text>
               </TouchableOpacity>
               {texts.map(text => (
@@ -732,40 +1705,137 @@ const MediaEditor = ({
           )}
 
           {activeTab === 'draw' && mediaType === 'photo' && (
-            <View style={styles.drawPanel}>
+            <ScrollView style={styles.drawPanel} showsVerticalScrollIndicator={false}>
+              <View style={styles.brushTypeContainer}>
+                <Text style={[styles.controlLabel, { color: theme.textSecondary }]}>Brush Type:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {brushTypes.map(type => (
+                    <TouchableOpacity
+                      key={type.id}
+                      style={[
+                        styles.brushTypeButton,
+                        { backgroundColor: brushType === type.id ? theme.accent : theme.cardSoft },
+                      ]}
+                      onPress={() => {
+                        setBrushType(type.id);
+                        setIsEraser(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.brushTypeButtonText,
+                        { color: brushType === type.id ? '#fff' : theme.textPrimary }
+                      ]}>
+                        {type.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              
+              <TouchableOpacity
+                style={[
+                  styles.eraserButton,
+                  { backgroundColor: isEraser ? theme.accent : theme.cardSoft },
+                ]}
+                onPress={() => {
+                  setIsEraser(!isEraser);
+                  if (!isEraser) setBrushType('pen');
+                }}
+              >
+                <Text style={[
+                  styles.eraserButtonText,
+                  { color: isEraser ? '#fff' : theme.textPrimary }
+                ]}>
+                  {isEraser ? '✓ Eraser' : 'Eraser'}
+                </Text>
+              </TouchableOpacity>
+              
               <View style={styles.colorPicker}>
-                {['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#000000', '#FFFFFF'].map(color => (
+                <Text style={[styles.controlLabel, { color: theme.textSecondary, marginBottom: 8 }]}>Colors:</Text>
+                {['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#000000', '#FFFFFF', '#FFA500', '#800080'].map(color => (
                   <TouchableOpacity
                     key={color}
                     style={[
                       styles.colorOption,
                       { backgroundColor: color },
-                      drawingColor === color && styles.colorOptionSelected
+                      drawingColor === color && !isEraser && styles.colorOptionSelected
                     ]}
-                    onPress={() => setDrawingColor(color)}
+                    onPress={() => {
+                      setDrawingColor(color);
+                      setIsEraser(false);
+                    }}
                   />
                 ))}
               </View>
+              
               <View style={styles.widthControl}>
-                <Text style={[styles.controlLabel, { color: theme.textSecondary }]}>Width:</Text>
-                <TextInput
-                  value={drawingWidth.toString()}
-                  onChangeText={(width) => setDrawingWidth(parseInt(width) || 5)}
-                  style={[styles.sizeInput, { color: theme.textPrimary, borderColor: theme.border }]}
-                  keyboardType="numeric"
+                <Text style={[styles.controlLabel, { color: theme.textSecondary }]}>Width: {drawingWidth}px</Text>
+                <Slider
+                  style={styles.slider}
+                  minimumValue={1}
+                  maximumValue={50}
+                  value={drawingWidth}
+                  onValueChange={setDrawingWidth}
+                  minimumTrackTintColor={theme.accent}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={theme.accent}
                 />
               </View>
-              <TouchableOpacity
-                style={[styles.clearButton, { backgroundColor: theme.cardSoft }]}
-                onPress={() => setDrawingPaths([])}
-              >
-                <Text style={[styles.clearButtonText, { color: theme.textPrimary }]}>Clear All</Text>
-              </TouchableOpacity>
-            </View>
+              
+              <View style={styles.widthControl}>
+                <Text style={[styles.controlLabel, { color: theme.textSecondary }]}>Opacity: {Math.round(drawingOpacity * 100)}%</Text>
+                <Slider
+                  style={styles.slider}
+                  minimumValue={0.1}
+                  maximumValue={1}
+                  value={drawingOpacity}
+                  onValueChange={setDrawingOpacity}
+                  minimumTrackTintColor={theme.accent}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={theme.accent}
+                />
+              </View>
+              
+              <View style={styles.drawActions}>
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: theme.cardSoft }]}
+                  onPress={undoDrawing}
+                  disabled={drawingPaths.length === 0}
+                >
+                  <Text style={[
+                    styles.actionButtonText,
+                    { color: drawingPaths.length === 0 ? theme.textSecondary : theme.textPrimary }
+                  ]}>
+                    Undo
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: theme.cardSoft }]}
+                  onPress={redoDrawing}
+                  disabled={drawingHistory.length === 0}
+                >
+                  <Text style={[
+                    styles.actionButtonText,
+                    { color: drawingHistory.length === 0 ? theme.textSecondary : theme.textPrimary }
+                  ]}>
+                    Redo
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: '#FF4444' }]}
+                  onPress={() => {
+                    setDrawingPaths([]);
+                    setDrawingHistory([]);
+                  }}
+                >
+                  <Text style={styles.actionButtonText}>Clear All</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           )}
 
           {activeTab === 'trim' && mediaType === 'video' && (
-            <View style={styles.trimPanel}>
+            <ScrollView style={styles.trimPanel} showsVerticalScrollIndicator={false}>
               <Text style={[styles.controlLabel, { color: theme.textPrimary, marginBottom: 8 }]}>
                 Trim Video
               </Text>
@@ -814,11 +1884,40 @@ const MediaEditor = ({
                   </Text>
                 </View>
               </View>
-            </View>
+              
+              {/* Video Speed Control */}
+              <View style={styles.speedControl}>
+                <Text style={[styles.controlLabel, { color: theme.textPrimary, marginTop: 16, marginBottom: 8 }]}>
+                  Playback Speed
+                </Text>
+                <View style={styles.speedButtons}>
+                  {[0.25, 0.5, 1.0, 1.5, 2.0].map(speed => (
+                    <TouchableOpacity
+                      key={speed}
+                      style={[
+                        styles.speedButton,
+                        { backgroundColor: videoSpeed === speed ? theme.accent : theme.cardSoft }
+                      ]}
+                      onPress={() => setVideoSpeed(speed)}
+                    >
+                      <Text style={[
+                        styles.speedButtonText,
+                        { color: videoSpeed === speed ? '#fff' : theme.textPrimary }
+                      ]}>
+                        {speed}x
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={[styles.speedInfo, { color: theme.textSecondary }]}>
+                  Current: {videoSpeed}x {videoSpeed < 1 ? '(Slow Motion)' : videoSpeed > 1 ? '(Fast Forward)' : '(Normal)'}
+                </Text>
+              </View>
+            </ScrollView>
           )}
 
           {activeTab === 'music' && mediaType === 'video' && (
-            <View style={styles.musicPanel}>
+            <ScrollView style={styles.musicPanel} showsVerticalScrollIndicator={false}>
               <TouchableOpacity
                 style={[styles.musicButton, { backgroundColor: theme.accent }]}
                 onPress={() => {
@@ -831,11 +1930,87 @@ const MediaEditor = ({
                 </Text>
               </TouchableOpacity>
               {selectedMusic && (
-                <Text style={[styles.musicInfo, { color: theme.textSecondary }]}>
+                <Text style={[styles.musicInfo, { color: theme.textSecondary, marginBottom: 16 }]}>
                   {selectedMusic.name}
                 </Text>
               )}
-            </View>
+              
+              {/* Music Volume Control */}
+              <View style={styles.audioControlRow}>
+                <Text style={[styles.controlLabel, { color: theme.textPrimary }]}>Music Volume</Text>
+                <View style={styles.sliderContainer}>
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={0}
+                    maximumValue={1}
+                    value={musicVolume}
+                    onValueChange={setMusicVolume}
+                    minimumTrackTintColor={theme.accent}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={theme.accent}
+                  />
+                  <Text style={[styles.sliderValue, { color: theme.textSecondary }]}>
+                    {Math.round(musicVolume * 100)}%
+                  </Text>
+                </View>
+              </View>
+              
+              {/* Audio Effects */}
+              <View style={styles.audioEffects}>
+                <Text style={[styles.controlLabel, { color: theme.textPrimary, marginBottom: 8 }]}>Audio Effects</Text>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.audioEffectToggle,
+                    { backgroundColor: audioFadeIn ? theme.accent : theme.cardSoft }
+                  ]}
+                  onPress={() => setAudioFadeIn(!audioFadeIn)}
+                >
+                  <Text style={[
+                    styles.audioEffectToggleText,
+                    { color: audioFadeIn ? '#fff' : theme.textPrimary }
+                  ]}>
+                    {audioFadeIn ? '✓ Fade In' : 'Fade In'}
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.audioEffectToggle,
+                    { backgroundColor: audioFadeOut ? theme.accent : theme.cardSoft }
+                  ]}
+                  onPress={() => setAudioFadeOut(!audioFadeOut)}
+                >
+                  <Text style={[
+                    styles.audioEffectToggleText,
+                    { color: audioFadeOut ? '#fff' : theme.textPrimary }
+                  ]}>
+                    {audioFadeOut ? '✓ Fade Out' : 'Fade Out'}
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.audioEffectToggle,
+                    { backgroundColor: audioDucking ? theme.accent : theme.cardSoft }
+                  ]}
+                  onPress={() => setAudioDucking(!audioDucking)}
+                >
+                  <Text style={[
+                    styles.audioEffectToggleText,
+                    { color: audioDucking ? '#fff' : theme.textPrimary }
+                  ]}>
+                    {audioDucking ? '✓ Audio Ducking' : 'Audio Ducking'}
+                  </Text>
+                </TouchableOpacity>
+                
+                {audioDucking && (
+                  <Text style={[styles.audioEffectInfo, { color: theme.textSecondary }]}>
+                    Original audio will be lowered when music plays
+                  </Text>
+                )}
+              </View>
+            </ScrollView>
           )}
         </View>
       </View>
@@ -921,11 +2096,17 @@ const styles = StyleSheet.create({
   },
   toolbar: {
     borderTopWidth: 1,
-    paddingVertical: 12,
+    paddingVertical: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
   },
   toolbarContent: {
     paddingHorizontal: 16,
     gap: 12,
+    alignItems: 'center',
   },
   toolButton: {
     paddingHorizontal: 20,
@@ -937,9 +2118,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  toolButtonNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    marginRight: 10,
+    borderWidth: 2,
+    backgroundColor: 'transparent',
+    minWidth: 100,
+    gap: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  toolButtonTextNew: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 0,
+  },
   panel: {
-    padding: 16,
-    maxHeight: 200,
+    padding: 20,
+    maxHeight: 250,
+    backgroundColor: 'transparent',
   },
   filterButton: {
     paddingHorizontal: 16,
@@ -951,25 +2156,86 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  filterScrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 12,
+  },
+  filterButtonNew: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    marginRight: 12,
+    borderWidth: 2,
+    backgroundColor: 'transparent',
+    minWidth: 90,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  filterPreview: {
+    width: 60,
+    height: 60,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  filterButtonTextNew: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  stickerScrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
   stickerGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
   },
   stickerItem: {
-    width: 50,
-    height: 50,
+    width: 60,
+    height: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    paddingHorizontal: 16,
+  },
+  sectionHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   textPanel: {
     gap: 12,
+    maxHeight: 300,
   },
   addTextButton: {
-    padding: 12,
-    borderRadius: 8,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    borderRadius: 12,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   addTextButtonText: {
     color: '#fff',
@@ -1070,6 +2336,403 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  adjustPanel: {
+    maxHeight: 300,
+  },
+  adjustRow: {
+    marginBottom: 16,
+  },
+  adjustLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  adjustLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  sliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  slider: {
+    flex: 1,
+    height: 40,
+  },
+  sliderValueContainer: {
+    minWidth: 50,
+    alignItems: 'flex-end',
+  },
+  sliderValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  resetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    borderRadius: 12,
+    marginTop: 12,
+    borderWidth: 2,
+    gap: 8,
+  },
+  resetButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cropPanel: {
+    gap: 16,
+  },
+  cropControls: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-around',
+  },
+  cropButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  cropButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  aspectRatioContainer: {
+    gap: 8,
+  },
+  aspectRatioLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  aspectRatioScroll: {
+    marginTop: 8,
+  },
+  aspectRatioButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+  },
+  aspectRatioButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  cropInfo: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  brushTypeContainer: {
+    marginBottom: 16,
+  },
+  brushTypeButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+  },
+  brushTypeButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  eraserButton: {
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  eraserButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  drawActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+  },
+  actionButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  transformButton: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#7f5af0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1001,
+  },
+  transformButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  filterIntensityContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+  },
+  filterIntensityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  filterIntensityLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  sliderThumb: {
+    width: 20,
+    height: 20,
+  },
+  fontScroll: {
+    marginTop: 8,
+  },
+  fontButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  fontButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  alignmentContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  alignmentButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  alignmentButtonText: {
+    fontSize: 16,
+  },
+  colorScroll: {
+    marginTop: 8,
+    flexDirection: 'row',
+  },
+  colorOptionSmall: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: '#fff',
+    marginRight: 8,
+  },
+  backgroundControls: {
+    flexDirection: 'column',
+    gap: 8,
+    marginTop: 8,
+  },
+  backgroundToggle: {
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    width: 100,
+  },
+  backgroundToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  outlineControls: {
+    marginTop: 8,
+    gap: 8,
+  },
+  effectToggle: {
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    width: 120,
+    marginRight: 8,
+  },
+  effectToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  speedControl: {
+    marginTop: 16,
+  },
+  speedButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  speedButton: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  speedButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  speedInfo: {
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  audioControlRow: {
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  audioEffects: {
+    gap: 12,
+  },
+  audioEffectToggle: {
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  audioEffectToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  audioEffectInfo: {
+    fontSize: 12,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  transitionsPanel: {
+    maxHeight: 300,
+  },
+  transitionOptions: {
+    marginBottom: 16,
+  },
+  transitionButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+  },
+  transitionButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  transitionDurationControl: {
+    marginTop: 16,
+  },
+  transitionInfo: {
+    marginTop: 4,
+  },
+  transitionPreview: {
+    marginTop: 16,
+  },
+  transitionPreviewText: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  clipsPanel: {
+    maxHeight: 300,
+  },
+  addClipButton: {
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  addClipButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  clipsList: {
+    marginTop: 16,
+  },
+  clipItem: {
+    borderRadius: 8,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  clipItemContent: {
+    padding: 12,
+  },
+  clipItemText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  clipTrimControls: {
+    marginTop: 8,
+    gap: 8,
+  },
+  clipTrimLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  clipTrimButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  clipTrimButton: {
+    padding: 6,
+    borderRadius: 4,
+  },
+  clipDeleteButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FF4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clipDeleteButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  clipsInfo: {
+    marginTop: 16,
+  },
+  clipsInfoText: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  interactiveCropSection: {
+    marginTop: 16,
+  },
+  cropAreaToggle: {
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  cropAreaToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cropAreaInfo: {
+    marginTop: 8,
+  },
+  activeTabIndicator: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  activeTabLine: {
+    width: 40,
+    height: 3,
+    borderRadius: 2,
   },
 });
 
