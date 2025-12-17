@@ -1025,7 +1025,7 @@ const Profile = () => {
                 <Image
                   source={icons.messages}
                   resizeMode="contain"
-                  style={{ width: 24, height: 24, tintColor: theme.textPrimary }}
+                  style={{ width: 66, height: 66, tintColor: theme.textPrimary }}
                 />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => router.push('/inbox')} style={{ position: 'relative' }}>
@@ -1416,7 +1416,7 @@ const Profile = () => {
                           position: 'absolute',
                           top: 8,
                           right: 8,
-                          backgroundColor: 'rgba(255, 59, 48, 0.9)',
+                          backgroundColor: 'rgba(255, 58, 48, 0.5)',
                           borderRadius: 20,
                           width: 32,
                           height: 32,
@@ -1557,7 +1557,7 @@ const Profile = () => {
                           position: 'absolute',
                           top: 8,
                           right: 8,
-                          backgroundColor: 'rgba(255, 59, 48, 0.9)',
+                          backgroundColor: 'rgba(255, 58, 48, 0.56)',
                           borderRadius: 20,
                           width: 32,
                           height: 32,
