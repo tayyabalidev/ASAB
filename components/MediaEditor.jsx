@@ -512,6 +512,17 @@ const MediaEditor = ({
     });
   }, [texts]);
 
+  // Text styles similar to Instagram
+  const TEXT_STYLES = [
+    { id: 'classic', name: 'Classic', fontFamily: 'System', fontWeight: 'normal', hasOutline: false, hasShadow: true },
+    { id: 'modern', name: 'Modern', fontFamily: 'System', fontWeight: '600', hasOutline: false, hasShadow: false },
+    { id: 'neon', name: 'Neon', fontFamily: 'System', fontWeight: 'bold', hasOutline: true, outlineColor: '#00FFFF', hasShadow: true, shadowColor: '#00FFFF' },
+    { id: 'typewriter', name: 'Typewriter', fontFamily: 'Courier', fontWeight: 'normal', hasOutline: false, hasShadow: false },
+    { id: 'strong', name: 'Strong', fontFamily: 'System', fontWeight: 'bold', hasOutline: false, hasShadow: true },
+    { id: 'casual', name: 'Casual', fontFamily: 'System', fontWeight: '300', hasOutline: false, hasShadow: false },
+    { id: 'elegant', name: 'Elegant', fontFamily: 'System', fontWeight: '300', hasOutline: false, hasShadow: true, shadowColor: 'rgba(0,0,0,0.3)' },
+  ];
+
   // Add text
   const addText = () => {
     const newText = {
@@ -521,7 +532,9 @@ const MediaEditor = ({
       y: SCREEN_HEIGHT / 2 - 15,
       fontSize: 24,
       color: '#FFFFFF',
-      fontFamily: 'Poppins-Bold',
+      fontFamily: 'System',
+      fontWeight: 'normal',
+      textStyle: 'classic', // Track which style is applied
       rotation: 0,
       scale: 1,
       alignment: 'center',
@@ -536,11 +549,39 @@ const MediaEditor = ({
       shadowBlur: 2,
     };
     setTexts([...texts, newText]);
+    setSelectedText(newText.id); // Auto-select new text
+  };
+
+  // Apply text style
+  const applyTextStyle = (textId, styleId) => {
+    const style = TEXT_STYLES.find(s => s.id === styleId);
+    if (!style) return;
+    
+    updateText(textId, {
+      textStyle: styleId,
+      fontFamily: style.fontFamily,
+      fontWeight: style.fontWeight,
+      hasOutline: style.hasOutline || false,
+      outlineColor: style.outlineColor || '#000000',
+      hasShadow: style.hasShadow !== undefined ? style.hasShadow : true,
+      shadowColor: style.shadowColor || 'rgba(0,0,0,0.5)',
+    });
   };
 
   // Update text
   const updateText = (id, updates) => {
     setTexts(texts.map(t => t.id === id ? { ...t, ...updates } : t));
+  };
+
+  // Format time helper for video trimming
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 10);
+    if (mins > 0) {
+      return `${mins}:${secs.toString().padStart(2, '0')}.${ms}`;
+    }
+    return `${secs}.${ms}`;
   };
 
   // Track activeTab, drawingColor, and drawingWidth in refs to access current values in PanResponder
@@ -577,8 +618,36 @@ const MediaEditor = ({
       setOriginalMediaUri(media.uri);
       setFilteredImageUri(null); // Reset filtered image when media changes
       setSelectedFilter('none'); // Reset filter selection when media changes
+      
+      // Reset video trim times when media changes
+      if (mediaType === 'video') {
+        setVideoStartTime(0);
+        setVideoEndTime(60); // Will be updated when video loads
+      }
     }
   }, [media?.uri]);
+
+  // Get video duration when video loads
+  useEffect(() => {
+    if (mediaType === 'video' && videoRef.current && visible) {
+      const loadVideoDuration = async () => {
+        try {
+          const status = await videoRef.current.getStatusAsync();
+          if (status.isLoaded && status.durationMillis) {
+            const durationSeconds = status.durationMillis / 1000;
+            setVideoDuration(durationSeconds);
+            setVideoEndTime(durationSeconds);
+          }
+        } catch (error) {
+          console.log('Error getting video duration:', error);
+        }
+      };
+      
+      // Wait a bit for video to load
+      const timer = setTimeout(loadVideoDuration, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [mediaType, visible, videoRef.current]);
 
   // Apply filter to main preview image when filter is selected (preview only, no auto-save)
   // We use CSS filters via getFilterCSS function, so no need to process image
@@ -916,6 +985,16 @@ const MediaEditor = ({
                 useNativeControls={false}
                 resizeMode={ResizeMode.COVER}
                 isLooping
+                shouldPlay={false}
+                onLoad={(status) => {
+                  if (status.isLoaded && status.durationMillis) {
+                    const durationSeconds = status.durationMillis / 1000;
+                    setVideoDuration(durationSeconds);
+                    if (videoEndTime === 60 || videoEndTime > durationSeconds) {
+                      setVideoEndTime(durationSeconds);
+                    }
+                  }
+                }}
               />
             ) : (
               <View style={styles.media}>
@@ -1142,7 +1221,8 @@ const MediaEditor = ({
                         {
                           fontSize: text.fontSize,
                           color: text.color,
-                          fontFamily: text.fontFamily,
+                          fontFamily: text.fontFamily || 'System',
+                          fontWeight: text.fontWeight || 'normal',
                           textAlign: text.alignment || 'center',
                           // Text shadow
                           textShadowColor: text.hasShadow !== false ? (text.shadowColor || 'rgba(0,0,0,0.5)') : 'transparent',
@@ -1940,7 +2020,7 @@ const MediaEditor = ({
           )}
 
           {activeTab === 'text' && (
-            <View style={styles.textPanel}>
+            <ScrollView style={styles.textPanel} showsVerticalScrollIndicator={false}>
               <TouchableOpacity
                 style={[styles.addTextButton, { backgroundColor: theme.accent }]}
                 onPress={addText}
@@ -1948,27 +2028,161 @@ const MediaEditor = ({
                 <MaterialCommunityIcons name="format-text" size={20} color="#fff" />
                 <Text style={styles.addTextButtonText}>Add Text</Text>
               </TouchableOpacity>
+              
               {texts.map(text => (
-                <View key={text.id} style={styles.textEditor}>
+                <View key={text.id} style={[styles.textEditor, { backgroundColor: theme.cardSoft, borderRadius: 12, padding: 12, marginBottom: 12 }]}>
+                  <View style={styles.textEditorHeader}>
+                    <Text style={[styles.textEditorTitle, { color: theme.textPrimary }]}>
+                      Text {texts.indexOf(text) + 1}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => deleteElement('text', text.id)}
+                      style={[styles.deleteTextButton, { backgroundColor: theme.error || '#FF3B30' }]}
+                    >
+                      <MaterialCommunityIcons name="delete" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                  
+                  {/* Text Input - Large and visible */}
                   <TextInput
                     value={text.text}
                     onChangeText={(newText) => updateText(text.id, { text: newText })}
-                    style={[styles.textInput, { color: theme.textPrimary, borderColor: theme.border }]}
-                    placeholder="Enter text"
+                    style={[
+                      styles.textInputLarge, 
+                      { 
+                        color: theme.textPrimary, 
+                        borderColor: theme.border,
+                        backgroundColor: theme.background,
+                        fontSize: 18,
+                        minHeight: 50,
+                        padding: 12,
+                        borderRadius: 8,
+                        marginBottom: 12,
+                      }
+                    ]}
+                    placeholder="Type your text here..."
                     placeholderTextColor={theme.textSecondary}
+                    multiline
+                    autoFocus={selectedText === text.id}
                   />
-                  <View style={styles.textControls}>
-                    <Text style={[styles.controlLabel, { color: theme.textSecondary }]}>Size:</Text>
-                    <TextInput
-                      value={text.fontSize.toString()}
-                      onChangeText={(size) => updateText(text.id, { fontSize: parseInt(size) || 24 })}
-                      style={[styles.sizeInput, { color: theme.textPrimary, borderColor: theme.border }]}
-                      keyboardType="numeric"
+                  
+                  {/* Text Styles - Instagram-like */}
+                  <View style={styles.textStylesSection}>
+                    <Text style={[styles.controlLabel, { color: theme.textPrimary, marginBottom: 8 }]}>Style</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.textStylesScroll}>
+                      {TEXT_STYLES.map(style => (
+                        <TouchableOpacity
+                          key={style.id}
+                          style={[
+                            styles.textStyleButton,
+                            { 
+                              backgroundColor: (text.textStyle || 'classic') === style.id ? theme.accent : theme.card,
+                              borderColor: (text.textStyle || 'classic') === style.id ? theme.accent : theme.border,
+                            }
+                          ]}
+                          onPress={() => applyTextStyle(text.id, style.id)}
+                        >
+                          <Text style={[
+                            styles.textStyleButtonText,
+                            { 
+                              color: (text.textStyle || 'classic') === style.id ? '#fff' : theme.textPrimary,
+                              fontFamily: style.fontFamily,
+                              fontWeight: style.fontWeight,
+                            }
+                          ]}>
+                            {style.name || style.id}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                  
+                  {/* Color Picker */}
+                  <View style={styles.colorPickerSection}>
+                    <Text style={[styles.controlLabel, { color: theme.textPrimary, marginBottom: 8 }]}>Color</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.colorPickerScroll}>
+                      {['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#FF69B4', '#8A2BE2', '#FF1493'].map(color => (
+                        <TouchableOpacity
+                          key={color}
+                          style={[
+                            styles.colorOption,
+                            { backgroundColor: color },
+                            text.color === color && styles.colorOptionSelected,
+                            { borderColor: text.color === color ? theme.accent : theme.border }
+                          ]}
+                          onPress={() => updateText(text.id, { color })}
+                        />
+                      ))}
+                    </ScrollView>
+                  </View>
+                  
+                  {/* Font Size Control */}
+                  <View style={styles.textControlRow}>
+                    <Text style={[styles.controlLabel, { color: theme.textPrimary }]}>Size: {text.fontSize}</Text>
+                    <Slider
+                      style={styles.slider}
+                      minimumValue={12}
+                      maximumValue={72}
+                      value={text.fontSize}
+                      onValueChange={(size) => updateText(text.id, { fontSize: Math.round(size) })}
+                      minimumTrackTintColor={theme.accent}
+                      maximumTrackTintColor={theme.border}
+                      thumbTintColor={theme.accent}
                     />
                   </View>
+                  
+                  {/* Alignment Options */}
+                  <View style={styles.alignmentSection}>
+                    <Text style={[styles.controlLabel, { color: theme.textPrimary, marginBottom: 8 }]}>Alignment</Text>
+                    <View style={styles.alignmentButtons}>
+                      {['left', 'center', 'right'].map(align => (
+                        <TouchableOpacity
+                          key={align}
+                          style={[
+                            styles.alignmentButton,
+                            { 
+                              backgroundColor: text.alignment === align ? theme.accent : theme.card,
+                              borderColor: text.alignment === align ? theme.accent : theme.border,
+                            }
+                          ]}
+                          onPress={() => updateText(text.id, { alignment: align })}
+                        >
+                          <MaterialCommunityIcons 
+                            name={`format-align-${align}`} 
+                            size={20} 
+                            color={text.alignment === align ? '#fff' : theme.textPrimary} 
+                          />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                  
+                  {/* Background Toggle */}
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleButton,
+                      { backgroundColor: text.backgroundColor ? theme.accent : theme.cardSoft }
+                    ]}
+                    onPress={() => updateText(text.id, { 
+                      backgroundColor: text.backgroundColor ? null : '#000000',
+                      backgroundOpacity: text.backgroundColor ? 0 : 0.5
+                    })}
+                  >
+                    <MaterialCommunityIcons 
+                      name={text.backgroundColor ? "format-color-fill" : "format-color-text"} 
+                      size={18} 
+                      color={text.backgroundColor ? '#fff' : theme.textPrimary} 
+                    />
+                    <Text style={[
+                      styles.toggleButtonText,
+                      { color: text.backgroundColor ? '#fff' : theme.textPrimary }
+                    ]}>
+                      {text.backgroundColor ? 'Background On' : 'Background Off'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               ))}
-            </View>
+            </ScrollView>
           )}
 
           {activeTab === 'draw' && mediaType === 'photo' && (
@@ -2103,52 +2317,131 @@ const MediaEditor = ({
 
           {activeTab === 'trim' && mediaType === 'video' && (
             <ScrollView style={styles.trimPanel} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.controlLabel, { color: theme.textPrimary, marginBottom: 8 }]}>
+              <Text style={[styles.controlLabel, { color: theme.textPrimary, marginBottom: 16, fontSize: 18, fontWeight: 'bold' }]}>
                 Trim Video
               </Text>
+              
+              {/* Video Timeline Scrubber */}
+              <View style={[styles.timelineContainer, { backgroundColor: theme.cardSoft, borderRadius: 12, padding: 16 }]}>
+                <View style={styles.timelineWrapper}>
+                  <View style={styles.timelineTrack}>
+                    {/* Start handle */}
+                    <View 
+                      style={[
+                        styles.timelineHandle, 
+                        styles.timelineHandleStart,
+                        { backgroundColor: theme.accent }
+                      ]}
+                    />
+                    {/* Selected range */}
+                    <View 
+                      style={[
+                        styles.timelineSelectedRange,
+                        { 
+                          backgroundColor: theme.accent + '40',
+                          left: `${(videoStartTime / videoDuration) * 100}%`,
+                          width: `${((videoEndTime - videoStartTime) / videoDuration) * 100}%`,
+                        }
+                      ]}
+                    />
+                    {/* End handle */}
+                    <View 
+                      style={[
+                        styles.timelineHandle, 
+                        styles.timelineHandleEnd,
+                        { backgroundColor: theme.accent }
+                      ]}
+                    />
+                  </View>
+                </View>
+                
+                {/* Time labels */}
+                <View style={styles.timelineLabels}>
+                  <Text style={[styles.timelineLabel, { color: theme.textSecondary }]}>
+                    {formatTime(videoStartTime)}
+                  </Text>
+                  <Text style={[styles.timelineLabel, { color: theme.textSecondary }]}>
+                    {formatTime(videoEndTime)} / {formatTime(videoDuration)}
+                  </Text>
+                </View>
+                
+                {/* Duration display */}
+                <View style={[styles.trimInfo, { backgroundColor: theme.background, marginTop: 12 }]}>
+                  <Text style={[styles.controlLabel, { color: theme.textPrimary }]}>
+                    Selected Duration: {formatTime(videoEndTime - videoStartTime)}
+                  </Text>
+                </View>
+              </View>
+              
+              {/* Fine-tune controls */}
               <View style={styles.trimControls}>
                 <View style={styles.trimControlRow}>
-                  <Text style={[styles.controlLabel, { color: theme.textSecondary, fontSize: 12 }]}>
-                    Start: {videoStartTime.toFixed(1)}s
-                  </Text>
+                  <View style={styles.trimControlLabel}>
+                    <MaterialCommunityIcons name="play-circle-outline" size={20} color={theme.textPrimary} />
+                    <Text style={[styles.controlLabel, { color: theme.textPrimary, marginLeft: 8 }]}>
+                      Start Time: {formatTime(videoStartTime)}
+                    </Text>
+                  </View>
                   <View style={styles.trimButtons}>
                     <TouchableOpacity
                       style={[styles.trimButton, { backgroundColor: theme.cardSoft }]}
-                      onPress={() => setVideoStartTime(Math.max(0, videoStartTime - 1))}
+                      onPress={() => setVideoStartTime(Math.max(0, videoStartTime - 0.5))}
                     >
-                      <Text style={{ color: theme.textPrimary }}>−1s</Text>
+                      <Text style={{ color: theme.textPrimary }}>−0.5s</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.trimButton, { backgroundColor: theme.cardSoft }]}
-                      onPress={() => setVideoStartTime(Math.min(videoEndTime - 1, videoStartTime + 1))}
+                      onPress={() => setVideoStartTime(Math.max(0, videoStartTime - 0.1))}
                     >
-                      <Text style={{ color: theme.textPrimary }}>+1s</Text>
+                      <Text style={{ color: theme.textPrimary }}>−0.1s</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.trimButton, { backgroundColor: theme.cardSoft }]}
+                      onPress={() => setVideoStartTime(Math.min(videoEndTime - 0.1, videoStartTime + 0.1))}
+                    >
+                      <Text style={{ color: theme.textPrimary }}>+0.1s</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.trimButton, { backgroundColor: theme.cardSoft }]}
+                      onPress={() => setVideoStartTime(Math.min(videoEndTime - 0.5, videoStartTime + 0.5))}
+                    >
+                      <Text style={{ color: theme.textPrimary }}>+0.5s</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
                 <View style={styles.trimControlRow}>
-                  <Text style={[styles.controlLabel, { color: theme.textSecondary, fontSize: 12 }]}>
-                    End: {videoEndTime.toFixed(1)}s
-                  </Text>
+                  <View style={styles.trimControlLabel}>
+                    <MaterialCommunityIcons name="stop-circle-outline" size={20} color={theme.textPrimary} />
+                    <Text style={[styles.controlLabel, { color: theme.textPrimary, marginLeft: 8 }]}>
+                      End Time: {formatTime(videoEndTime)}
+                    </Text>
+                  </View>
                   <View style={styles.trimButtons}>
                     <TouchableOpacity
                       style={[styles.trimButton, { backgroundColor: theme.cardSoft }]}
-                      onPress={() => setVideoEndTime(Math.max(videoStartTime + 1, videoEndTime - 1))}
+                      onPress={() => setVideoEndTime(Math.max(videoStartTime + 0.1, videoEndTime - 0.5))}
                     >
-                      <Text style={{ color: theme.textPrimary }}>−1s</Text>
+                      <Text style={{ color: theme.textPrimary }}>−0.5s</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.trimButton, { backgroundColor: theme.cardSoft }]}
-                      onPress={() => setVideoEndTime(Math.min(videoDuration, videoEndTime + 1))}
+                      onPress={() => setVideoEndTime(Math.max(videoStartTime + 0.1, videoEndTime - 0.1))}
                     >
-                      <Text style={{ color: theme.textPrimary }}>+1s</Text>
+                      <Text style={{ color: theme.textPrimary }}>−0.1s</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.trimButton, { backgroundColor: theme.cardSoft }]}
+                      onPress={() => setVideoEndTime(Math.min(videoDuration, videoEndTime + 0.1))}
+                    >
+                      <Text style={{ color: theme.textPrimary }}>+0.1s</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.trimButton, { backgroundColor: theme.cardSoft }]}
+                      onPress={() => setVideoEndTime(Math.min(videoDuration, videoEndTime + 0.5))}
+                    >
+                      <Text style={{ color: theme.textPrimary }}>+0.5s</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
-                <View style={[styles.trimInfo, { backgroundColor: theme.cardSoft }]}>
-                  <Text style={[styles.controlLabel, { color: theme.textPrimary }]}>
-                    Duration: {(videoEndTime - videoStartTime).toFixed(1)}s
-                  </Text>
                 </View>
               </View>
               
@@ -2540,7 +2833,7 @@ const styles = StyleSheet.create({
   },
   textPanel: {
     gap: 12,
-    maxHeight: 300,
+    paddingBottom: 20,
   },
   addTextButton: {
     flexDirection: 'row',
@@ -2563,11 +2856,92 @@ const styles = StyleSheet.create({
   textEditor: {
     gap: 8,
   },
+  textEditorHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  textEditorTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteTextButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   textInput: {
     borderWidth: 1,
     borderRadius: 8,
     padding: 8,
     fontSize: 16,
+  },
+  textInputLarge: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    fontSize: 18,
+    minHeight: 50,
+  },
+  textStylesSection: {
+    marginBottom: 16,
+  },
+  textStylesScroll: {
+    marginTop: 8,
+  },
+  textStyleButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 2,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  textStyleButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  colorPickerSection: {
+    marginBottom: 16,
+  },
+  colorPickerScroll: {
+    marginTop: 8,
+    flexDirection: 'row',
+  },
+  textControlRow: {
+    marginBottom: 16,
+  },
+  alignmentSection: {
+    marginBottom: 16,
+  },
+  alignmentButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  alignmentButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  toggleButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   textControls: {
     flexDirection: 'row',
@@ -2618,6 +2992,71 @@ const styles = StyleSheet.create({
   },
   trimPanel: {
     gap: 12,
+    paddingBottom: 20,
+  },
+  timelineContainer: {
+    marginBottom: 20,
+  },
+  timelineWrapper: {
+    width: '100%',
+    height: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  timelineTrack: {
+    width: '100%',
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 2,
+    position: 'relative',
+  },
+  timelineSelectedRange: {
+    position: 'absolute',
+    height: 4,
+    borderRadius: 2,
+    top: 0,
+  },
+  timelineHandle: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    top: -8,
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  timelineHandleStart: {
+    left: 0,
+    transform: [{ translateX: -10 }],
+  },
+  timelineHandleEnd: {
+    right: 0,
+    transform: [{ translateX: 10 }],
+  },
+  timelineLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  timelineLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  trimControls: {
+    gap: 16,
+  },
+  trimControlRow: {
+    gap: 12,
+  },
+  trimControlLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   musicPanel: {
     gap: 12,
