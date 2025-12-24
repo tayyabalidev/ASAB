@@ -13,6 +13,8 @@ config.resolver = {
   },
   // Ensure proper module resolution
   platforms: ['ios', 'android', 'native', 'web'],
+  // Ensure TypeScript files are resolved properly
+  sourceExts: [...config.resolver.sourceExts, 'ts', 'tsx'],
 };
 
 // Configure watcher to ignore problematic directories
