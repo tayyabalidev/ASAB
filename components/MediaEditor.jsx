@@ -44,6 +44,41 @@ const getFilterCSS = (filterId) => {
   let filterCSS = '';
   
   switch (filterId) {
+    // Instagram-style filters
+    case 'wavy':
+      filterCSS = 'brightness(1.05) contrast(0.95) saturate(0.85) hue-rotate(5deg)';
+      break;
+    case 'paris':
+      filterCSS = 'brightness(1.08) contrast(1.1) saturate(1.15) hue-rotate(-10deg)';
+      break;
+    case 'losangeles':
+      filterCSS = 'brightness(1.15) contrast(1.05) saturate(1.2) hue-rotate(15deg)';
+      break;
+    case 'oslo':
+      filterCSS = 'brightness(0.95) contrast(1.1) saturate(0.9) hue-rotate(10deg)';
+      break;
+    case 'tokyo':
+      filterCSS = 'brightness(1.1) contrast(1.15) saturate(1.1) hue-rotate(-5deg)';
+      break;
+    case 'london':
+      filterCSS = 'brightness(0.9) contrast(1.2) saturate(0.95) hue-rotate(5deg)';
+      break;
+    case 'moscow':
+      filterCSS = 'brightness(0.92) contrast(1.25) saturate(0.88) hue-rotate(-8deg)';
+      break;
+    case 'berlin':
+      filterCSS = 'brightness(0.98) contrast(1.15) saturate(1.05) hue-rotate(12deg)';
+      break;
+    case 'rome':
+      filterCSS = 'brightness(1.12) contrast(1.08) saturate(1.18) hue-rotate(-12deg)';
+      break;
+    case 'madrid':
+      filterCSS = 'brightness(1.05) contrast(1.2) saturate(1.12) hue-rotate(8deg)';
+      break;
+    case 'amsterdam':
+      filterCSS = 'brightness(1.08) contrast(1.05) saturate(1.1) hue-rotate(-15deg)';
+      break;
+    // Classic filters
     case 'vintage':
       filterCSS = 'brightness(1.1) contrast(0.9) saturate(0.8) sepia(0.2)';
       break;
@@ -98,6 +133,17 @@ const getFilterCSS = (filterId) => {
 
 const FILTERS = [
   { id: 'none', name: 'Original' },
+  { id: 'wavy', name: 'Wavy' },
+  { id: 'paris', name: 'Paris' },
+  { id: 'losangeles', name: 'Los Angeles' },
+  { id: 'oslo', name: 'Oslo' },
+  { id: 'tokyo', name: 'Tokyo' },
+  { id: 'london', name: 'London' },
+  { id: 'moscow', name: 'Moscow' },
+  { id: 'berlin', name: 'Berlin' },
+  { id: 'rome', name: 'Rome' },
+  { id: 'madrid', name: 'Madrid' },
+  { id: 'amsterdam', name: 'Amsterdam' },
   { id: 'vintage', name: 'Vintage' },
   { id: 'blackwhite', name: 'B&W' },
   { id: 'sepia', name: 'Sepia' },
@@ -180,7 +226,7 @@ const MediaEditor = ({
   const { theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
   
-  const [activeTab, setActiveTab] = useState('filters'); // filters, adjust, crop, stickers, text, draw, trim, music, transitions, clips
+  const [activeTab, setActiveTab] = useState('adjust'); // adjust, crop, stickers, text, draw, trim, music, transitions, clips
   const [selectedFilter, setSelectedFilter] = useState('none');
   const [filteredImageUri, setFilteredImageUri] = useState(null); // Store filtered image URI
   const [isApplyingFilter, setIsApplyingFilter] = useState(false); // Track filter application
@@ -649,20 +695,7 @@ const MediaEditor = ({
     }
   }, [mediaType, visible, videoRef.current]);
 
-  // Apply filter to main preview image when filter is selected (preview only, no auto-save)
-  // We use CSS filters via getFilterCSS function, so no need to process image
-  // The filteredImageUri will be null and we'll use WebView with CSS filters for preview
-  useEffect(() => {
-    // Reset filtered image URI - we'll use CSS filters in WebView instead
-    if (selectedFilter === 'none') {
-      setFilteredImageUri(null);
-      setIsApplyingFilter(false);
-    } else {
-      // For non-none filters, we'll use WebView with CSS filters
-      // No need to process the image, just set a flag
-      setIsApplyingFilter(false);
-    }
-  }, [selectedFilter]);
+  // Filters removed - no filter application needed
   
   // Debounced adjustment update to prevent excessive re-renders
   const adjustmentTimeoutRef = useRef({});
@@ -834,8 +867,8 @@ const MediaEditor = ({
     
     setIsExporting(true);
     try {
-      // Use filtered image if available, otherwise use original
-      let finalMedia = filteredImageUri ? { ...media, uri: filteredImageUri } : media;
+      // Use original media (filters removed)
+      let finalMedia = media;
       
       // Apply crop/rotate if needed
       if (mediaType === 'photo' && (rotation !== 0 || flipHorizontal || flipVertical)) {
@@ -846,7 +879,7 @@ const MediaEditor = ({
         media: finalMedia,
         mediaType,
         filter: selectedFilter,
-        filterIntensity: 100, // Always 100% intensity
+        filterIntensity: 100,
         adjustments,
         crop: mediaType === 'photo' ? { rotation, flipHorizontal, flipVertical, aspectRatio } : null,
         stickers,
@@ -998,7 +1031,7 @@ const MediaEditor = ({
               />
             ) : (
               <View style={styles.media}>
-                {selectedFilter !== 'none' && getFilterCSS(selectedFilter) !== 'none' && imageBase64 ? (
+                {imageBase64 ? (
                   <WebView
                     source={{
                       html: `
@@ -1023,7 +1056,7 @@ const MediaEditor = ({
                                 height: 100%;
                                 object-fit: cover;
                                 display: block;
-                                filter: ${getFilterCSS(selectedFilter)};
+                                filter: none;
                                 transform: rotate(${rotation}deg) scaleX(${flipHorizontal ? -1 : 1}) scaleY(${flipVertical ? -1 : 1});
                               }
                             </style>
@@ -1052,6 +1085,7 @@ const MediaEditor = ({
                       const { nativeEvent } = syntheticEvent;
                       console.log('WebView HTTP error: ', nativeEvent);
                     }}
+                    key={`preview-${selectedFilter}-${activeTab}`}
                   />
                 ) : isLoadingBase64 ? (
                   <View style={[styles.media, { justifyContent: 'center', alignItems: 'center', backgroundColor: theme.background }]}>
@@ -1320,30 +1354,6 @@ const MediaEditor = ({
             <TouchableOpacity
               style={[
                 styles.toolButtonNew, 
-                activeTab === 'filters' && { 
-                  backgroundColor: theme.accent,
-                  borderColor: theme.accent,
-                },
-                { borderColor: theme.border }
-              ]}
-              onPress={() => setActiveTab('filters')}
-            >
-              <MaterialCommunityIcons 
-                name="image-filter" 
-                size={24} 
-                color={activeTab === 'filters' ? '#fff' : theme.textPrimary} 
-              />
-              <Text style={[
-                styles.toolButtonTextNew, 
-                { color: activeTab === 'filters' ? '#fff' : theme.textPrimary }
-              ]}>
-                Filters
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[
-                styles.toolButtonNew, 
                 activeTab === 'adjust' && { 
                   backgroundColor: theme.accent,
                   borderColor: theme.accent,
@@ -1573,127 +1583,6 @@ const MediaEditor = ({
           <View style={styles.activeTabIndicator}>
             <View style={[styles.activeTabLine, { backgroundColor: theme.accent }]} />
           </View>
-          {activeTab === 'filters' && (
-            <View>
-              {media && media.uri && mediaType === 'photo' ? (
-                <>
-                  <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.filterScrollContent}
-              >
-                {FILTERS.map(filter => {
-                  const filterCSS = getFilterCSS(filter.id);
-                  const isSelected = selectedFilter === filter.id;
-                  
-                  return (
-                    <TouchableOpacity
-                      key={filter.id}
-                      style={styles.filterButtonInstagram}
-                      onPress={() => setSelectedFilter(filter.id)}
-                    >
-                      <View style={[
-                        styles.filterThumbnailContainer,
-                        isSelected && {
-                          borderColor: theme.accent,
-                          borderWidth: 3,
-                        },
-                        !isSelected && { borderColor: 'transparent' }
-                      ]}>
-                        {filterThumbnails[filter.id] ? (
-                          filter.id === 'none' || getFilterCSS(filter.id) === 'none' ? (
-                            <Image
-                              source={{ uri: filterThumbnails[filter.id] }}
-                              style={styles.filterThumbnail}
-                              resizeMode="cover"
-                            />
-                          ) : filterThumbnails[filter.id] && filterThumbnails[filter.id].startsWith('data:') ? (
-                            <WebView
-                              source={{
-                                html: `
-                                  <!DOCTYPE html>
-                                  <html>
-                                    <head>
-                                      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                                      <style>
-                                        * {
-                                          margin: 0;
-                                          padding: 0;
-                                          box-sizing: border-box;
-                                        }
-                                        html, body {
-                                          width: 100%;
-                                          height: 100%;
-                                          overflow: hidden;
-                                          background: transparent;
-                                        }
-                                        img {
-                                          width: 100%;
-                                          height: 100%;
-                                          object-fit: cover;
-                                          display: block;
-                                          filter: ${getFilterCSS(filter.id)};
-                                        }
-                                      </style>
-                                    </head>
-                                    <body>
-                                      <img src="${filterThumbnails[filter.id]}" onerror="this.style.display='none';" />
-                                    </body>
-                                  </html>
-                                `,
-                              }}
-                              style={styles.filterThumbnail}
-                              scrollEnabled={false}
-                              showsVerticalScrollIndicator={false}
-                              showsHorizontalScrollIndicator={false}
-                              bounces={false}
-                              overScrollMode="never"
-                              androidLayerType="hardware"
-                              originWhitelist={['*']}
-                              javaScriptEnabled={true}
-                            />
-                          ) : (
-                            <Image
-                              source={{ uri: filterThumbnails[filter.id] || media.uri }}
-                              style={styles.filterThumbnail}
-                              resizeMode="cover"
-                            />
-                          )
-                        ) : (
-                          <View style={[styles.filterThumbnail, { justifyContent: 'center', alignItems: 'center', backgroundColor: theme.cardSoft }]}>
-                            <ActivityIndicator size="small" color={theme.accent} />
-                          </View>
-                        )}
-                        {isSelected && (
-                          <View style={[styles.filterSelectedIndicator, { backgroundColor: theme.accent }]}>
-                            <MaterialCommunityIcons name="check" size={16} color="#fff" />
-                          </View>
-                        )}
-                      </View>
-                      <Text style={[
-                        styles.filterButtonTextInstagram,
-                        { color: isSelected ? theme.accent : theme.textPrimary }
-                      ]}>
-                        {filter.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-                </>
-              ) : (
-                <View style={styles.filterPlaceholder}>
-                  <MaterialCommunityIcons name="image-filter" size={48} color={theme.textSecondary} />
-                  <Text style={[styles.filterPlaceholderText, { color: theme.textSecondary }]}>
-                    {mediaType === 'video' 
-                      ? 'Filters are only available for photos' 
-                      : 'Please select an image to preview filters'}
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
-
           {activeTab === 'adjust' && (
             <ScrollView style={styles.adjustPanel} showsVerticalScrollIndicator={false}>
               <View style={styles.adjustRow}>
@@ -2799,6 +2688,83 @@ const styles = StyleSheet.create({
   filterPlaceholderText: {
     fontSize: 14,
     marginTop: 12,
+    textAlign: 'center',
+  },
+  // Instagram-style filter UI
+  instagramFilterContainer: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  instagramFilterCarousel: {
+    maxHeight: 120,
+    marginBottom: 8,
+  },
+  instagramFilterScroll: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  instagramFilterItem: {
+    alignItems: 'center',
+    marginRight: 12,
+    minWidth: 70,
+  },
+  instagramFilterThumbnail: {
+    width: 70,
+    height: 70,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    marginBottom: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  instagramFilterThumbnailSelected: {
+    borderColor: '#0095F6',
+    borderWidth: 3,
+  },
+  instagramFilterThumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  instagramFilterLabel: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  instagramFilterPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  instagramFilterActionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  instagramFilterActionButton: {
+    minWidth: 60,
+  },
+  instagramFilterActionText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: 'Poppins-SemiBold',
+  },
+  instagramFilterActionTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: 'Poppins-SemiBold',
+    position: 'absolute',
+    left: 0,
+    right: 0,
     textAlign: 'center',
   },
   stickerScrollContent: {

@@ -18,21 +18,35 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Animated,
 } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from "react-i18next";
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
+import Slider from '@react-native-community/slider';
 
 import { icons, images } from "../../constants";
 import { createVideoPost, createPhotoPost } from "../../lib/appwrite";
 import { processVideo, processPhoto, checkProcessingServer } from "../../lib/videoProcessor";
 import { exportEditedMedia } from "../../lib/mediaExporter";
 import { CustomButton, FormField, MediaEditor } from "../../components";
+import { Feather } from '@expo/vector-icons';
 import { useGlobalContext } from "../../context/GlobalProvider";
 
 const FILTERS = [
   { id: 'none', name: 'Original' },
+  { id: 'wavy', name: 'Wavy' },
+  { id: 'paris', name: 'Paris' },
+  { id: 'losangeles', name: 'Los Angeles' },
+  { id: 'oslo', name: 'Oslo' },
+  { id: 'tokyo', name: 'Tokyo' },
+  { id: 'london', name: 'London' },
+  { id: 'moscow', name: 'Moscow' },
+  { id: 'berlin', name: 'Berlin' },
+  { id: 'rome', name: 'Rome' },
+  { id: 'madrid', name: 'Madrid' },
+  { id: 'amsterdam', name: 'Amsterdam' },
   { id: 'vintage', name: 'Vintage' },
   { id: 'blackwhite', name: 'B&W' },
   { id: 'sepia', name: 'Sepia' },
@@ -40,6 +54,14 @@ const FILTERS = [
   { id: 'warm', name: 'Warm' },
   { id: 'contrast', name: 'Contrast' },
   { id: 'bright', name: 'Bright' },
+  { id: 'dramatic', name: 'Dramatic' },
+  { id: 'portrait', name: 'Portrait' },
+  { id: 'cinema', name: 'Cinema' },
+  { id: 'noir', name: 'Noir' },
+  { id: 'vivid', name: 'Vivid' },
+  { id: 'fade', name: 'Fade' },
+  { id: 'chrome', name: 'Chrome' },
+  { id: 'process', name: 'Process' },
 ];
 
 const Create = () => {
@@ -80,12 +102,60 @@ const Create = () => {
   const [videoFilterCSS, setVideoFilterCSS] = useState('none');
   const scrollViewRef = useRef(null);
   const linkInputRef = useRef(null);
+  const textWebViewRef = useRef(null);
+  const hiddenTextInputRef = useRef(null);
   const [processingMedia, setProcessingMedia] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [useProcessing, setUseProcessing] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [editingMedia, setEditingMedia] = useState(null);
   const [isMediaEdited, setIsMediaEdited] = useState(false); // Track if media was edited via MediaEditor
+  const [showTextModal, setShowTextModal] = useState(false);
+  const [textOverlays, setTextOverlays] = useState([]);
+  const [currentText, setCurrentText] = useState('');
+  const [currentTextStyle, setCurrentTextStyle] = useState({
+    fontSize: 24,
+    fontFamily: 'Poppins-Bold',
+    color: '#FFFFFF',
+    backgroundColor: 'transparent',
+    alignment: 'center',
+    textStyle: 'normal', // normal, outline, shadow, neon, gradient
+  });
+  
+  const [showTextStyles, setShowTextStyles] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showBackgroundColors, setShowBackgroundColors] = useState(false);
+  const [imageOverlays, setImageOverlays] = useState([]);
+  const [showOverlayModal, setShowOverlayModal] = useState(false);
+  
+  // Instagram text styles - Multiple styles like Instagram
+  const TEXT_STYLES = [
+    { id: 'normal', name: 'Normal', fontFamily: 'Poppins-Regular', fontWeight: '400' },
+    { id: 'bold', name: 'Bold', fontFamily: 'Poppins-Bold', fontWeight: '700' },
+    { id: 'italic', name: 'Italic', fontFamily: 'Poppins-Regular', fontWeight: '400', fontStyle: 'italic' },
+    { id: 'outline', name: 'Outline', fontFamily: 'Poppins-Bold', fontWeight: '700' },
+    { id: 'shadow', name: 'Shadow', fontFamily: 'Poppins-Bold', fontWeight: '700' },
+    { id: 'neon', name: 'Neon', fontFamily: 'Poppins-Bold', fontWeight: '700' },
+    { id: 'gradient', name: 'Gradient', fontFamily: 'Poppins-Bold', fontWeight: '700' },
+    { id: 'classic', name: 'Classic', fontFamily: 'Poppins-Bold', fontWeight: '700' },
+    { id: 'modern', name: 'Modern', fontFamily: 'Poppins-SemiBold', fontWeight: '600' },
+    { id: 'journal', name: 'Journal', fontFamily: 'Poppins-Regular', fontWeight: '400' },
+  ];
+  
+  // Instagram text colors - Extended palette (no duplicates)
+  const TEXT_COLORS = [
+    '#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', 
+    '#FF00FF', '#00FFFF', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', 
+    '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B739', '#FF1493', 
+    '#00CED1', '#FFD700', '#FF6347', '#9370DB', '#20B2AA', '#FF69B4',
+    '#32CD32', '#FF4500', '#1E90FF', '#00FA9A', '#8A2BE2', '#DC143C',
+  ];
+  
+  // Background colors for text
+  const BACKGROUND_COLORS = [
+    'transparent', '#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', 
+    '#FFFF00', '#FF00FF', '#00FFFF', '#FF6B6B', '#4ECDC4', '#45B7D1',
+  ];
 
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -133,6 +203,17 @@ const Create = () => {
     };
     checkServer();
   }, []);
+
+  // Auto-focus text input when text modal opens or when image is tapped
+  useEffect(() => {
+    if (showTextModal && hiddenTextInputRef.current) {
+      // Small delay to ensure modal is fully rendered
+      const timer = setTimeout(() => {
+        hiddenTextInputRef.current?.focus();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [showTextModal]);
 
   const openPicker = async (selectType) => {
     try {
@@ -381,6 +462,41 @@ const Create = () => {
     
     // Apply filter effects
     switch (filterId) {
+      // Instagram-style filters
+      case 'wavy':
+        filterCSS += 'brightness(1.05) contrast(0.95) saturate(0.85) hue-rotate(5deg)';
+        break;
+      case 'paris':
+        filterCSS += 'brightness(1.08) contrast(1.1) saturate(1.15) hue-rotate(-10deg)';
+        break;
+      case 'losangeles':
+        filterCSS += 'brightness(1.15) contrast(1.05) saturate(1.2) hue-rotate(15deg)';
+        break;
+      case 'oslo':
+        filterCSS += 'brightness(0.95) contrast(1.1) saturate(0.9) hue-rotate(10deg)';
+        break;
+      case 'tokyo':
+        filterCSS += 'brightness(1.1) contrast(1.15) saturate(1.1) hue-rotate(-5deg)';
+        break;
+      case 'london':
+        filterCSS += 'brightness(0.9) contrast(1.2) saturate(0.95) hue-rotate(5deg)';
+        break;
+      case 'moscow':
+        filterCSS += 'brightness(0.92) contrast(1.25) saturate(0.88) hue-rotate(-8deg)';
+        break;
+      case 'berlin':
+        filterCSS += 'brightness(0.98) contrast(1.15) saturate(1.05) hue-rotate(12deg)';
+        break;
+      case 'rome':
+        filterCSS += 'brightness(1.12) contrast(1.08) saturate(1.18) hue-rotate(-12deg)';
+        break;
+      case 'madrid':
+        filterCSS += 'brightness(1.05) contrast(1.2) saturate(1.12) hue-rotate(8deg)';
+        break;
+      case 'amsterdam':
+        filterCSS += 'brightness(1.08) contrast(1.05) saturate(1.1) hue-rotate(-15deg)';
+        break;
+      // Classic filters
       case 'vintage':
         filterCSS += 'brightness(1.1) contrast(0.9) saturate(0.8) sepia(0.2)';
         break;
@@ -401,6 +517,30 @@ const Create = () => {
         break;
       case 'bright':
         filterCSS += 'brightness(1.2) contrast(1.1)';
+        break;
+      case 'dramatic':
+        filterCSS += 'contrast(1.4) saturate(1.2) brightness(0.95)';
+        break;
+      case 'portrait':
+        filterCSS += 'contrast(1.1) saturate(1.05) brightness(1.05)';
+        break;
+      case 'cinema':
+        filterCSS += 'contrast(1.2) saturate(0.85) brightness(0.9)';
+        break;
+      case 'noir':
+        filterCSS += 'grayscale(100%) contrast(1.3) brightness(0.9)';
+        break;
+      case 'vivid':
+        filterCSS += 'saturate(1.3) contrast(1.2) brightness(1.05)';
+        break;
+      case 'fade':
+        filterCSS += 'brightness(1.1) contrast(0.85) saturate(0.7)';
+        break;
+      case 'chrome':
+        filterCSS += 'contrast(1.2) saturate(1.1) brightness(1.05)';
+        break;
+      case 'process':
+        filterCSS += 'contrast(1.15) saturate(1.1) brightness(1.02)';
         break;
       default:
         break;
@@ -1175,7 +1315,7 @@ const Create = () => {
                     <View style={{ position: 'relative', width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}>
                       {imageBase64 ? (
                         <WebView
-                          key={`${photoForm.filter}-${JSON.stringify(editedImage.adjustments || adjustments)}`}
+                          key={`${photoForm.filter}-${JSON.stringify(editedImage.adjustments || adjustments)}-${textOverlays.length}-${imageOverlays.length}`}
                           source={{
                             html: `
                               <!DOCTYPE html>
@@ -1192,6 +1332,7 @@ const Create = () => {
                                       width: 100%;
                                       height: 100%;
                                       overflow: hidden;
+                                      position: relative;
                                     }
                                     img {
                                       width: 100%;
@@ -1199,10 +1340,55 @@ const Create = () => {
                                       object-fit: cover;
                                       filter: ${getFilterCSS(photoForm.filter, editedImage.adjustments || adjustments)};
                                     }
+                                    ${textOverlays.map((overlay, index) => {
+                                      const textStyle = overlay.style || {};
+                                      let textCSS = `
+                                        position: absolute;
+                                        top: ${overlay.y || 50}%;
+                                        left: ${overlay.x || 50}%;
+                                        transform: translate(-50%, -50%);
+                                        font-size: ${textStyle.fontSize || 24}px;
+                                        font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
+                                        color: ${textStyle.color || '#FFFFFF'};
+                                        text-align: ${textStyle.alignment || 'center'};
+                                        white-space: nowrap;
+                                        z-index: ${index + 1};
+                                      `;
+                                      
+                                      if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
+                                        textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                      }
+                                      
+                                      if (textStyle.textStyle === 'outline') {
+                                        textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                      } else if (textStyle.textStyle === 'shadow') {
+                                        textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                      }
+                                      
+                                      return `.text-overlay-${index} { ${textCSS} }`;
+                                    }).join('\n')}
+                                    ${imageOverlays.map((overlay, index) => {
+                                      return `.image-overlay-${index} {
+                                        position: absolute;
+                                        top: ${overlay.y}%;
+                                        left: ${overlay.x}%;
+                                        width: ${overlay.width}%;
+                                        height: ${overlay.height}%;
+                                        transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
+                                        z-index: ${100 + index};
+                                        pointer-events: none;
+                                      }`;
+                                    }).join('\n')}
                                   </style>
                                 </head>
                                 <body>
                                   <img src="${imageBase64}" alt="Filtered Image" />
+                                  ${textOverlays.map((overlay, index) => 
+                                    `<div class="text-overlay-${index}">${overlay.text}</div>`
+                                  ).join('')}
+                                  ${imageOverlays.map((overlay, index) => 
+                                    `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
+                                  ).join('')}
                                 </body>
                               </html>
                             `
@@ -1231,9 +1417,53 @@ const Create = () => {
                           paddingHorizontal: 12,
                           paddingVertical: 6,
                           borderRadius: 8,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 8,
                         }}>
                           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
                             Filter: {FILTERS.find(f => f.id === photoForm.filter)?.name || photoForm.filter}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => {
+                              applyFilter('none');
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>×</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                      
+                      {/* Text Overlays Count Indicator */}
+                      {textOverlays.length > 0 && (
+                        <View style={{
+                          position: 'absolute',
+                          top: 10,
+                          right: imageOverlays.length > 0 ? 120 : 50,
+                          backgroundColor: 'rgba(0,0,0,0.7)',
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          borderRadius: 8,
+                        }}>
+                          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                            {textOverlays.length} Text{textOverlays.length > 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                      )}
+                      
+                      {/* Image Overlays Count Indicator */}
+                      {imageOverlays.length > 0 && (
+                        <View style={{
+                          position: 'absolute',
+                          top: 10,
+                          right: 50,
+                          backgroundColor: 'rgba(0,0,0,0.7)',
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          borderRadius: 8,
+                        }}>
+                          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                            {imageOverlays.length} Overlay{imageOverlays.length > 1 ? 's' : ''}
                           </Text>
                         </View>
                       )}
@@ -1245,6 +1475,8 @@ const Create = () => {
                           setOriginalImage(null);
                           setPhotoForm({ ...photoForm, photo: null });
                           setEdits({});
+                          setTextOverlays([]);
+                          setImageOverlays([]);
                         }}
                         style={{
                           position: 'absolute',
@@ -1261,60 +1493,251 @@ const Create = () => {
                       >
                         <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>×</Text>
                       </TouchableOpacity>
+                      {/* Instagram-style action buttons */}
                       <View style={{
                         position: 'absolute',
-                        bottom: 10,
-                        right: 10,
-                        flexDirection: 'row',
-                        gap: 8,
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        paddingBottom: 16,
+                        paddingHorizontal: 16,
+                        paddingTop: 20,
+                        backgroundColor: 'transparent',
                       }}>
-                        <TouchableOpacity
-                          onPress={() => setShowFilterModal(true)}
+                        <LinearGradient
+                          colors={['transparent', 'rgba(0, 0, 0, 0.7)', 'rgba(0, 0, 0, 0.85)']}
                           style={{
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            padding: 12,
-                            borderRadius: 8,
+                            position: 'absolute',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            height: 120,
                           }}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 12 }}>Filters</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => setShowAdjustModal(true)}
-                          style={{
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            padding: 12,
-                            borderRadius: 8,
-                          }}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 12 }}>Adjust</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={resetEdits}
-                          style={{
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            padding: 12,
-                            borderRadius: 8,
-                          }}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 12 }}>Reset</Text>
-                        </TouchableOpacity>
-                        {/* Edit Button */}
-                        <TouchableOpacity
-                          onPress={() => {
-                            setEditingMedia({ ...photoForm.photo, mediaType: 'photo' });
-                            setShowEditor(true);
-                          }}
-                          style={{
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            padding: 12,
-                            borderRadius: 8,
+                        />
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}>
+                          {/* Action buttons row */}
+                          <View style={{
                             flexDirection: 'row',
                             alignItems: 'center',
-                            gap: 6,
-                          }}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 12 }}>✏️ Edit</Text>
-                        </TouchableOpacity>
+                            flex: 1,
+                            marginRight: 12,
+                          }}>
+                            {/* Audio Button */}
+                            <TouchableOpacity
+                              onPress={() => setShowMusicModal(true)}
+                              style={{
+                                width: 60,
+                                height: 60,
+                                borderRadius: 12,
+                                backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                marginRight: 4,
+                                paddingTop: 8,
+                                paddingBottom: 4,
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Feather name="music" size={22} color="#FFFFFF" />
+                              <Text style={{
+                                color: '#FFFFFF',
+                                fontSize: 11,
+                                fontWeight: '500',
+                                fontFamily: 'Poppins-Medium',
+                                marginTop: 2,
+                                textAlign: 'center',
+                              }}>Audio</Text>
+                            </TouchableOpacity>
+
+                            {/* Text Button */}
+                            <TouchableOpacity
+                              onPress={() => {
+                                if (!editedImage) {
+                                  Alert.alert('No Photo', 'Please select a photo first');
+                                  return;
+                                }
+                                setCurrentText('');
+                                setCurrentTextStyle({
+                                  fontSize: 24,
+                                  fontFamily: 'Poppins-Bold',
+                                  color: '#FFFFFF',
+                                  backgroundColor: 'transparent',
+                                  alignment: 'center',
+                                  textStyle: 'normal',
+                                });
+                                setShowTextModal(true);
+                              }}
+                              style={{
+                                width: 60,
+                                height: 60,
+                                borderRadius: 12,
+                                backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                marginRight: 4,
+                                paddingTop: 8,
+                                paddingBottom: 4,
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Feather name="type" size={22} color="#FFFFFF" />
+                              <Text style={{
+                                color: '#FFFFFF',
+                                fontSize: 11,
+                                fontWeight: '500',
+                                fontFamily: 'Poppins-Medium',
+                                marginTop: 2,
+                                textAlign: 'center',
+                              }}>Text</Text>
+                            </TouchableOpacity>
+
+                            {/* Overlay Button */}
+                            <TouchableOpacity
+                              onPress={async () => {
+                                if (!editedImage) {
+                                  Alert.alert('No Photo', 'Please select a photo first');
+                                  return;
+                                }
+                                
+                                // If there are overlays, show management modal
+                                if (imageOverlays.length > 0) {
+                                  setShowOverlayModal(true);
+                                  return;
+                                }
+                                
+                                // Otherwise, open image picker for new overlay
+                                try {
+                                  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                                  if (!permission.granted) {
+                                    Alert.alert('Permission Required', 'Please grant permission to access your photos');
+                                    return;
+                                  }
+
+                                  const result = await ImagePicker.launchImageLibraryAsync({
+                                    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                    allowsEditing: false,
+                                    quality: 0.8,
+                                    exif: false,
+                                  });
+
+                                  if (!result.canceled && result.assets && result.assets.length > 0) {
+                                    const selectedAsset = result.assets[0];
+                                    
+                                    // Convert image to base64 for WebView rendering
+                                    try {
+                                      const base64 = await FileSystem.readAsStringAsync(selectedAsset.uri, {
+                                        encoding: FileSystem.EncodingType.Base64,
+                                      });
+                                      
+                                      const imageUri = `data:image/jpeg;base64,${base64}`;
+                                      
+                                      // Add overlay image to state
+                                      const newOverlay = {
+                                        id: Date.now().toString(),
+                                        uri: imageUri,
+                                        x: 50, // Center position (percentage)
+                                        y: 50,
+                                        width: 30, // Default width (percentage)
+                                        height: 30, // Default height (percentage)
+                                        rotation: 0,
+                                      };
+                                      
+                                      setImageOverlays([...imageOverlays, newOverlay]);
+                                    } catch (error) {
+                                      console.error('Error processing overlay image:', error);
+                                      Alert.alert('Error', 'Failed to process overlay image');
+                                    }
+                                  }
+                                } catch (error) {
+                                  console.error('Error picking overlay image:', error);
+                                  Alert.alert('Error', 'Failed to pick overlay image');
+                                }
+                              }}
+                              style={{
+                                width: 60,
+                                height: 60,
+                                borderRadius: 12,
+                                backgroundColor: imageOverlays.length > 0 ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                marginRight: 4,
+                                paddingTop: 8,
+                                paddingBottom: 4,
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Feather name="grid" size={22} color="#FFFFFF" />
+                              <Text style={{
+                                color: '#FFFFFF',
+                                fontSize: 11,
+                                fontWeight: '500',
+                                fontFamily: 'Poppins-Medium',
+                                marginTop: 2,
+                                textAlign: 'center',
+                              }}>Overlay</Text>
+                            </TouchableOpacity>
+
+                            {/* Filter Button */}
+                            <TouchableOpacity
+                              onPress={() => setShowFilterModal(true)}
+                              style={{
+                                width: 60,
+                                height: 60,
+                                borderRadius: 12,
+                                backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                marginRight: 4,
+                                paddingTop: 8,
+                                paddingBottom: 4,
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Feather name="sliders" size={22} color="#FFFFFF" />
+                              <Text style={{
+                                color: '#FFFFFF',
+                                fontSize: 11,
+                                fontWeight: '500',
+                                fontFamily: 'Poppins-Medium',
+                                marginTop: 2,
+                                textAlign: 'center',
+                              }}>Filter</Text>
+                            </TouchableOpacity>
+
+                            {/* Edit Button */}
+                            <TouchableOpacity
+                              onPress={() => {
+                                setEditingMedia({ ...photoForm.photo, mediaType: 'photo' });
+                                setShowEditor(true);
+                              }}
+                              style={{
+                                width: 60,
+                                height: 60,
+                                borderRadius: 12,
+                                backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                paddingTop: 8,
+                                paddingBottom: 4,
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Feather name="edit-3" size={22} color="#FFFFFF" />
+                              <Text style={{
+                                color: '#FFFFFF',
+                                fontSize: 11,
+                                fontWeight: '500',
+                                fontFamily: 'Poppins-Medium',
+                                marginTop: 2,
+                                textAlign: 'center',
+                              }}>Edit</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
                       </View>
                     </View>
                   ) : (
@@ -1455,7 +1878,7 @@ const Create = () => {
         </ScrollView>
             </KeyboardAvoidingView>
 
-            {/* Filter Modal */}
+            {/* Instagram-style Filter Modal */}
             <Modal
               visible={showFilterModal}
               transparent={true}
@@ -1464,67 +1887,236 @@ const Create = () => {
             >
               <View style={{
                 flex: 1,
-                backgroundColor: 'rgba(0,0,0,0.8)',
-                justifyContent: 'flex-end',
+                backgroundColor: 'rgba(0,0,0,0.95)',
               }}>
+                {/* Full-screen preview with selected filter */}
+                {editedImage && imageBase64 ? (
+                  <View style={{ flex: 1, backgroundColor: '#000' }}>
+                    <WebView
+                      key={`filter-preview-${photoForm.filter}`}
+                      source={{
+                        html: `
+                          <!DOCTYPE html>
+                          <html>
+                            <head>
+                              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                              <style>
+                                * {
+                                  margin: 0;
+                                  padding: 0;
+                                  box-sizing: border-box;
+                                }
+                                html, body {
+                                  width: 100%;
+                                  height: 100%;
+                                  overflow: hidden;
+                                  background: #000;
+                                }
+                                body {
+                                  display: flex;
+                                  align-items: center;
+                                  justify-content: center;
+                                }
+                                img {
+                                  width: 100%;
+                                  height: 100%;
+                                  object-fit: cover;
+                                  display: block;
+                                  filter: ${getFilterCSS(photoForm.filter, editedImage.adjustments || adjustments)};
+                                }
+                              </style>
+                            </head>
+                            <body>
+                              <img src="${imageBase64}" alt="Filtered Image" onerror="this.style.display='none';" />
+                            </body>
+                          </html>
+                        `
+                      }}
+                      style={{ 
+                        flex: 1,
+                        backgroundColor: '#000',
+                      }}
+                      scrollEnabled={false}
+                      showsVerticalScrollIndicator={false}
+                      showsHorizontalScrollIndicator={false}
+                      bounces={false}
+                      overScrollMode="never"
+                      androidLayerType="hardware"
+                      originWhitelist={['*']}
+                      javaScriptEnabled={true}
+                    />
+                  </View>
+                ) : (
+                  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+                    <Text style={{ color: '#fff' }}>No image selected</Text>
+                  </View>
+                )}
+
+                {/* Bottom Filter Carousel */}
                 <View style={{
-                  backgroundColor: theme.surface,
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.85)',
                   borderTopLeftRadius: 20,
                   borderTopRightRadius: 20,
-                  padding: 20,
-                  maxHeight: '60%',
+                  paddingTop: 12,
+                  paddingBottom: 20,
+                  maxHeight: 200,
                 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <Text style={{
-                    color: theme.textPrimary,
-                    fontSize: 20,
-                    fontWeight: 'bold',
+                  {/* Action Bar */}
+                  <View style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    paddingHorizontal: 16,
+                    paddingBottom: 12,
                   }}>
-                    Filters
-                  </Text>
-                    {processingImage && (
-                      <ActivityIndicator size="small" color={theme.accent} />
-                    )}
+                    <TouchableOpacity
+                      onPress={() => setShowFilterModal(false)}
+                      style={{ minWidth: 60 }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600', fontFamily: 'Poppins-SemiBold' }}>
+                        Cancel
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <Text style={{
+                      color: '#FFFFFF',
+                      fontSize: 16,
+                      fontWeight: '600',
+                      fontFamily: 'Poppins-SemiBold',
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      textAlign: 'center',
+                    }}>
+                      Filter
+                    </Text>
+                    
+                    <TouchableOpacity
+                      onPress={() => {
+                        setShowFilterModal(false);
+                      }}
+                      style={{ minWidth: 60, alignItems: 'flex-end' }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600', fontFamily: 'Poppins-SemiBold' }}>
+                        Done
+                      </Text>
+                    </TouchableOpacity>
                   </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View style={{ flexDirection: 'row', gap: 12 }}>
-                      {FILTERS.map((filter) => (
-                        <TouchableOpacity
-                          key={filter.id}
-                          onPress={() => !processingImage && applyFilter(filter.id)}
-                          disabled={processingImage}
-                          style={{
-                            alignItems: 'center',
-                            padding: 10,
-                            backgroundColor: photoForm.filter === filter.id ? theme.accentSoft : theme.cardSoft,
-                            borderRadius: 10,
-                            minWidth: 80,
-                            opacity: processingImage ? 0.5 : 1,
-                          }}
-                        >
-                          <Text style={{
-                            color: theme.textPrimary,
-                            fontSize: 14,
-                            fontWeight: photoForm.filter === filter.id ? 'bold' : 'normal',
-                          }}>
-                            {filter.name}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
+
+                  {/* Filter Thumbnails Carousel */}
+                  {editedImage && imageBase64 ? (
+                    <ScrollView 
+                      horizontal 
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        alignItems: 'center',
+                      }}
+                    >
+                      {FILTERS.map((filter) => {
+                        const filterCSS = getFilterCSS(filter.id, null);
+                        const isSelected = photoForm.filter === filter.id;
+                        
+                        return (
+                          <TouchableOpacity
+                            key={filter.id}
+                            onPress={() => !processingImage && applyFilter(filter.id)}
+                            disabled={processingImage}
+                            style={{
+                              alignItems: 'center',
+                              marginRight: 12,
+                              minWidth: 70,
+                              opacity: processingImage ? 0.5 : 1,
+                            }}
+                          >
+                            <View style={{
+                              width: 70,
+                              height: 70,
+                              borderRadius: 8,
+                              overflow: 'hidden',
+                              borderWidth: isSelected ? 3 : 2,
+                              borderColor: isSelected ? '#0095F6' : 'transparent',
+                              marginBottom: 6,
+                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                            }}>
+                              {filter.id === 'none' || filterCSS === 'none' ? (
+                                <Image
+                                  source={{ uri: imageBase64.startsWith('data:') ? imageBase64 : editedImage.uri }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                />
+                              ) : (
+                                <WebView
+                                  key={`filter-thumb-${filter.id}`}
+                                  source={{
+                                    html: `
+                                      <!DOCTYPE html>
+                                      <html>
+                                        <head>
+                                          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                                          <style>
+                                            * {
+                                              margin: 0;
+                                              padding: 0;
+                                              box-sizing: border-box;
+                                            }
+                                            html, body {
+                                              width: 100%;
+                                              height: 100%;
+                                              overflow: hidden;
+                                              background: transparent;
+                                            }
+                                            img {
+                                              width: 100%;
+                                              height: 100%;
+                                              object-fit: cover;
+                                              display: block;
+                                              filter: ${filterCSS};
+                                            }
+                                          </style>
+                                        </head>
+                                        <body>
+                                          <img src="${imageBase64}" onerror="this.style.display='none';" />
+                                        </body>
+                                      </html>
+                                    `,
+                                  }}
+                                  style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                                  scrollEnabled={false}
+                                  showsVerticalScrollIndicator={false}
+                                  showsHorizontalScrollIndicator={false}
+                                  bounces={false}
+                                  overScrollMode="never"
+                                  androidLayerType="hardware"
+                                  originWhitelist={['*']}
+                                  javaScriptEnabled={true}
+                                  domStorageEnabled={true}
+                                />
+                              )}
+                            </View>
+                            <Text style={{
+                              color: isSelected ? '#0095F6' : '#FFFFFF',
+                              fontSize: 12,
+                              fontWeight: isSelected ? '600' : '400',
+                              fontFamily: isSelected ? 'Poppins-SemiBold' : 'Poppins-Regular',
+                              textAlign: 'center',
+                            }}>
+                              {filter.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  ) : (
+                    <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                      <Text style={{ color: '#FFFFFF', fontSize: 14 }}>Please select a photo first</Text>
                     </View>
-                  </ScrollView>
-                  <TouchableOpacity
-                    onPress={() => setShowFilterModal(false)}
-                    style={{
-                      marginTop: 20,
-                      backgroundColor: theme.accent,
-                      padding: 15,
-                      borderRadius: 10,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
-                  </TouchableOpacity>
+                  )}
                 </View>
               </View>
             </Modal>
@@ -1941,6 +2533,939 @@ const Create = () => {
                   >
                     <Text style={{ color: '#fff', fontWeight: 'bold' }}>Close</Text>
                   </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+
+            {/* Instagram-style Text Editor Modal - EXACT MATCH */}
+            <Modal
+              visible={showTextModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowTextModal(false)}
+            >
+              <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={{ flex: 1 }}
+                keyboardVerticalOffset={0}
+              >
+                <View style={{
+                  flex: 1,
+                  backgroundColor: 'rgba(0,0,0,0.95)',
+                }}>
+                  {/* Full-screen preview with text overlay */}
+                  {editedImage && imageBase64 ? (
+                    <TouchableOpacity 
+                      activeOpacity={1}
+                      style={{ flex: 1, backgroundColor: '#000' }}
+                      onPress={() => {
+                        // Focus the hidden text input to open keyboard
+                        if (hiddenTextInputRef.current) {
+                          hiddenTextInputRef.current.focus();
+                        }
+                      }}
+                      pointerEvents="box-none"
+                    >
+                      <WebView
+                        key={`text-preview-base-${editedImage?.uri || 'none'}`}
+                        source={{
+                          html: `
+                            <!DOCTYPE html>
+                            <html>
+                              <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                                <style>
+                                  * {
+                                    margin: 0;
+                                    padding: 0;
+                                    box-sizing: border-box;
+                                  }
+                                  html, body {
+                                    width: 100%;
+                                    height: 100%;
+                                    overflow: hidden;
+                                    background: #000;
+                                  }
+                                  body {
+                                    position: relative;
+                                  }
+                                  img {
+                                    width: 100%;
+                                    height: 100%;
+                                    object-fit: cover;
+                                    display: block;
+                                    filter: ${getFilterCSS(photoForm.filter, editedImage.adjustments || adjustments)};
+                                  }
+                                  ${textOverlays.map((overlay, index) => {
+                                    const textStyle = overlay.style || currentTextStyle;
+                                    const alignment = textStyle.alignment || 'center';
+                                    
+                                    // Calculate positioning based on alignment
+                                    let leftPos, transformValue;
+                                    if (alignment === 'left') {
+                                      leftPos = '5%';
+                                      transformValue = 'translateY(-50%)';
+                                    } else if (alignment === 'right') {
+                                      leftPos = '95%';
+                                      transformValue = 'translate(-100%, -50%)';
+                                    } else {
+                                      // center
+                                      leftPos = '50%';
+                                      transformValue = 'translate(-50%, -50%)';
+                                    }
+                                    
+                                    let textCSS = `
+                                      position: absolute;
+                                      top: ${overlay.y || 50}%;
+                                      left: ${leftPos};
+                                      transform: ${transformValue};
+                                      font-size: ${textStyle.fontSize}px;
+                                      font-family: '${textStyle.fontFamily}', sans-serif;
+                                      color: ${textStyle.color};
+                                      text-align: ${alignment};
+                                      white-space: nowrap;
+                                      z-index: ${index + 1};
+                                    `;
+                                    
+                                    if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
+                                      textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                    }
+                                    
+                                    if (textStyle.textStyle === 'outline') {
+                                      textCSS += `-webkit-text-stroke: 2px ${textStyle.color}; -webkit-text-fill-color: transparent;`;
+                                    } else if (textStyle.textStyle === 'shadow') {
+                                      textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                    } else if (textStyle.textStyle === 'neon') {
+                                      textCSS += `text-shadow: 0 0 5px ${textStyle.color}, 0 0 10px ${textStyle.color}, 0 0 15px ${textStyle.color};`;
+                                    } else if (textStyle.textStyle === 'gradient') {
+                                      textCSS += `background: linear-gradient(45deg, ${textStyle.color}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                    }
+                                    
+                                    return `.text-overlay-${index} { ${textCSS} }`;
+                                  }).join('\n')}
+                                  ${imageOverlays.map((overlay, index) => {
+                                    return `.image-overlay-${index} {
+                                      position: absolute;
+                                      top: ${overlay.y}%;
+                                      left: ${overlay.x}%;
+                                      width: ${overlay.width}%;
+                                      height: ${overlay.height}%;
+                                      transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
+                                      z-index: ${100 + index};
+                                      pointer-events: none;
+                                    }`;
+                                  }).join('\n')}
+                                  ${currentText ? (() => {
+                                    const alignment = currentTextStyle.alignment || 'center';
+                                    let leftPos, transformValue;
+                                    if (alignment === 'left') {
+                                      leftPos = '5%';
+                                      transformValue = 'translateY(-50%)';
+                                    } else if (alignment === 'right') {
+                                      leftPos = '95%';
+                                      transformValue = 'translate(-100%, -50%)';
+                                    } else {
+                                      leftPos = '50%';
+                                      transformValue = 'translate(-50%, -50%)';
+                                    }
+                                    
+                                    let css = '.current-text { position: absolute; top: 50%; left: ' + leftPos + '; transform: ' + transformValue + '; font-size: ' + currentTextStyle.fontSize + 'px; font-family: \'' + currentTextStyle.fontFamily + '\', sans-serif; color: ' + currentTextStyle.color + '; text-align: ' + alignment + '; white-space: nowrap; z-index: 1000;';
+                                    
+                                    if (currentTextStyle.backgroundColor && currentTextStyle.backgroundColor !== 'transparent') {
+                                      css += ' background-color: ' + currentTextStyle.backgroundColor + '; padding: 4px 8px; border-radius: 4px;';
+                                    }
+                                    
+                                    if (currentTextStyle.textStyle === 'outline') {
+                                      css += ' -webkit-text-stroke: 2px ' + currentTextStyle.color + '; -webkit-text-fill-color: transparent;';
+                                    } else if (currentTextStyle.textStyle === 'shadow') {
+                                      css += ' text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);';
+                                    } else if (currentTextStyle.textStyle === 'neon') {
+                                      css += ' text-shadow: 0 0 5px ' + currentTextStyle.color + ', 0 0 10px ' + currentTextStyle.color + ', 0 0 15px ' + currentTextStyle.color + ';';
+                                    } else if (currentTextStyle.textStyle === 'gradient') {
+                                      css += ' background: linear-gradient(45deg, ' + currentTextStyle.color + ', #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;';
+                                    }
+                                    
+                                    css += ' }';
+                                    return css;
+                                  })() : ''}
+                                </style>
+                              </head>
+                              <body>
+                                <img src="${imageBase64}" alt="Image with Text" />
+                                ${textOverlays.map((overlay, index) => 
+                                  `<div class="text-overlay-${index}">${overlay.text}</div>`
+                                ).join('')}
+                                ${imageOverlays.map((overlay, index) => 
+                                  `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
+                                ).join('')}
+                                ${currentText ? `<div class="current-text">${currentText}</div>` : ''}
+                              </body>
+                            </html>
+                          `
+                        }}
+                        style={{ flex: 1, backgroundColor: '#000' }}
+                        scrollEnabled={false}
+                        showsVerticalScrollIndicator={false}
+                        showsHorizontalScrollIndicator={false}
+                        bounces={false}
+                        overScrollMode="never"
+                        androidLayerType="hardware"
+                        originWhitelist={['*']}
+                        javaScriptEnabled={true}
+                        cacheEnabled={true}
+                        cacheMode="LOAD_CACHE_ELSE_NETWORK"
+                        renderToHardwareTextureAndroid={true}
+                        onError={(syntheticEvent) => {
+                          const { nativeEvent } = syntheticEvent;
+                          console.warn('WebView error: ', nativeEvent);
+                        }}
+                        onLoadEnd={() => {
+                          // WebView loaded successfully
+                        }}
+                      />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+                      <Text style={{ color: '#fff' }}>No image selected</Text>
+                    </View>
+                  )}
+
+                  {/* Top Action Bar - EXACT Instagram Style */}
+                  <View style={{ 
+                    position: 'absolute',
+                    top: Platform.OS === 'ios' ? 60 : 50,
+                    left: 0,
+                    right: 0,
+                    zIndex: 1000,
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    backgroundColor: 'transparent',
+                    pointerEvents: 'box-none',
+                  }}>
+                    <View style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      height: 44,
+                      pointerEvents: 'box-none',
+                    }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setShowTextModal(false);
+                          setCurrentText('');
+                          setShowTextStyles(false);
+                          setShowColorPicker(false);
+                          setShowBackgroundColors(false);
+                        }}
+                        style={{ 
+                          minWidth: 60,
+                          paddingVertical: 8,
+                          paddingHorizontal: 4,
+                          zIndex: 1001,
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '600', fontFamily: 'Poppins-SemiBold' }}>
+                          Cancel
+                        </Text>
+                      </TouchableOpacity>
+                      
+                      <Text style={{
+                        color: '#FFFFFF',
+                        fontSize: 16,
+                        fontWeight: '600',
+                        fontFamily: 'Poppins-SemiBold',
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        textAlign: 'center',
+                        pointerEvents: 'none',
+                      }}>
+                        Text
+                      </Text>
+                      
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (currentText.trim()) {
+                            setTextOverlays([...textOverlays, {
+                              text: currentText,
+                              style: { ...currentTextStyle },
+                              x: 50,
+                              y: 50,
+                              id: Date.now().toString(),
+                            }]);
+                            setCurrentText('');
+                            setCurrentTextStyle({
+                              fontSize: 24,
+                              fontFamily: 'Poppins-Bold',
+                              color: '#FFFFFF',
+                              backgroundColor: 'transparent',
+                              alignment: 'center',
+                              textStyle: 'normal',
+                            });
+                          }
+                          setShowTextModal(false);
+                          setShowTextStyles(false);
+                          setShowColorPicker(false);
+                          setShowBackgroundColors(false);
+                        }}
+                        style={{ 
+                          minWidth: 60, 
+                          alignItems: 'flex-end',
+                          paddingVertical: 8,
+                          paddingHorizontal: 4,
+                          zIndex: 1001,
+                        }}
+                        activeOpacity={0.7}
+                        disabled={!currentText.trim()}
+                      >
+                        <Text style={{ 
+                          color: currentText.trim() ? '#0095F6' : 'rgba(255, 255, 255, 0.5)', 
+                          fontSize: 16, 
+                          fontWeight: '600', 
+                          fontFamily: 'Poppins-SemiBold' 
+                        }}>
+                          Done
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Left Side Vertical Slider - Tapered Style (Wider at top, narrower at bottom) */}
+                  <View style={{
+                    position: 'absolute',
+                    left: 12,
+                    top: 120,
+                    width: 30,
+                    height: 250,
+                    zIndex: 50,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}>
+                    {/* Tapered Slider Track - Wider at top, narrower at bottom */}
+                    <View style={{
+                      width: 5, // Base width
+                      height: 250,
+                      position: 'relative',
+                      alignSelf: 'center',
+                      overflow: 'visible',
+                    }}>
+                      {/* Top section - Wider (5px) */}
+                      <View style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: 5,
+                        height: 80,
+                        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                        borderRadius: 2.5,
+                      }} />
+                      
+                      {/* Middle section - Medium (4px) */}
+                      <View style={{
+                        position: 'absolute',
+                        top: 80,
+                        left: 0.5,
+                        width: 4,
+                        height: 90,
+                        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                        borderRadius: 2,
+                      }} />
+                      
+                      {/* Bottom section - Narrower (3px) */}
+                      <View style={{
+                        position: 'absolute',
+                        top: 170,
+                        left: 1,
+                        width: 3,
+                        height: 80,
+                        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                        borderRadius: 1.5,
+                      }} />
+                      
+                      {/* Filled portion from bottom with tapered width */}
+                      {(() => {
+                        const fillHeight = ((currentTextStyle.fontSize - 12) / (72 - 12)) * 100;
+                        let fillWidth, fillLeft, fillBorderRadius;
+                        
+                        if (fillHeight <= 32) {
+                          // Bottom section (narrowest)
+                          fillWidth = 3;
+                          fillLeft = 1;
+                          fillBorderRadius = 1.5;
+                        } else if (fillHeight <= 68) {
+                          // Middle section
+                          fillWidth = 4;
+                          fillLeft = 0.5;
+                          fillBorderRadius = 2;
+                        } else {
+                          // Top section (widest)
+                          fillWidth = 5;
+                          fillLeft = 0;
+                          fillBorderRadius = 2.5;
+                        }
+                        
+                        return (
+                          <View style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            left: fillLeft,
+                            width: fillWidth,
+                            height: `${fillHeight}%`,
+                            backgroundColor: '#FFFFFF',
+                            borderRadius: fillBorderRadius,
+                          }} />
+                        );
+                      })()}
+                    </View>
+                    
+                    {/* Slider Thumb (Circle) - Centered on the line */}
+                    <View 
+                      style={{
+                        position: 'absolute',
+                        width: 24,
+                        height: 24,
+                        borderRadius: 12,
+                        backgroundColor: '#FFFFFF',
+                        borderWidth: 2,
+                        borderColor: '#0095F6',
+                        left: 3, // Center: (30px container - 24px circle) / 2 = 3px
+                        bottom: `${((currentTextStyle.fontSize - 12) / (72 - 12)) * 100}%`,
+                        transform: [{ translateY: 12 }], // Half of thumb height to center it vertically
+                      }}
+                    />
+                    
+                    {/* Touchable Area */}
+                    <View
+                      style={{
+                        position: 'absolute',
+                        width: 50,
+                        height: 250,
+                        left: -25,
+                        top: 0,
+                      }}
+                      onStartShouldSetResponder={() => true}
+                      onMoveShouldSetResponder={() => true}
+                      onResponderGrant={(e) => {
+                        const { locationY } = e.nativeEvent;
+                        const sliderHeight = 250;
+                        // Clamp locationY to slider bounds
+                        const clampedY = Math.max(0, Math.min(sliderHeight, locationY));
+                        // Calculate percentage from bottom (0 = bottom, 1 = top)
+                        const percentage = 1 - (clampedY / sliderHeight);
+                        // Map to fontSize range (12-72)
+                        const newValue = 12 + (percentage * (72 - 12));
+                        setCurrentTextStyle({ ...currentTextStyle, fontSize: Math.max(12, Math.min(72, Math.round(newValue))) });
+                      }}
+                      onResponderMove={(e) => {
+                        const { locationY } = e.nativeEvent;
+                        const sliderHeight = 250;
+                        // Clamp locationY to slider bounds
+                        const clampedY = Math.max(0, Math.min(sliderHeight, locationY));
+                        // Calculate percentage from bottom (0 = bottom, 1 = top)
+                        const percentage = 1 - (clampedY / sliderHeight);
+                        // Map to fontSize range (12-72)
+                        const newValue = 12 + (percentage * (72 - 12));
+                        setCurrentTextStyle({ ...currentTextStyle, fontSize: Math.max(12, Math.min(72, Math.round(newValue))) });
+                      }}
+                    />
+                  </View>
+
+                  {/* Bottom Text Editor Panel - Instagram Style Tab Above Keyboard */}
+                  <View style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    backgroundColor: 'transparent',
+                    borderTopLeftRadius: 0,
+                    borderTopRightRadius: 0,
+                    paddingTop: 12,
+                    paddingBottom: Platform.OS === 'ios' ? 0 : 16,
+                  }}>
+                    {/* Text Formatting Options Row - Aa, Rainbow, Lines, A */}
+                    <View style={{
+                      flexDirection: 'row',
+                      justifyContent: 'center',
+                      paddingHorizontal: 20,
+                      paddingVertical: 12,
+                      marginBottom: 12,
+                      gap: 20,
+                      alignItems: 'center',
+                      backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                      borderRadius: 12,
+                      marginHorizontal: 16,
+                    }}>
+                      {/* Aa Button - Text Styling (Shows draggable text styles) */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          setShowTextStyles(!showTextStyles);
+                          setShowColorPicker(false);
+                          setShowBackgroundColors(false);
+                        }}
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 22,
+                          backgroundColor: showTextStyles ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          borderWidth: showTextStyles ? 2 : 1,
+                          borderColor: showTextStyles ? '#0095F6' : 'rgba(255, 255, 255, 0.3)',
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={{ color: '#FFFFFF', fontSize: 18, fontFamily: 'Poppins-Bold' }}>Aa</Text>
+                      </TouchableOpacity>
+
+                      {/* Rainbow Gradient Button - Color Picker (Shows draggable colors) */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          setShowColorPicker(!showColorPicker);
+                          setShowTextStyles(false);
+                          setShowBackgroundColors(false);
+                        }}
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 22,
+                          overflow: 'hidden',
+                          borderWidth: showColorPicker ? 2 : 1,
+                          borderColor: showColorPicker ? '#0095F6' : 'rgba(255, 255, 255, 0.3)',
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <LinearGradient
+                          colors={['#FF0000', '#FF7F00', '#FFFF00', '#00FF00', '#0000FF', '#4B0082', '#9400D3']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                          style={{ width: '100%', height: '100%' }}
+                        />
+                      </TouchableOpacity>
+
+                      {/* Three Lines Button - Alignment */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          const alignments = ['left', 'center', 'right'];
+                          const currentIndex = alignments.indexOf(currentTextStyle.alignment);
+                          const nextAlignment = alignments[(currentIndex + 1) % alignments.length];
+                          setCurrentTextStyle({ ...currentTextStyle, alignment: nextAlignment });
+                        }}
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 8,
+                          backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          borderWidth: 1,
+                          borderColor: 'rgba(255, 255, 255, 0.3)',
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ gap: 3 }}>
+                          <View style={{ 
+                            width: currentTextStyle.alignment === 'left' ? 20 : currentTextStyle.alignment === 'center' ? 18 : 14, 
+                            height: 2, 
+                            backgroundColor: '#FFFFFF' 
+                          }} />
+                          <View style={{ 
+                            width: currentTextStyle.alignment === 'left' ? 18 : currentTextStyle.alignment === 'center' ? 20 : 16, 
+                            height: 2, 
+                            backgroundColor: '#FFFFFF' 
+                          }} />
+                          <View style={{ 
+                            width: currentTextStyle.alignment === 'left' ? 14 : currentTextStyle.alignment === 'center' ? 18 : 20, 
+                            height: 2, 
+                            backgroundColor: '#FFFFFF' 
+                          }} />
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* A Button - Background Color (Shows draggable background colors) */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          setShowBackgroundColors(!showBackgroundColors);
+                          setShowTextStyles(false);
+                          setShowColorPicker(false);
+                        }}
+                        style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 8,
+                          backgroundColor: showBackgroundColors ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          borderWidth: showBackgroundColors ? 2 : 1,
+                          borderColor: showBackgroundColors ? '#0095F6' : 'rgba(255, 255, 255, 0.3)',
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={{ 
+                          color: '#FFFFFF', 
+                          fontSize: 20, 
+                          fontFamily: 'Poppins-Bold',
+                          textShadowColor: currentTextStyle.textStyle === 'shadow' ? '#000' : 'transparent',
+                          textShadowOffset: currentTextStyle.textStyle === 'shadow' ? { width: 1, height: 1 } : { width: 0, height: 0 },
+                          textShadowRadius: currentTextStyle.textStyle === 'shadow' ? 2 : 0,
+                        }}>
+                          A
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Draggable Text Styles - Horizontal Scroll */}
+                    {showTextStyles && (
+                      <View style={{ 
+                        marginBottom: 12,
+                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                        borderRadius: 12,
+                        marginHorizontal: 16,
+                        paddingVertical: 8,
+                      }}>
+                        <ScrollView 
+                          horizontal 
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={{
+                            paddingHorizontal: 16,
+                            paddingVertical: 8,
+                          }}
+                          decelerationRate="fast"
+                          snapToInterval={80}
+                          snapToAlignment="start"
+                        >
+                          {TEXT_STYLES.map((style) => {
+                            const isSelected = currentTextStyle.textStyle === style.id || 
+                              (style.id === 'normal' && currentTextStyle.textStyle === 'normal' && currentTextStyle.fontFamily === style.fontFamily);
+                            return (
+                              <TouchableOpacity
+                                key={style.id}
+                                onPress={() => {
+                                  setCurrentTextStyle({ 
+                                    ...currentTextStyle, 
+                                    textStyle: style.id,
+                                    fontFamily: style.fontFamily,
+                                    backgroundColor: style.id === 'outline' || style.id === 'shadow' ? 'transparent' : currentTextStyle.backgroundColor,
+                                  });
+                                }}
+                                style={{
+                                  width: 70,
+                                  height: 50,
+                                  borderRadius: 8,
+                                  backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  marginRight: 8,
+                                  borderWidth: isSelected ? 2 : 1,
+                                  borderColor: isSelected ? '#0095F6' : 'rgba(255, 255, 255, 0.2)',
+                                }}
+                              >
+                                <Text style={{
+                                  color: '#FFFFFF',
+                                  fontSize: 14,
+                                  fontFamily: style.fontFamily,
+                                  fontWeight: style.fontWeight,
+                                  fontStyle: style.fontStyle || 'normal',
+                                  textShadowColor: style.id === 'shadow' ? '#000' : 'transparent',
+                                  textShadowOffset: style.id === 'shadow' ? { width: 1, height: 1 } : { width: 0, height: 0 },
+                                  textShadowRadius: style.id === 'shadow' ? 2 : 0,
+                                }}>
+                                  {style.name}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {/* Draggable Color Picker - Horizontal Scroll */}
+                    {showColorPicker && (
+                      <View style={{ 
+                        marginBottom: 12,
+                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                        borderRadius: 12,
+                        marginHorizontal: 16,
+                        paddingVertical: 8,
+                        zIndex: 10,
+                      }}>
+                        <ScrollView 
+                          horizontal 
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={{
+                            paddingHorizontal: 16,
+                            paddingVertical: 8,
+                          }}
+                          decelerationRate="fast"
+                          snapToInterval={48}
+                          snapToAlignment="start"
+                        >
+                          {TEXT_COLORS.map((color, index) => (
+                            <TouchableOpacity
+                              key={`color-${color}-${index}`}
+                              onPress={() => setCurrentTextStyle({ ...currentTextStyle, color: color })}
+                              style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 20,
+                                backgroundColor: color,
+                                borderWidth: currentTextStyle.color === color ? 3 : 2,
+                                borderColor: currentTextStyle.color === color ? '#0095F6' : 'rgba(255, 255, 255, 0.3)',
+                                marginRight: 10,
+                              }}
+                              activeOpacity={0.7}
+                            />
+                          ))}
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {/* Draggable Background Colors - Horizontal Scroll */}
+                    {showBackgroundColors && (
+                      <View style={{ 
+                        marginBottom: 12,
+                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                        borderRadius: 12,
+                        marginHorizontal: 16,
+                        paddingVertical: 8,
+                        zIndex: 10,
+                      }}>
+                        <ScrollView 
+                          horizontal 
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={{
+                            paddingHorizontal: 16,
+                            paddingVertical: 8,
+                          }}
+                          decelerationRate="fast"
+                          snapToInterval={48}
+                          snapToAlignment="start"
+                        >
+                          {BACKGROUND_COLORS.map((bgColor, index) => (
+                            <TouchableOpacity
+                              key={`bg-${bgColor}-${index}`}
+                              onPress={() => setCurrentTextStyle({ ...currentTextStyle, backgroundColor: bgColor })}
+                              style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 20,
+                                backgroundColor: bgColor === 'transparent' ? 'rgba(255, 255, 255, 0.1)' : bgColor,
+                                borderWidth: currentTextStyle.backgroundColor === bgColor ? 3 : 2,
+                                borderColor: currentTextStyle.backgroundColor === bgColor ? '#0095F6' : 'rgba(255, 255, 255, 0.3)',
+                                marginRight: 10,
+                                borderStyle: bgColor === 'transparent' ? 'dashed' : 'solid',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              {bgColor === 'transparent' && (
+                                <Text style={{ color: '#FFFFFF', fontSize: 12 }}>Ø</Text>
+                              )}
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {/* Hidden Text Input - Text appears directly on photo/video */}
+                    <TextInput
+                      ref={hiddenTextInputRef}
+                      value={currentText}
+                      onChangeText={setCurrentText}
+                      style={{
+                        position: 'absolute',
+                        opacity: 0,
+                        width: 1,
+                        height: 1,
+                      }}
+                      autoFocus={false}
+                      multiline
+                    />
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </Modal>
+
+            {/* Overlay Management Modal */}
+            <Modal
+              visible={showOverlayModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowOverlayModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.95)',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}>
+                <View style={{
+                  width: '90%',
+                  maxHeight: '80%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: 20,
+                  padding: 20,
+                }}>
+                  <View style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 20,
+                  }}>
+                    <Text style={{
+                      color: '#FFFFFF',
+                      fontSize: 20,
+                      fontWeight: 'bold',
+                      fontFamily: 'Poppins-Bold',
+                    }}>
+                      Image Overlays ({imageOverlays.length})
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setShowOverlayModal(false)}
+                      style={{
+                        padding: 8,
+                      }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 24, fontWeight: 'bold' }}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView style={{ maxHeight: 400 }}>
+                    {imageOverlays.map((overlay, index) => (
+                      <View
+                        key={overlay.id}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                          borderRadius: 12,
+                          padding: 12,
+                          marginBottom: 12,
+                        }}
+                      >
+                        <Image
+                          source={{ uri: overlay.uri }}
+                          style={{
+                            width: 60,
+                            height: 60,
+                            borderRadius: 8,
+                            marginRight: 12,
+                          }}
+                          resizeMode="cover"
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>
+                            Overlay {index + 1}
+                          </Text>
+                          <Text style={{ color: '#AAAAAA', fontSize: 12, marginTop: 4 }}>
+                            Position: {Math.round(overlay.x)}%, {Math.round(overlay.y)}%
+                          </Text>
+                          <Text style={{ color: '#AAAAAA', fontSize: 12 }}>
+                            Size: {Math.round(overlay.width)}% × {Math.round(overlay.height)}%
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setImageOverlays(imageOverlays.filter((_, i) => i !== index));
+                            if (imageOverlays.length === 1) {
+                              setShowOverlayModal(false);
+                            }
+                          }}
+                          style={{
+                            backgroundColor: 'rgba(255, 59, 48, 0.8)',
+                            borderRadius: 8,
+                            padding: 8,
+                            marginLeft: 8,
+                          }}
+                        >
+                          <Feather name="trash-2" size={20} color="#FFFFFF" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </ScrollView>
+
+                  <View style={{
+                    flexDirection: 'row',
+                    gap: 12,
+                    marginTop: 20,
+                  }}>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        try {
+                          const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                          if (!permission.granted) {
+                            Alert.alert('Permission Required', 'Please grant permission to access your photos');
+                            return;
+                          }
+
+                          const result = await ImagePicker.launchImageLibraryAsync({
+                            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                            allowsEditing: false,
+                            quality: 0.8,
+                            exif: false,
+                          });
+
+                          if (!result.canceled && result.assets && result.assets.length > 0) {
+                            const selectedAsset = result.assets[0];
+                            
+                            try {
+                              const base64 = await FileSystem.readAsStringAsync(selectedAsset.uri, {
+                                encoding: FileSystem.EncodingType.Base64,
+                              });
+                              
+                              const imageUri = `data:image/jpeg;base64,${base64}`;
+                              
+                              const newOverlay = {
+                                id: Date.now().toString(),
+                                uri: imageUri,
+                                x: 50,
+                                y: 50,
+                                width: 30,
+                                height: 30,
+                                rotation: 0,
+                              };
+                              
+                              setImageOverlays([...imageOverlays, newOverlay]);
+                            } catch (error) {
+                              console.error('Error processing overlay image:', error);
+                              Alert.alert('Error', 'Failed to process overlay image');
+                            }
+                          }
+                        } catch (error) {
+                          console.error('Error picking overlay image:', error);
+                          Alert.alert('Error', 'Failed to pick overlay image');
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                        borderRadius: 12,
+                        padding: 16,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Feather name="plus" size={24} color="#FFFFFF" />
+                      <Text style={{ color: '#FFFFFF', fontSize: 14, marginTop: 8, fontWeight: '600' }}>
+                        Add Overlay
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => setShowOverlayModal(false)}
+                      style={{
+                        flex: 1,
+                        backgroundColor: '#0095F6',
+                        borderRadius: 12,
+                        padding: 16,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' }}>
+                        Done
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             </Modal>

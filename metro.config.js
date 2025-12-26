@@ -2,9 +2,6 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-// Add support for additional file extensions
-config.resolver.sourceExts.push('cjs');
-
 // Configure resolver to handle module resolution
 config.resolver = {
   ...config.resolver,
@@ -13,8 +10,8 @@ config.resolver = {
   },
   // Ensure proper module resolution
   platforms: ['ios', 'android', 'native', 'web'],
-  // Ensure TypeScript files are resolved properly
-  sourceExts: [...config.resolver.sourceExts, 'ts', 'tsx'],
+  // Ensure TypeScript and additional file extensions are resolved properly
+  sourceExts: [...(config.resolver.sourceExts || []), 'ts', 'tsx', 'cjs'],
 };
 
 // Configure watcher to ignore problematic directories
