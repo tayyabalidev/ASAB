@@ -55,6 +55,16 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
   useEffect(() => {
     if (visible && imageUri) {
       loadImageAsBase64();
+    } else {
+      setImageBase64(null);
+      setAdjustments(() => {
+        const defaults = {};
+        ADJUSTMENT_TOOLS.forEach(tool => {
+          defaults[tool.id] = tool.default;
+        });
+        return defaults;
+      });
+      setSelectedTool(null);
     }
   }, [visible, imageUri]);
 
@@ -74,9 +84,63 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
     }
   };
 
-  // Generate HTML with Canvas for image processing
-  const generateEditorHTML = () => {
-    const adjustmentsJson = JSON.stringify(adjustments);
+  // Generate CSS filter string from adjustments
+  const generateFilterCSS = useCallback(() => {
+    const parts = [];
+    
+    // Brightness: -100 to +100 -> 0.5 to 1.5
+    if (adjustments.brightness !== 0) {
+      const brightness = 1 + (adjustments.brightness / 200);
+      parts.push(`brightness(${brightness.toFixed(2)})`);
+    }
+    
+    // Contrast: -100 to +100 -> 0.5 to 1.5
+    if (adjustments.contrast !== 0) {
+      const contrast = 0.5 + ((adjustments.contrast + 100) / 200) * 1.0;
+      parts.push(`contrast(${contrast.toFixed(2)})`);
+    }
+    
+    // Saturation: -100 to +100 -> 0 to 2
+    if (adjustments.saturation !== 0) {
+      const saturation = 1 + (adjustments.saturation / 100);
+      parts.push(`saturate(${saturation.toFixed(2)})`);
+    }
+    
+    // Warmth (hue-rotate): -100 to +100 -> -30deg to +30deg
+    if (adjustments.warmth !== 0) {
+      const hue = (adjustments.warmth / 100) * 30;
+      parts.push(`hue-rotate(${hue.toFixed(1)}deg)`);
+    }
+    
+    // Color (hue-rotate): -100 to +100 -> -60deg to +60deg
+    if (adjustments.color !== 0) {
+      const hue = (adjustments.color / 100) * 60;
+      parts.push(`hue-rotate(${hue.toFixed(1)}deg)`);
+    }
+    
+    // Fade (opacity + desaturate): 0 to 100
+    if (adjustments.fade !== 0) {
+      const fade = adjustments.fade / 100;
+      parts.push(`opacity(${(1 - fade * 0.3).toFixed(2)})`);
+      parts.push(`saturate(${(1 - fade * 0.3).toFixed(2)})`);
+    }
+    
+    // Lux (brightness boost): -100 to +100
+    if (adjustments.lux !== 0) {
+      const lux = 1 + (adjustments.lux / 300);
+      parts.push(`brightness(${lux.toFixed(2)})`);
+    }
+    
+    return parts.length > 0 ? parts.join(' ') : 'none';
+  }, [adjustments]);
+
+  // Generate HTML with img tag and CSS filters (like create.jsx)
+  const generateEditorHTML = useCallback(() => {
+    if (!imageBase64) return '<html><body></body></html>';
+    
+    const filterCSS = generateFilterCSS();
+    const imageSrc = `data:image/jpeg;base64,${imageBase64}`;
+    
     return `
 <!DOCTYPE html>
 <html>
@@ -84,479 +148,156 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { 
-      background: #000; 
+    html, body { 
+      width: 100%;
+      height: 100%;
+      background: #000;
       overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 100vw;
-      height: 100vh;
     }
-    #canvasContainer {
+    .image-container {
       width: 100%;
       height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
+      position: relative;
     }
-    canvas {
+    img {
       max-width: 100%;
       max-height: 100%;
+      width: auto;
+      height: auto;
       object-fit: contain;
+      display: block;
+      filter: ${filterCSS};
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
     }
   </style>
 </head>
 <body>
-  <div id="canvasContainer">
-    <canvas id="imageCanvas"></canvas>
+  <div class="image-container">
+    <img id="editedImage" src="${imageSrc}" alt="Edited Image" onerror="console.error('Image load error');" />
   </div>
   <script>
-    const canvas = document.getElementById('imageCanvas');
-    const ctx = canvas.getContext('2d');
-    let originalImageData = null;
-    let currentImageData = null;
-    let originalImage = null;
-    let originalWidth = 0;
-    let originalHeight = 0;
+    const img = document.getElementById('editedImage');
+    let originalImageLoaded = false;
     
-    // Create a hidden canvas for full-resolution processing
-    const processCanvas = document.createElement('canvas');
-    const processCtx = processCanvas.getContext('2d');
-    
-    const adjustments = ${adjustmentsJson};
-    
-    // Image processing functions (Instagram-style algorithms)
-    function applyBrightness(data, value) {
-      // Instagram-style brightness: -100 to +100 maps to brightness adjustment
-      // Use safer formula to prevent black images
-      const adjustment = (value / 100) * 80; // Limit to -80 to +80 range
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i] + adjustment;
-        const g = data[i + 1] + adjustment;
-        const b = data[i + 2] + adjustment;
-        data[i] = Math.max(0, Math.min(255, Math.round(r)));
-        data[i + 1] = Math.max(0, Math.min(255, Math.round(g)));
-        data[i + 2] = Math.max(0, Math.min(255, Math.round(b)));
-      }
-    }
-    
-    function applyContrast(data, value) {
-      // Instagram-style contrast: -100 to +100 maps to contrast factor
-      // Using safer contrast formula to prevent black images
-      // factor range: 0.5 (low contrast) to 1.5 (high contrast)
-      const factor = 0.5 + ((value + 100) / 200) * 1.0;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = (data[i] - 128) * factor + 128;
-        const g = (data[i + 1] - 128) * factor + 128;
-        const b = (data[i + 2] - 128) * factor + 128;
-        data[i] = Math.max(0, Math.min(255, Math.round(r)));
-        data[i + 1] = Math.max(0, Math.min(255, Math.round(g)));
-        data[i + 2] = Math.max(0, Math.min(255, Math.round(b)));
-      }
-    }
-    
-    function applySaturation(data, value) {
-      // Convert -100 to +100 range to saturation factor
-      // value = -100: factor = 0 (grayscale)
-      // value = 0: factor = 1 (no change)
-      // value = +100: factor = 2 (high saturation)
-      const factor = 1 + (value / 100);
-      for (let i = 0; i < data.length; i += 4) {
-        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-        data[i] = Math.max(0, Math.min(255, gray + (data[i] - gray) * factor));
-        data[i + 1] = Math.max(0, Math.min(255, gray + (data[i + 1] - gray) * factor));
-        data[i + 2] = Math.max(0, Math.min(255, gray + (data[i + 2] - gray) * factor));
-      }
-    }
-    
-    function applyWarmth(data, value) {
-      const factor = value / 100;
-      for (let i = 0; i < data.length; i += 4) {
-        data[i] = Math.max(0, Math.min(255, data[i] + factor * 10));
-        data[i + 2] = Math.max(0, Math.min(255, data[i + 2] - factor * 5));
-      }
-    }
-    
-    function applyColor(data, value) {
-      const factor = value / 100;
-      const hue = factor * 60;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i] / 255;
-        const g = data[i + 1] / 255;
-        const b = data[i + 2] / 255;
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
-        let h, s, l = (max + min) / 2;
-        if (max === min) {
-          h = s = 0;
-        } else {
-          const d = max - min;
-          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-          if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-          else if (max === g) h = ((b - r) / d + 2) / 6;
-          else h = ((r - g) / d + 4) / 6;
-        }
-        h = (h * 360 + hue) % 360;
-        const c = (1 - Math.abs(2 * l - 1)) * s;
-        const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-        const m = l - c / 2;
-        let r2 = 0, g2 = 0, b2 = 0;
-        if (h < 60) { r2 = c; g2 = x; b2 = 0; }
-        else if (h < 120) { r2 = x; g2 = c; b2 = 0; }
-        else if (h < 180) { r2 = 0; g2 = c; b2 = x; }
-        else if (h < 240) { r2 = 0; g2 = x; b2 = c; }
-        else if (h < 300) { r2 = x; g2 = 0; b2 = c; }
-        else { r2 = c; g2 = 0; b2 = x; }
-        data[i] = Math.max(0, Math.min(255, (r2 + m) * 255));
-        data[i + 1] = Math.max(0, Math.min(255, (g2 + m) * 255));
-        data[i + 2] = Math.max(0, Math.min(255, (b2 + m) * 255));
-      }
-    }
-    
-    function applyLux(data, value) {
-      // Lux: subtle exposure boost based on luminance (Instagram-style)
-      // Similar to brightness but preserves highlights better
-      const factor = value / 100;
-      for (let i = 0; i < data.length; i += 4) {
-        const luminance = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-        // More conservative boost to prevent overexposure
-        const boost = (luminance / 255) * factor * 50;
-        const r = data[i] + boost;
-        const g = data[i + 1] + boost;
-        const b = data[i + 2] + boost;
-        data[i] = Math.max(0, Math.min(255, Math.round(r)));
-        data[i + 1] = Math.max(0, Math.min(255, Math.round(g)));
-        data[i + 2] = Math.max(0, Math.min(255, Math.round(b)));
-      }
-    }
-    
-    function applyStructure(data, value, width, height) {
-      if (value === 0) return;
-      const factor = value / 100;
-      const tempCanvas = document.createElement('canvas');
-      const tempCtx = tempCanvas.getContext('2d');
-      tempCanvas.width = width;
-      tempCanvas.height = height;
-      tempCtx.putImageData(new ImageData(data, width, height), 0, 0);
-      
-      const imageData = tempCtx.getImageData(0, 0, width, height);
-      const tempData = new Uint8ClampedArray(imageData.data);
-      
-      const kernel = [
-        0, -1 * factor, 0,
-        -1 * factor, 1 + 4 * factor, -1 * factor,
-        0, -1 * factor, 0
-      ];
-      
-      for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-          let r = 0, g = 0, b = 0;
-          for (let ky = -1; ky <= 1; ky++) {
-            for (let kx = -1; kx <= 1; kx++) {
-              const idx = ((y + ky) * width + (x + kx)) * 4;
-              const k = kernel[(ky + 1) * 3 + (kx + 1)];
-              r += tempData[idx] * k;
-              g += tempData[idx + 1] * k;
-              b += tempData[idx + 2] * k;
-            }
-          }
-          const idx = (y * width + x) * 4;
-          data[idx] = Math.max(0, Math.min(255, r));
-          data[idx + 1] = Math.max(0, Math.min(255, g));
-          data[idx + 2] = Math.max(0, Math.min(255, b));
-        }
-      }
-    }
-    
-    function applyFade(data, value) {
-      const factor = value / 100;
-      for (let i = 0; i < data.length; i += 4) {
-        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-        data[i] = Math.max(0, Math.min(255, data[i] * (1 - factor * 0.3) + gray * factor * 0.3));
-        data[i + 1] = Math.max(0, Math.min(255, data[i + 1] * (1 - factor * 0.3) + gray * factor * 0.3));
-        data[i + 2] = Math.max(0, Math.min(255, data[i + 2] * (1 - factor * 0.3) + gray * factor * 0.3));
-      }
-    }
-    
-    function applyHighlights(data, value) {
-      const factor = value / 100;
-      for (let i = 0; i < data.length; i += 4) {
-        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        if (brightness > 128) {
-          const boost = (brightness - 128) / 128 * factor;
-          data[i] = Math.min(255, data[i] + boost * 50);
-          data[i + 1] = Math.min(255, data[i + 1] + boost * 50);
-          data[i + 2] = Math.min(255, data[i + 2] + boost * 50);
-        }
-      }
-    }
-    
-    function applyShadows(data, value) {
-      const factor = value / 100;
-      for (let i = 0; i < data.length; i += 4) {
-        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        if (brightness < 128) {
-          const boost = (128 - brightness) / 128 * factor;
-          data[i] = Math.max(0, data[i] + boost * 50);
-          data[i + 1] = Math.max(0, data[i + 1] + boost * 50);
-          data[i + 2] = Math.max(0, data[i + 2] + boost * 50);
-        }
-      }
-    }
-    
-    function applyVignette(data, width, height, value) {
-      const factor = value / 100;
-      const centerX = width / 2;
-      const centerY = height / 2;
-      const maxDist = Math.sqrt(centerX * centerX + centerY * centerY);
-      
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const dist = Math.sqrt((x - centerX) * (x - centerX) + (y - centerY) * (y - centerY));
-          const darken = (dist / maxDist) * factor * 0.5;
-          const idx = (y * width + x) * 4;
-          data[idx] = Math.max(0, data[idx] * (1 - darken));
-          data[idx + 1] = Math.max(0, data[idx + 1] * (1 - darken));
-          data[idx + 2] = Math.max(0, data[idx + 2] * (1 - darken));
-        }
-      }
-    }
-    
-    function applySharpen(data, width, height, value) {
-      if (value === 0) return;
-      const factor = value / 100;
-      const tempData = new Uint8ClampedArray(data);
-      
-      const kernel = [
-        0, -factor, 0,
-        -factor, 1 + 4 * factor, -factor,
-        0, -factor, 0
-      ];
-      
-      for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-          let r = 0, g = 0, b = 0;
-          for (let ky = -1; ky <= 1; ky++) {
-            for (let kx = -1; kx <= 1; kx++) {
-              const idx = ((y + ky) * width + (x + kx)) * 4;
-              const k = kernel[(ky + 1) * 3 + (kx + 1)];
-              r += tempData[idx] * k;
-              g += tempData[idx + 1] * k;
-              b += tempData[idx + 2] * k;
-            }
-          }
-          const idx = (y * width + x) * 4;
-          data[idx] = Math.max(0, Math.min(255, r));
-          data[idx + 1] = Math.max(0, Math.min(255, g));
-          data[idx + 2] = Math.max(0, Math.min(255, b));
-        }
-      }
-    }
-    
-    function applyTiltShift(data, width, height, value) {
-      if (value === 0) return;
-      const factor = value / 100;
-      const centerY = height / 2;
-      const blurRadius = factor * 15;
-      const focusHeight = height * 0.4;
-      const tempData = new Uint8ClampedArray(data);
-      
-      for (let y = 0; y < height; y++) {
-        const distFromCenter = Math.abs(y - centerY);
-        const blurAmount = distFromCenter > focusHeight / 2 ? 
-          Math.min(1, (distFromCenter - focusHeight / 2) / (height / 2 - focusHeight / 2)) * blurRadius : 0;
-        
-        if (blurAmount > 0) {
-          for (let x = 0; x < width; x++) {
-            const idx = (y * width + x) * 4;
-            let r = 0, g = 0, b = 0, count = 0;
-            const radius = Math.ceil(blurAmount);
-            for (let dy = -radius; dy <= radius; dy++) {
-              const ny = Math.max(0, Math.min(height - 1, y + dy));
-              const nidx = (ny * width + x) * 4;
-              r += tempData[nidx];
-              g += tempData[nidx + 1];
-              b += tempData[nidx + 2];
-              count++;
-            }
-            data[idx] = r / count;
-            data[idx + 1] = g / count;
-            data[idx + 2] = b / count;
-          }
-        }
-      }
-    }
-    
-    function processImage() {
-      if (!originalImageData || !originalImage) {
-        console.log('processImage: Missing originalImageData or originalImage');
-        return;
-      }
-      
-      try {
-        // Always start from original image - redraw it fresh
-        processCanvas.width = originalWidth;
-        processCanvas.height = originalHeight;
-        processCtx.clearRect(0, 0, originalWidth, originalHeight);
-        processCtx.drawImage(originalImage, 0, 0, originalWidth, originalHeight);
-        
-        // Get fresh image data from the original image
-        const fullImageData = processCtx.getImageData(0, 0, originalWidth, originalHeight);
-        
-        // Create a working copy of the pixel data
-        const data = new Uint8ClampedArray(fullImageData.data);
-        
-        // Apply all adjustments in proper order
-        if (adjustments.brightness !== 0) applyBrightness(data, adjustments.brightness);
-        if (adjustments.contrast !== 0) applyContrast(data, adjustments.contrast);
-        if (adjustments.lux !== 0) applyLux(data, adjustments.lux);
-        if (adjustments.saturation !== 0) applySaturation(data, adjustments.saturation);
-        if (adjustments.warmth !== 0) applyWarmth(data, adjustments.warmth);
-        if (adjustments.color !== 0) applyColor(data, adjustments.color);
-        if (adjustments.structure !== 0) applyStructure(data, adjustments.structure, originalWidth, originalHeight);
-        if (adjustments.fade !== 0) applyFade(data, adjustments.fade);
-        if (adjustments.highlights !== 0) applyHighlights(data, adjustments.highlights);
-        if (adjustments.shadows !== 0) applyShadows(data, adjustments.shadows);
-        if (adjustments.vignette !== 0) applyVignette(data, originalWidth, originalHeight, adjustments.vignette);
-        if (adjustments.sharpen !== 0) applySharpen(data, originalWidth, originalHeight, adjustments.sharpen);
-        if (adjustments.tiltShift !== 0) applyTiltShift(data, originalWidth, originalHeight, adjustments.tiltShift);
-        
-        // Create new ImageData with processed data
-        const processedImageData = new ImageData(data, originalWidth, originalHeight);
-        
-        // Put processed data back to process canvas
-        processCtx.putImageData(processedImageData, 0, 0);
-        
-        // Calculate display size
-        const maxWidth = window.innerWidth || 400;
-        const maxHeight = window.innerHeight || 600;
-        let displayWidth = originalWidth;
-        let displayHeight = originalHeight;
-        
-        if (displayWidth > maxWidth || displayHeight > maxHeight) {
-          const ratio = Math.min(maxWidth / displayWidth, maxHeight / displayHeight);
-          displayWidth = Math.round(displayWidth * ratio);
-          displayHeight = Math.round(displayHeight * ratio);
-        }
-        
-        // Update display canvas - preserve aspect ratio
-        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-          canvas.width = displayWidth;
-          canvas.height = displayHeight;
-        }
-        
-        // Clear and redraw
-        ctx.clearRect(0, 0, displayWidth, displayHeight);
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(processCanvas, 0, 0, originalWidth, originalHeight, 0, 0, displayWidth, displayHeight);
-        
-        currentImageData = processedImageData;
-      } catch (error) {
-        console.error('Error in processImage:', error);
-        // Fallback: just draw original image
-        if (originalImage) {
-          const maxWidth = window.innerWidth || 400;
-          const maxHeight = window.innerHeight || 600;
-          let displayWidth = originalWidth;
-          let displayHeight = originalHeight;
-          
-          if (displayWidth > maxWidth || displayHeight > maxHeight) {
-            const ratio = Math.min(maxWidth / displayWidth, maxHeight / displayHeight);
-            displayWidth = Math.round(displayWidth * ratio);
-            displayHeight = Math.round(displayHeight * ratio);
-          }
-          
-          canvas.width = displayWidth;
-          canvas.height = displayHeight;
-          ctx.clearRect(0, 0, displayWidth, displayHeight);
-          ctx.drawImage(originalImage, 0, 0, displayWidth, displayHeight);
-        }
-      }
-    }
-    
-    function loadImage(base64) {
-      const img = new Image();
-      img.onload = function() {
-        // Store original image and dimensions
-        originalImage = img;
-        originalWidth = img.width;
-        originalHeight = img.height;
-        
-        // Get original image data for reference
-        processCanvas.width = originalWidth;
-        processCanvas.height = originalHeight;
-        processCtx.drawImage(img, 0, 0, originalWidth, originalHeight);
-        originalImageData = processCtx.getImageData(0, 0, originalWidth, originalHeight);
-        
-        // Process and display
-        processImage();
-      };
-      img.onerror = function(e) {
-        console.error('Error loading image:', e);
-      };
-      img.src = 'data:image/jpeg;base64,' + base64;
-    }
-    
-    window.loadImage = loadImage;
-    window.processImage = processImage;
-    window.getImageData = function() {
-      // Export from full-resolution process canvas, not display canvas
-      if (processCanvas.width > 0 && processCanvas.height > 0) {
-        return processCanvas.toDataURL('image/jpeg', 0.95);
-      }
-      return canvas.toDataURL('image/jpeg', 0.95);
+    img.onload = function() {
+      originalImageLoaded = true;
+      console.log('Image loaded successfully');
     };
     
-    // Listen for messages from React Native
-    window.addEventListener('message', function(event) {
-      try {
-        const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        
-        if (message.type === 'adjustmentChange') {
-          adjustments[message.tool] = message.value;
-          processImage();
-        } else if (message.type === 'getImageData') {
-          const imageData = getImageData();
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'imageData',
-            data: imageData
-          }));
-        }
-      } catch (e) {
-        console.error('Error handling message:', e);
-      }
-    });
+    img.onerror = function() {
+      console.error('Failed to load image');
+    };
     
-    // Also handle direct postMessage calls
-    document.addEventListener('message', function(event) {
-      window.dispatchEvent(new MessageEvent('message', { data: event.data }));
-    });
+    // Function to update filter
+    window.updateFilter = function(filterCSS) {
+      if (img) {
+        img.style.filter = filterCSS || 'none';
+      }
+    };
+    
+    // Function to get image data for export
+    window.getImageData = function() {
+      return new Promise((resolve, reject) => {
+        if (!originalImageLoaded) {
+          reject(new Error('Image not loaded'));
+          return;
+        }
+        
+        // Create canvas to capture the filtered image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        img.onload = function() {
+          try {
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            
+            // Apply current filter to canvas
+            ctx.filter = img.style.filter || 'none';
+            ctx.drawImage(img, 0, 0);
+            
+            const dataURL = canvas.toDataURL('image/jpeg', 0.95);
+            resolve(dataURL);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        
+        // Trigger reload if needed
+        if (img.complete) {
+          img.onload();
+        } else {
+          const originalSrc = img.src;
+          img.src = '';
+          img.src = originalSrc;
+        }
+      });
+    };
   </script>
 </body>
 </html>
     `;
-  };
+  }, [imageBase64, generateFilterCSS]);
 
   // Handle adjustment change
   const handleAdjustmentChange = useCallback((toolId, value) => {
     const newAdjustments = { ...adjustments, [toolId]: value };
     setAdjustments(newAdjustments);
     
-    // Update WebView immediately for real-time preview
+    // Update WebView filter immediately
     if (webViewRef.current) {
+      const filterCSS = (() => {
+        const parts = [];
+        const adj = newAdjustments;
+        
+        if (adj.brightness !== 0) {
+          const brightness = 1 + (adj.brightness / 200);
+          parts.push(`brightness(${brightness.toFixed(2)})`);
+        }
+        if (adj.contrast !== 0) {
+          const contrast = 0.5 + ((adj.contrast + 100) / 200) * 1.0;
+          parts.push(`contrast(${contrast.toFixed(2)})`);
+        }
+        if (adj.saturation !== 0) {
+          const saturation = 1 + (adj.saturation / 100);
+          parts.push(`saturate(${saturation.toFixed(2)})`);
+        }
+        if (adj.warmth !== 0) {
+          const hue = (adj.warmth / 100) * 30;
+          parts.push(`hue-rotate(${hue.toFixed(1)}deg)`);
+        }
+        if (adj.color !== 0) {
+          const hue = (adj.color / 100) * 60;
+          parts.push(`hue-rotate(${hue.toFixed(1)}deg)`);
+        }
+        if (adj.fade !== 0) {
+          const fade = adj.fade / 100;
+          parts.push(`opacity(${(1 - fade * 0.3).toFixed(2)})`);
+          parts.push(`saturate(${(1 - fade * 0.3).toFixed(2)})`);
+        }
+        if (adj.lux !== 0) {
+          const lux = 1 + (adj.lux / 300);
+          parts.push(`brightness(${lux.toFixed(2)})`);
+        }
+        
+        return parts.length > 0 ? parts.join(' ') : 'none';
+      })();
+      
       webViewRef.current.injectJavaScript(`
         (function() {
           try {
-            if (typeof adjustments !== 'undefined') {
-              adjustments['${toolId}'] = ${value};
-              if (typeof processImage === 'function') {
-                processImage();
-              }
+            if (typeof updateFilter === 'function') {
+              updateFilter('${filterCSS}');
             }
           } catch(e) {
-            console.error('Error updating adjustment:', e);
+            console.error('Error updating filter:', e);
           }
         })();
         true;
@@ -572,13 +313,47 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
         webViewRef.current.injectJavaScript(`
           (function() {
             try {
-              const imageData = getImageData();
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'imageData',
-                data: imageData
-              }));
+              if (typeof getImageData === 'function') {
+                getImageData().then(function(dataURL) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'imageData',
+                    data: dataURL
+                  }));
+                }).catch(function(error) {
+                  console.error('Error getting image data:', error);
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'error',
+                    message: error.message
+                  }));
+                });
+              } else {
+                // Fallback: try to get image directly
+                const img = document.getElementById('editedImage');
+                if (img && img.complete) {
+                  const canvas = document.createElement('canvas');
+                  const ctx = canvas.getContext('2d');
+                  canvas.width = img.naturalWidth || img.width;
+                  canvas.height = img.naturalHeight || img.height;
+                  ctx.filter = img.style.filter || 'none';
+                  ctx.drawImage(img, 0, 0);
+                  const dataURL = canvas.toDataURL('image/jpeg', 0.95);
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'imageData',
+                    data: dataURL
+                  }));
+                } else {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'error',
+                    message: 'Image not loaded'
+                  }));
+                }
+              }
             } catch(e) {
-              console.error('Error getting image data:', e);
+              console.error('Error in save:', e);
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'error',
+                message: e.message
+              }));
             }
           })();
           true;
@@ -614,31 +389,15 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
           setProcessing(false);
           Alert.alert('Error', 'Failed to save edited image');
         });
+      } else if (message.type === 'error') {
+        setProcessing(false);
+        Alert.alert('Error', message.message || 'Failed to export image');
       }
     } catch (error) {
       console.error('Error handling WebView message:', error);
       setProcessing(false);
     }
   };
-
-  // Load image in WebView
-  useEffect(() => {
-    if (imageBase64 && webViewRef.current) {
-      // Small delay to ensure WebView is ready
-      setTimeout(() => {
-        if (webViewRef.current) {
-          webViewRef.current.injectJavaScript(`
-            (function() {
-              if (typeof loadImage !== 'undefined') {
-                loadImage('${imageBase64}');
-              }
-            })();
-            true;
-          `);
-        }
-      }, 500);
-    }
-  }, [imageBase64]);
 
   // Handle Android back button
   useEffect(() => {
@@ -686,6 +445,7 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
           {imageBase64 ? (
             <WebView
               ref={webViewRef}
+              key={`editor-${imageBase64.substring(0, 20)}`}
               source={{ html: generateEditorHTML() }}
               style={styles.webView}
               onMessage={handleWebViewMessage}
@@ -693,6 +453,21 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
               domStorageEnabled
               startInLoadingState
               scalesPageToFit
+              onLoadEnd={() => {
+                // Ensure image is visible after load
+                if (webViewRef.current) {
+                  webViewRef.current.injectJavaScript(`
+                    (function() {
+                      const img = document.getElementById('editedImage');
+                      if (img) {
+                        img.style.display = 'block';
+                        img.style.visibility = 'visible';
+                      }
+                    })();
+                    true;
+                  `);
+                }
+              }}
             />
           ) : (
             <ActivityIndicator size="large" color="#fff" />
@@ -861,4 +636,3 @@ const styles = StyleSheet.create({
 });
 
 export default PhotoEditor;
-
