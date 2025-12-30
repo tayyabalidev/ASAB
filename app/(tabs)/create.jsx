@@ -1317,7 +1317,7 @@ const Create = () => {
                     <View style={{ position: 'relative', width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}>
                       {imageBase64 ? (
                         <WebView
-                          key={`${photoForm.filter}-${JSON.stringify(editedImage.adjustments || adjustments)}-${textOverlays.length}-${imageOverlays.length}`}
+                          key={`photo-display-${editedImage?.uri || 'none'}-${photoForm.filter}-${textOverlays.length}-${imageOverlays.length}`}
                           source={{
                             html: `
                               <!DOCTYPE html>
@@ -3573,18 +3573,38 @@ const Create = () => {
               onSave={async (editedFile) => {
                 try {
                   setIsMediaEdited(true);
+                  
+                  // Convert edited image to base64 for display
+                  let editedBase64 = null;
+                  try {
+                    if (editedFile.uri) {
+                      const base64 = await FileSystem.readAsStringAsync(editedFile.uri, {
+                        encoding: FileSystem.EncodingType.Base64,
+                      });
+                      editedBase64 = `data:image/jpeg;base64,${base64}`;
+                    }
+                  } catch (conversionError) {
+                    console.error('Error converting edited image to base64:', conversionError);
+                  }
+                  
+                  // Update all states
                   setPhotoForm({
                     ...photoForm,
                     photo: editedFile,
                   });
                   setEditedImage(editedFile);
-                  if (originalImage?.uri !== editedFile?.uri) {
-                    setOriginalImage(editedFile);
+                  setOriginalImage(editedFile);
+                  
+                  // Force update imageBase64 if conversion succeeded
+                  if (editedBase64) {
+                    setImageBase64(editedBase64);
                   }
+                  
                   setShowPhotoEditor(false);
                   setEditingPhotoUri(null);
                   Alert.alert('Success', 'Photo edited and saved!');
                 } catch (error) {
+                  console.error('Error saving edited photo:', error);
                   Alert.alert('Error', 'Failed to save edited photo: ' + error.message);
                 }
               }}
