@@ -30,7 +30,7 @@ import { icons, images } from "../../constants";
 import { createVideoPost, createPhotoPost } from "../../lib/appwrite";
 import { processVideo, processPhoto, checkProcessingServer } from "../../lib/videoProcessor";
 import { exportEditedMedia } from "../../lib/mediaExporter";
-import { CustomButton, FormField, MediaEditor } from "../../components";
+import { CustomButton, FormField, MediaEditor, PhotoEditor } from "../../components";
 import { Feather } from '@expo/vector-icons';
 import { useGlobalContext } from "../../context/GlobalProvider";
 
@@ -110,6 +110,8 @@ const Create = () => {
   const [showEditor, setShowEditor] = useState(false);
   const [editingMedia, setEditingMedia] = useState(null);
   const [isMediaEdited, setIsMediaEdited] = useState(false); // Track if media was edited via MediaEditor
+  const [showPhotoEditor, setShowPhotoEditor] = useState(false);
+  const [editingPhotoUri, setEditingPhotoUri] = useState(null);
   const [showTextModal, setShowTextModal] = useState(false);
   const [textOverlays, setTextOverlays] = useState([]);
   const [currentText, setCurrentText] = useState('');
@@ -1711,8 +1713,13 @@ const Create = () => {
                             {/* Edit Button */}
                             <TouchableOpacity
                               onPress={() => {
-                                setEditingMedia({ ...photoForm.photo, mediaType: 'photo' });
-                                setShowEditor(true);
+                                if (editedImage || photoForm.photo) {
+                                  const photo = editedImage || photoForm.photo;
+                                  setEditingPhotoUri(photo.uri);
+                                  setShowPhotoEditor(true);
+                                } else {
+                                  Alert.alert('No Photo', 'Please select a photo first');
+                                }
                               }}
                               style={{
                                 width: 60,
@@ -1721,12 +1728,13 @@ const Create = () => {
                                 backgroundColor: 'rgba(255, 255, 255, 0.15)',
                                 justifyContent: 'center',
                                 alignItems: 'center',
+                                marginRight: 4,
                                 paddingTop: 8,
                                 paddingBottom: 4,
                               }}
                               activeOpacity={0.8}
                             >
-                              <Feather name="edit-3" size={22} color="#FFFFFF" />
+                              <Feather name="edit-2" size={22} color="#FFFFFF" />
                               <Text style={{
                                 color: '#FFFFFF',
                                 fontSize: 11,
@@ -3010,7 +3018,7 @@ const Create = () => {
                           backgroundColor: showTextStyles ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)',
                           justifyContent: 'center',
                           alignItems: 'center',
-                          borderWidth: showTextStyles ? 2 : 1,
+                          borderWidth: showTextStyles ? 2 : 1, 
                           borderColor: showTextStyles ? '#0095F6' : 'rgba(255, 255, 255, 0.3)',
                         }}
                         activeOpacity={0.7}
@@ -3553,6 +3561,34 @@ const Create = () => {
               }}
               />
             )}
+
+            {/* Photo Editor Modal */}
+            <PhotoEditor
+              visible={showPhotoEditor}
+              onClose={() => {
+                setShowPhotoEditor(false);
+                setEditingPhotoUri(null);
+              }}
+              imageUri={editingPhotoUri}
+              onSave={async (editedFile) => {
+                try {
+                  setIsMediaEdited(true);
+                  setPhotoForm({
+                    ...photoForm,
+                    photo: editedFile,
+                  });
+                  setEditedImage(editedFile);
+                  if (originalImage?.uri !== editedFile?.uri) {
+                    setOriginalImage(editedFile);
+                  }
+                  setShowPhotoEditor(false);
+                  setEditingPhotoUri(null);
+                  Alert.alert('Success', 'Photo edited and saved!');
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to save edited photo: ' + error.message);
+                }
+              }}
+            />
           </ImageBackground>
         </LinearGradient>
       </View>
