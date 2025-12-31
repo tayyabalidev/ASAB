@@ -88,6 +88,7 @@ const Create = () => {
   const [originalImage, setOriginalImage] = useState(null);
   const [editedImage, setEditedImage] = useState(null);
   const [edits, setEdits] = useState({});
+  const [imageUpdateKey, setImageUpdateKey] = useState(0); // Force WebView re-render when image changes
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [adjustments, setAdjustments] = useState({
@@ -318,6 +319,7 @@ const Create = () => {
           setEditedImage(file);
           setPhotoForm({ ...photoForm, photo: file });
           setIsMediaEdited(false); // Reset edit flag when new photo is selected
+          manuallySetBase64Ref.current = false; // Reset manual base64 flag when new image is selected
         }
       }
     } catch (error) {
@@ -575,6 +577,7 @@ const Create = () => {
   const [imageBase64, setImageBase64] = useState(null);
   const lastConvertedUri = useRef(null);
   const isConvertingRef = useRef(false);
+  const manuallySetBase64Ref = useRef(false); // Track if base64 was manually set (from PhotoEditor)
   
   useEffect(() => {
     const convertToBase64 = async () => {
@@ -585,7 +588,14 @@ const Create = () => {
         if (imageBase64 !== null) {
           setImageBase64(null);
           lastConvertedUri.current = null;
+          manuallySetBase64Ref.current = false;
         }
+        return;
+      }
+
+      // IMPORTANT: If base64 was manually set (from PhotoEditor), don't overwrite it
+      if (manuallySetBase64Ref.current) {
+        console.log('Skipping base64 conversion - manually set base64 exists');
         return;
       }
 
@@ -638,6 +648,95 @@ const Create = () => {
     convertToBase64();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [originalImage?.uri]);
+
+  // Generate HTML for WebView using useMemo to ensure it updates when imageBase64 changes
+  const webViewHTML = useMemo(() => {
+    if (!imageBase64 || !editedImage) return '';
+    
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            body {
+              width: 100%;
+              height: 100%;
+              overflow: hidden;
+              position: relative;
+            }
+            img {
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+              filter: ${(() => {
+                // If image came from PhotoEditor, adjustments are already baked in
+                // Only apply the filter (if any), not adjustments
+                if (editedImage?.adjustmentsAlreadyApplied || editedImage?.fromPhotoEditor) {
+                  return getFilterCSS(photoForm.filter, null);
+                }
+                // Otherwise, apply both filter and adjustments
+                return getFilterCSS(photoForm.filter, editedImage?.adjustments || adjustments);
+              })()};
+            }
+            ${textOverlays.map((overlay, index) => {
+              const textStyle = overlay.style || {};
+              let textCSS = `
+                position: absolute;
+                top: ${overlay.y || 50}%;
+                left: ${overlay.x || 50}%;
+                transform: translate(-50%, -50%);
+                font-size: ${textStyle.fontSize || 24}px;
+                font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
+                color: ${textStyle.color || '#FFFFFF'};
+                text-align: ${textStyle.alignment || 'center'};
+                white-space: nowrap;
+                z-index: ${index + 1};
+              `;
+              
+              if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
+                textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+              }
+              
+              if (textStyle.textStyle === 'outline') {
+                textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+              } else if (textStyle.textStyle === 'shadow') {
+                textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+              }
+              
+              return `.text-overlay-${index} { ${textCSS} }`;
+            }).join('\n')}
+            ${imageOverlays.map((overlay, index) => {
+              return `.image-overlay-${index} {
+                position: absolute;
+                top: ${overlay.y}%;
+                left: ${overlay.x}%;
+                width: ${overlay.width}%;
+                height: ${overlay.height}%;
+                transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
+                z-index: ${100 + index};
+                pointer-events: none;
+              }`;
+            }).join('\n')}
+          </style>
+        </head>
+        <body>
+          <img src="${imageBase64}" alt="Filtered Image" onerror="console.error('Image load error')" onload="console.log('Image loaded successfully, src length:', this.src.length)" />
+          ${textOverlays.map((overlay, index) => 
+            `<div class="text-overlay-${index}">${overlay.text}</div>`
+          ).join('')}
+          ${imageOverlays.map((overlay, index) => 
+            `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
+          ).join('')}
+        </body>
+      </html>
+    `;
+  }, [imageBase64, editedImage, photoForm.filter, textOverlays, imageOverlays, adjustments]);
 
   const submit = async () => {
     if (postType === 'video') {
@@ -1315,86 +1414,10 @@ const Create = () => {
                 <TouchableOpacity onPress={() => openPicker("image")}>
                   {editedImage ? (
                     <View style={{ position: 'relative', width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}>
-                      {imageBase64 ? (
+                      {imageBase64 && webViewHTML ? (
                         <WebView
-                          key={`photo-display-${editedImage?.uri || 'none'}-${photoForm.filter}-${textOverlays.length}-${imageOverlays.length}`}
-                          source={{
-                            html: `
-                              <!DOCTYPE html>
-                              <html>
-                                <head>
-                                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                                  <style>
-                                    * {
-                                      margin: 0;
-                                      padding: 0;
-                                      box-sizing: border-box;
-                                    }
-                                    body {
-                                      width: 100%;
-                                      height: 100%;
-                                      overflow: hidden;
-                                      position: relative;
-                                    }
-                                    img {
-                                      width: 100%;
-                                      height: 100%;
-                                      object-fit: cover;
-                                      filter: ${getFilterCSS(photoForm.filter, editedImage.adjustments || adjustments)};
-                                    }
-                                    ${textOverlays.map((overlay, index) => {
-                                      const textStyle = overlay.style || {};
-                                      let textCSS = `
-                                        position: absolute;
-                                        top: ${overlay.y || 50}%;
-                                        left: ${overlay.x || 50}%;
-                                        transform: translate(-50%, -50%);
-                                        font-size: ${textStyle.fontSize || 24}px;
-                                        font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
-                                        color: ${textStyle.color || '#FFFFFF'};
-                                        text-align: ${textStyle.alignment || 'center'};
-                                        white-space: nowrap;
-                                        z-index: ${index + 1};
-                                      `;
-                                      
-                                      if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
-                                        textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
-                                      }
-                                      
-                                      if (textStyle.textStyle === 'outline') {
-                                        textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
-                                      } else if (textStyle.textStyle === 'shadow') {
-                                        textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
-                                      }
-                                      
-                                      return `.text-overlay-${index} { ${textCSS} }`;
-                                    }).join('\n')}
-                                    ${imageOverlays.map((overlay, index) => {
-                                      return `.image-overlay-${index} {
-                                        position: absolute;
-                                        top: ${overlay.y}%;
-                                        left: ${overlay.x}%;
-                                        width: ${overlay.width}%;
-                                        height: ${overlay.height}%;
-                                        transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
-                                        z-index: ${100 + index};
-                                        pointer-events: none;
-                                      }`;
-                                    }).join('\n')}
-                                  </style>
-                                </head>
-                                <body>
-                                  <img src="${imageBase64}" alt="Filtered Image" />
-                                  ${textOverlays.map((overlay, index) => 
-                                    `<div class="text-overlay-${index}">${overlay.text}</div>`
-                                  ).join('')}
-                                  ${imageOverlays.map((overlay, index) => 
-                                    `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
-                                  ).join('')}
-                                </body>
-                              </html>
-                            `
-                          }}
+                          key={`photo-${editedImage?.uri || originalImage?.uri || 'none'}-${imageUpdateKey}-${imageBase64.length}-${photoForm.filter}-${textOverlays.length}-${imageOverlays.length}`}
+                          source={{ html: webViewHTML }}
                           style={{ 
                             width: "100%", 
                             height: 400, 
@@ -1930,7 +1953,13 @@ const Create = () => {
                                   height: 100%;
                                   object-fit: cover;
                                   display: block;
-                                  filter: ${getFilterCSS(photoForm.filter, editedImage.adjustments || adjustments)};
+                                  filter: ${(() => {
+                                    // If image came from PhotoEditor, adjustments are already baked in
+                                    if (editedImage?.adjustmentsAlreadyApplied || editedImage?.fromPhotoEditor) {
+                                      return getFilterCSS(photoForm.filter, null);
+                                    }
+                                    return getFilterCSS(photoForm.filter, editedImage?.adjustments || adjustments);
+                                  })()};
                                 }
                               </style>
                             </head>
@@ -2602,7 +2631,13 @@ const Create = () => {
                                     height: 100%;
                                     object-fit: cover;
                                     display: block;
-                                    filter: ${getFilterCSS(photoForm.filter, editedImage.adjustments || adjustments)};
+                                    filter: ${(() => {
+                                      // If image came from PhotoEditor, adjustments are already baked in
+                                      if (editedImage?.adjustmentsAlreadyApplied || editedImage?.fromPhotoEditor) {
+                                        return getFilterCSS(photoForm.filter, null);
+                                      }
+                                      return getFilterCSS(photoForm.filter, editedImage?.adjustments || adjustments);
+                                    })()};
                                   }
                                   ${textOverlays.map((overlay, index) => {
                                     const textStyle = overlay.style || currentTextStyle;
@@ -3582,29 +3617,91 @@ const Create = () => {
                         encoding: FileSystem.EncodingType.Base64,
                       });
                       editedBase64 = `data:image/jpeg;base64,${base64}`;
+                      console.log('✅ Converted edited image to base64, length:', editedBase64.length);
                     }
                   } catch (conversionError) {
                     console.error('Error converting edited image to base64:', conversionError);
                   }
                   
-                  // Update all states
-                  setPhotoForm({
-                    ...photoForm,
-                    photo: editedFile,
-                  });
-                  setEditedImage(editedFile);
-                  setOriginalImage(editedFile);
-                  
-                  // Force update imageBase64 if conversion succeeded
-                  if (editedBase64) {
-                    setImageBase64(editedBase64);
+                  if (!editedBase64) {
+                    Alert.alert('Error', 'Failed to convert edited image');
+                    return;
                   }
                   
+                  // IMPORTANT: Mark that we're manually setting base64 FIRST
+                  // This prevents useEffect from overwriting our edited base64
+                  manuallySetBase64Ref.current = true;
+                  
+                  // Update the ref to prevent useEffect from running
+                  lastConvertedUri.current = editedFile.uri;
+                  
+                  // Mark that we're manually setting base64 (prevent useEffect from overwriting)
+                  isConvertingRef.current = true;
+                  
+                  // Update imageBase64 FIRST and wait for it to complete
+                  // Use a promise to ensure state is updated
+                  await new Promise(resolve => {
+                    setImageBase64(editedBase64);
+                    console.log('✅ Set imageBase64 state, length:', editedBase64.length);
+                    // Use requestAnimationFrame to ensure React has processed the state update
+                    requestAnimationFrame(() => {
+                      setTimeout(resolve, 150);
+                    });
+                  });
+                  
+                  // Then update all other states
+                  // Mark that adjustments are already baked into this image from PhotoEditor
+                  const editedFileWithFlag = {
+                    ...editedFile,
+                    adjustmentsAlreadyApplied: true, // Flag to prevent re-applying adjustments
+                    fromPhotoEditor: true, // Mark as coming from PhotoEditor
+                  };
+                  setEditedImage(editedFileWithFlag);
+                  console.log('✅ Set editedImage state, URI:', editedFile.uri);
+                  
+                  // IMPORTANT: Update originalImage too (like filter does)
+                  // But keep manuallySetBase64Ref true so useEffect doesn't overwrite our base64
+                  setOriginalImage(editedFileWithFlag);
+                  console.log('✅ Set originalImage state, URI:', editedFile.uri);
+                  
+                  setPhotoForm({
+                    ...photoForm,
+                    photo: editedFileWithFlag,
+                  });
+                  console.log('✅ Set photoForm state');
+                  
+                  // Close editor AFTER state updates
                   setShowPhotoEditor(false);
                   setEditingPhotoUri(null);
+                  
+                  // Force WebView re-render by updating the key with a unique value
+                  // Use a counter that increments to ensure key always changes
+                  setImageUpdateKey(prev => {
+                    const newKey = (prev || 0) + 1;
+                    console.log('✅ Updated imageUpdateKey from', prev, 'to', newKey);
+                    return newKey;
+                  });
+                  
+                  // Wait for React to process all state updates and re-render
+                  await new Promise(resolve => setTimeout(resolve, 300));
+                  
+                  // Log current state for debugging
+                  console.log('✅ Final check - imageBase64 length:', editedBase64.length);
+                  console.log('✅ Final check - editedImage URI:', editedFile.uri);
+                  
+                  // Release the conversion lock after a delay (but keep manuallySetBase64Ref true)
+                  setTimeout(() => {
+                    isConvertingRef.current = false;
+                    // Keep manuallySetBase64Ref true so useEffect doesn't overwrite
+                    // It will be reset when a new image is selected
+                  }, 2000);
+                  
+                  console.log('✅ Photo editor save completed');
                   Alert.alert('Success', 'Photo edited and saved!');
                 } catch (error) {
                   console.error('Error saving edited photo:', error);
+                  isConvertingRef.current = false;
+                  manuallySetBase64Ref.current = false; // Reset on error
                   Alert.alert('Error', 'Failed to save edited photo: ' + error.message);
                 }
               }}
