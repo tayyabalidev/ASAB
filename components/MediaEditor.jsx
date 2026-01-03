@@ -510,13 +510,14 @@ const MediaEditor = ({
   // Store PanResponders in ref to avoid recreation
   const textPanRespondersRef = useRef({});
   
-  // Create or get PanResponder for a text
+  // Create or get PanResponder for a text (EXACTLY like stickers)
   const getTextPanResponder = useCallback((text) => {
     if (!textPanRespondersRef.current[text.id]) {
       textPanRespondersRef.current[text.id] = PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: (evt) => {
+          console.log('✅ Text PanResponder GRANT - text id:', text.id);
           const { pageX, pageY } = evt.nativeEvent;
           textStartPositions.current[text.id] = {
             startX: pageX - text.x,
@@ -525,21 +526,21 @@ const MediaEditor = ({
           setSelectedText(text.id);
         },
         onPanResponderMove: (evt) => {
+          console.log('🔄 Text PanResponder MOVE');
           const { pageX, pageY } = evt.nativeEvent;
           const startPos = textStartPositions.current[text.id];
           if (startPos) {
             const newX = pageX - startPos.startX;
             const newY = pageY - startPos.startY;
+            console.log('📍 Moving text to:', newX, newY);
             updateTextPosition(text.id, newX, newY);
           }
         },
         onPanResponderRelease: () => {
           delete textStartPositions.current[text.id];
-          setSelectedText(null);
         },
         onPanResponderTerminate: () => {
           delete textStartPositions.current[text.id];
-          setSelectedText(null);
         },
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
@@ -998,12 +999,9 @@ const MediaEditor = ({
         <View 
           style={styles.previewContainer} 
           collapsable={false}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderGrant={() => {
-            // Prevent system gestures when touching preview area
-          }}
-          onResponderTerminationRequest={() => false}
+          onStartShouldSetResponder={() => false}
+          onMoveShouldSetResponder={() => false}
+          onResponderTerminationRequest={() => true}
         >
           <View ref={previewRef} collapsable={false} style={styles.previewWrapper}>
             {!media || !media.uri ? (
@@ -1131,10 +1129,6 @@ const MediaEditor = ({
           <View
             style={styles.overlay}
             pointerEvents="box-none"
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
-            onResponderTerminationRequest={() => false}
-            onShouldBlockNativeResponder={() => true}
           >
             <GestureHandlerRootView 
               style={StyleSheet.absoluteFill} 
@@ -1198,7 +1192,7 @@ const MediaEditor = ({
               );
             })}
             
-            {/* Texts - Draggable using PanResponder with Transform Gestures */}
+            {/* Texts - Draggable using PanResponder (same as stickers) */}
             {texts.map(text => {
               const panResponder = getTextPanResponder(text);
               
@@ -1219,55 +1213,63 @@ const MediaEditor = ({
                     }
                   ]}
                 >
-                  <View style={[
-                    text.backgroundColor && {
-                      backgroundColor: text.backgroundColor,
-                      opacity: text.backgroundOpacity || 0.5,
-                      paddingHorizontal: 8,
-                      paddingVertical: 4,
-                      borderRadius: 4,
-                    }
-                  ]}>
-                    {/* Outline layer (rendered behind main text) */}
-                    {text.hasOutline && (
+                  <View 
+                    style={[
+                      {
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        minHeight: 30,
+                        width: '100%',
+                      },
+                      text.backgroundColor && {
+                        backgroundColor: text.backgroundColor,
+                        opacity: text.backgroundOpacity || 0.5,
+                        borderRadius: 4,
+                      }
+                    ]}
+                  >
+                      {/* Outline layer (rendered behind main text) */}
+                      {text.hasOutline && (
+                        <Text
+                          pointerEvents="none"
+                          style={[
+                            styles.textOverlay,
+                            {
+                              position: 'absolute',
+                              fontSize: text.fontSize,
+                              fontFamily: text.fontFamily,
+                              textAlign: text.alignment || 'center',
+                              color: text.outlineColor || '#000000',
+                              textShadowColor: text.outlineColor || '#000000',
+                              textShadowOffset: { width: (text.outlineWidth || 2) * 0.5, height: (text.outlineWidth || 2) * 0.5 },
+                              textShadowRadius: (text.outlineWidth || 2) * 2,
+                            }
+                          ]}
+                        >
+                          {text.text}
+                        </Text>
+                      )}
+                      {/* Main text */}
                       <Text
+                        pointerEvents="none"
                         style={[
                           styles.textOverlay,
                           {
-                            position: 'absolute',
                             fontSize: text.fontSize,
-                            fontFamily: text.fontFamily,
+                            color: text.color,
+                            fontFamily: text.fontFamily || 'System',
+                            fontWeight: text.fontWeight || 'normal',
                             textAlign: text.alignment || 'center',
-                            color: text.outlineColor || '#000000',
-                            textShadowColor: text.outlineColor || '#000000',
-                            textShadowOffset: { width: (text.outlineWidth || 2) * 0.5, height: (text.outlineWidth || 2) * 0.5 },
-                            textShadowRadius: (text.outlineWidth || 2) * 2,
+                            // Text shadow
+                            textShadowColor: text.hasShadow !== false ? (text.shadowColor || 'rgba(0,0,0,0.5)') : 'transparent',
+                            textShadowOffset: text.hasShadow !== false ? (text.shadowOffset || { width: 1, height: 1 }) : { width: 0, height: 0 },
+                            textShadowRadius: text.hasShadow !== false ? (text.shadowBlur || 2) : 0,
                           }
                         ]}
                       >
                         {text.text}
                       </Text>
-                    )}
-                    {/* Main text */}
-                    <Text
-                      style={[
-                        styles.textOverlay,
-                        {
-                          fontSize: text.fontSize,
-                          color: text.color,
-                          fontFamily: text.fontFamily || 'System',
-                          fontWeight: text.fontWeight || 'normal',
-                          textAlign: text.alignment || 'center',
-                          // Text shadow
-                          textShadowColor: text.hasShadow !== false ? (text.shadowColor || 'rgba(0,0,0,0.5)') : 'transparent',
-                          textShadowOffset: text.hasShadow !== false ? (text.shadowOffset || { width: 1, height: 1 }) : { width: 0, height: 0 },
-                          textShadowRadius: text.hasShadow !== false ? (text.shadowBlur || 2) : 0,
-                        }
-                      ]}
-                    >
-                      {text.text}
-                    </Text>
-                  </View>
+                    </View>
                   {!isCapturing && selectedText === text.id && (
                     <>
                       <TouchableOpacity
@@ -2519,7 +2521,9 @@ const styles = StyleSheet.create({
   textContainer: {
     position: 'absolute',
     minWidth: 100,
+    minHeight: 30,
     padding: 8,
+    backgroundColor: 'transparent',
   },
   textOverlay: {
     fontWeight: 'bold',

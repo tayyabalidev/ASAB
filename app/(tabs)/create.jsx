@@ -19,6 +19,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  PanResponder,
+  Dimensions,
 } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from "react-i18next";
@@ -97,14 +99,91 @@ const Create = () => {
     saturation: 1,
     hue: 0,
   });
+  // Video adjustments state (Instagram-style)
+  const [videoAdjustments, setVideoAdjustments] = useState({
+    brightness: 0,
+    contrast: 0,
+    saturation: 0,
+    warmth: 0,
+    lux: 0,
+    fade: 0,
+    highlights: 0,
+    shadows: 0,
+    structure: 0,
+  });
+  const [showVideoAdjustModal, setShowVideoAdjustModal] = useState(false);
+  const [selectedVideoTool, setSelectedVideoTool] = useState(null);
   const [processingImage, setProcessingImage] = useState(false);
   const [showVideoFilterModal, setShowVideoFilterModal] = useState(false);
   const [showMusicModal, setShowMusicModal] = useState(false);
   const [videoFilterCSS, setVideoFilterCSS] = useState('none');
+  
+  // Video editing features state
+  const [showTrimModal, setShowTrimModal] = useState(false);
+  const [videoTrimStart, setVideoTrimStart] = useState(0); // in seconds
+  const [videoTrimEnd, setVideoTrimEnd] = useState(0); // in seconds
+  const [videoDuration, setVideoDuration] = useState(0); // total video duration
+  
+  const [showSpeedModal, setShowSpeedModal] = useState(false);
+  const [videoSpeed, setVideoSpeed] = useState(1.0); // 0.3, 0.5, 1, 2, 3
+  
+  const [showCoverModal, setShowCoverModal] = useState(false);
+  const [videoCoverTime, setVideoCoverTime] = useState(0); // time in seconds for cover frame
+  
+  const [showVolumeModal, setShowVolumeModal] = useState(false);
+  const [videoVolume, setVideoVolume] = useState(1.0); // 0.0 to 1.0
+  
+  const [showVideoTextModal, setShowVideoTextModal] = useState(false);
+  const [videoTextOverlays, setVideoTextOverlays] = useState([]);
+  const [currentVideoText, setCurrentVideoText] = useState('');
+  
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [videoCrop, setVideoCrop] = useState({ x: 0, y: 0, width: 1, height: 1 }); // normalized crop values
+  const [videoRotation, setVideoRotation] = useState(0); // 0, 90, 180, 270
+  
+  const videoRef = useRef(null);
+  const seekTimeoutRef = useRef(null); // Debounce seeking
+  const isSeekingRef = useRef(false); // Prevent multiple simultaneous seeks
   const scrollViewRef = useRef(null);
   const linkInputRef = useRef(null);
   const textWebViewRef = useRef(null);
   const hiddenTextInputRef = useRef(null);
+  const textModalContainerRef = useRef(null);
+  const textStartPositionsRef = useRef({});
+  const textPanRespondersRef = useRef({});
+  
+  // Safe seek function with debounce and error handling
+  const safeSeek = useCallback(async (positionMs) => {
+    // Clear any pending seek
+    if (seekTimeoutRef.current) {
+      clearTimeout(seekTimeoutRef.current);
+    }
+    
+    // If already seeking, wait
+    if (isSeekingRef.current) {
+      return;
+    }
+    
+    // Debounce the seek operation
+    seekTimeoutRef.current = setTimeout(async () => {
+      if (!videoRef.current) return;
+      
+      isSeekingRef.current = true;
+      try {
+        await videoRef.current.setPositionAsync(positionMs);
+      } catch (error) {
+        // Silently ignore seeking errors - they're harmless
+        if (!error?.message?.includes?.('Seeking interrupted')) {
+          console.log('Seek error:', error);
+        }
+      } finally {
+        // Reset seeking flag after a short delay
+        setTimeout(() => {
+          isSeekingRef.current = false;
+        }, 100);
+      }
+    }, 150); // 150ms debounce
+  }, []);
   const [processingMedia, setProcessingMedia] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [useProcessing, setUseProcessing] = useState(false);
@@ -124,6 +203,7 @@ const Create = () => {
     alignment: 'center',
     textStyle: 'normal', // normal, outline, shadow, neon, gradient
   });
+  const [currentTextPosition, setCurrentTextPosition] = useState({ x: 50, y: 50 });
   
   const [showTextStyles, setShowTextStyles] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -207,6 +287,23 @@ const Create = () => {
     checkServer();
   }, []);
 
+  // Update video filter CSS when adjustments change
+  useEffect(() => {
+    if (form.video) {
+      const newFilterCSS = getVideoFilterCSS();
+      setVideoFilterCSS(newFilterCSS);
+    }
+  }, [videoAdjustments, form.filter, form.video, getVideoFilterCSS]);
+
+  // Cleanup seek timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (seekTimeoutRef.current) {
+        clearTimeout(seekTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Auto-focus text input when text modal opens or when image is tapped
   useEffect(() => {
     if (showTextModal && hiddenTextInputRef.current) {
@@ -223,107 +320,165 @@ const Create = () => {
       // Request permissions
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert(t('alerts.permissionRequiredTitle'), t('alerts.permissionRequiredMessage'));
+        Alert.alert(
+          t('alerts.permissionRequiredTitle') || 'Permission Required',
+          t('alerts.permissionRequiredMessage') || 'Please grant permission to access your media library'
+        );
         return;
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const pickerOptions = {
         mediaTypes: selectType === "image" 
           ? ImagePicker.MediaTypeOptions.Images 
           : ImagePicker.MediaTypeOptions.Videos,
-        allowsEditing: true,
         quality: 0.7,
-        aspect: [16, 9],
-        videoMaxDuration: 60, // Limit to 60 seconds
         exif: false, // Don't include EXIF data
-      });
+      };
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const selectedAsset = result.assets[0];
-        let fileName = selectedAsset.fileName || selectedAsset.name || selectedAsset.uri.split('/').pop() || `file_${Date.now()}`;
-        
-        // Ensure proper file extension for Appwrite compatibility
-        if (selectType === "video") {
-          // Force .mp4 extension for videos to ensure Appwrite compatibility
-          const baseName = fileName.split('.')[0];
-          fileName = `${baseName}.mp4`;
-        } else if (selectType === "image") {
-          // Force .jpg extension for images
-          const baseName = fileName.split('.')[0];
-          fileName = `${baseName}.jpg`;
-        }
-        
-        const fileType = selectedAsset.type === 'image' ? 'image/jpeg' : selectedAsset.type === 'video' ? 'video/mp4' : selectedAsset.type;
-        const fileSize = selectedAsset.fileSize || selectedAsset.size;
-        
-        // For videos, copy the trimmed video to a permanent location
-        // This ensures the trimmed video persists and is used when posting
-        // The trimmed video from ImagePicker might be in a temporary location
-        // that gets deleted, so we copy it to a permanent location
-        let finalUri = selectedAsset.uri;
-        if (selectType === "video") {
-          try {
-            // Create a permanent file path for the trimmed video
-            const permanentPath = `${FileSystem.documentDirectory}trimmed_video_${Date.now()}.mp4`;
-            
-            // Copy the trimmed video from temporary location to permanent location
-            // This ensures the trimmed video is preserved and used when uploading
-            await FileSystem.copyAsync({
-              from: selectedAsset.uri,
-              to: permanentPath,
-            });
-            
-            // Verify the file was copied successfully
-            const fileInfo = await FileSystem.getInfoAsync(permanentPath);
-            if (fileInfo.exists) {
-              // Use the permanent path - this is the trimmed video
-              finalUri = permanentPath;
-            } else {
-              console.warn('Trimmed video copy verification failed, using original URI');
-              finalUri = selectedAsset.uri;
-            }
-          } catch (copyError) {
-            console.error('Error copying trimmed video:', copyError);
-            // If copy fails, use original URI (might still work on some platforms)
-            // but the trimmed video might not persist
+      // Add type-specific options
+      if (selectType === "image") {
+        pickerOptions.allowsEditing = true;
+        pickerOptions.aspect = [16, 9];
+      } else if (selectType === "video") {
+        pickerOptions.allowsEditing = false; // Disable editing for videos (we handle trimming separately)
+        pickerOptions.videoMaxDuration = 60; // Limit to 60 seconds
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync(pickerOptions);
+
+      // Check if user cancelled
+      if (!result || result.canceled) {
+        return; // User cancelled - not an error
+      }
+
+      // Validate result
+      if (!result.assets || result.assets.length === 0) {
+        Alert.alert('Error', 'No media selected. Please try selecting a file again.');
+        return;
+      }
+
+      const selectedAsset = result.assets[0];
+      
+      // Validate selected asset
+      if (!selectedAsset) {
+        Alert.alert('Error', 'Invalid media file selected. Please try again.');
+        return;
+      }
+
+      if (!selectedAsset.uri) {
+        Alert.alert('Error', 'Failed to get media file path. Please try again.');
+        return;
+      }
+
+      let fileName = selectedAsset.fileName || selectedAsset.name || selectedAsset.uri.split('/').pop() || `file_${Date.now()}`;
+      
+      // Ensure proper file extension for Appwrite compatibility
+      if (selectType === "video") {
+        // Force .mp4 extension for videos to ensure Appwrite compatibility
+        const baseName = fileName.split('.')[0];
+        fileName = `${baseName}.mp4`;
+      } else if (selectType === "image") {
+        // Force .jpg extension for images
+        const baseName = fileName.split('.')[0];
+        fileName = `${baseName}.jpg`;
+      }
+      
+      const fileType = selectedAsset.type === 'image' ? 'image/jpeg' : selectedAsset.type === 'video' ? 'video/mp4' : selectedAsset.type;
+      const fileSize = selectedAsset.fileSize || selectedAsset.size;
+      
+      // For videos, copy the trimmed video to a permanent location
+      // This ensures the trimmed video persists and is used when posting
+      // The trimmed video from ImagePicker might be in a temporary location
+      // that gets deleted, so we copy it to a permanent location
+      let finalUri = selectedAsset.uri;
+      if (selectType === "video") {
+        try {
+          // Create a permanent file path for the trimmed video
+          const permanentPath = `${FileSystem.documentDirectory}trimmed_video_${Date.now()}.mp4`;
+          
+          // Copy the trimmed video from temporary location to permanent location
+          // This ensures the trimmed video is preserved and used when uploading
+          await FileSystem.copyAsync({
+            from: selectedAsset.uri,
+            to: permanentPath,
+          });
+          
+          // Verify the file was copied successfully
+          const fileInfo = await FileSystem.getInfoAsync(permanentPath);
+          if (fileInfo.exists) {
+            // Use the permanent path - this is the trimmed video
+            finalUri = permanentPath;
+          } else {
+            console.warn('Trimmed video copy verification failed, using original URI');
             finalUri = selectedAsset.uri;
           }
-        }
-        
-        const file = {
-          uri: finalUri,
-          name: fileName,
-          type: fileType,
-          mimeType: fileType, // Add mimeType for iOS compatibility
-          size: fileSize,
-        };
-        
-        if (postType === 'video') {
-          if (selectType === "image") {
-            setForm({
-              ...form,
-              thumbnail: file,
-            });
-          }
-
-          if (selectType === "video") {
-            setForm({
-              ...form,
-              video: file,
-            });
-            setIsMediaEdited(false); // Reset edit flag when new video is selected
-          }
-        } else {
-          // Photo mode
-          setOriginalImage(file);
-          setEditedImage(file);
-          setPhotoForm({ ...photoForm, photo: file });
-          setIsMediaEdited(false); // Reset edit flag when new photo is selected
-          manuallySetBase64Ref.current = false; // Reset manual base64 flag when new image is selected
+        } catch (copyError) {
+          console.error('Error copying trimmed video:', copyError);
+          // If copy fails, use original URI (might still work on some platforms)
+          // but the trimmed video might not persist
+          finalUri = selectedAsset.uri;
         }
       }
+      
+      const file = {
+        uri: finalUri,
+        name: fileName,
+        type: fileType,
+        mimeType: fileType, // Add mimeType for iOS compatibility
+        size: fileSize,
+      };
+      
+      if (postType === 'video') {
+        if (selectType === "image") {
+          setForm({
+            ...form,
+            thumbnail: file,
+          });
+        }
+
+        if (selectType === "video") {
+          setForm({
+            ...form,
+            video: file,
+          });
+          setIsMediaEdited(false); // Reset edit flag when new video is selected
+          // Reset all video editing states
+          setVideoTrimStart(0);
+          setVideoTrimEnd(0);
+          setVideoDuration(0);
+          setVideoSpeed(1.0);
+          setVideoCoverTime(0);
+          setVideoVolume(1.0);
+          setVideoTextOverlays([]);
+          setVideoCrop({ x: 0, y: 0, width: 1, height: 1 });
+          setVideoRotation(0);
+          setVideoAdjustments({
+            brightness: 0,
+            contrast: 0,
+            saturation: 0,
+            warmth: 0,
+            lux: 0,
+            fade: 0,
+            highlights: 0,
+            shadows: 0,
+            structure: 0,
+          });
+        }
+      } else {
+        // Photo mode
+        setOriginalImage(file);
+        setEditedImage(file);
+        setPhotoForm({ ...photoForm, photo: file });
+        setIsMediaEdited(false); // Reset edit flag when new photo is selected
+        manuallySetBase64Ref.current = false; // Reset manual base64 flag when new image is selected
+      }
     } catch (error) {
-      Alert.alert(t("common.error"), t("alerts.mediaSelectError"));
+      console.error('Error in openPicker:', error);
+      const errorMessage = error?.message || error?.toString() || 'Unknown error occurred';
+      Alert.alert(
+        t("common.error") || 'Error',
+        t("alerts.mediaSelectError") || `Failed to select media: ${errorMessage}`
+      );
     }
   };
 
@@ -451,6 +606,69 @@ const Create = () => {
       Alert.alert(t("common.error"), "Failed to select music file");
     }
   };
+
+  // Generate video filter CSS with adjustments
+  const getVideoFilterCSS = useCallback(() => {
+    const baseFilterCSS = getFilterCSS(form.filter, null);
+    
+    // Add video adjustments to filter CSS
+    const adjustmentParts = [];
+    
+    // Brightness and Lux combined
+    let brightnessValue = 1;
+    if (videoAdjustments.brightness !== 0) {
+      brightnessValue *= (1 + (videoAdjustments.brightness / 200));
+    }
+    if (videoAdjustments.lux !== 0) {
+      brightnessValue *= (1 + (videoAdjustments.lux / 300));
+    }
+    if (brightnessValue !== 1) {
+      adjustmentParts.push(`brightness(${brightnessValue.toFixed(2)})`);
+    }
+    
+    // Contrast and Structure combined
+    let contrastValue = 1.0;
+    if (videoAdjustments.contrast !== 0) {
+      contrastValue = 0.5 + ((videoAdjustments.contrast + 100) / 200) * 1.0;
+    }
+    if (videoAdjustments.structure !== 0) {
+      const structureValue = 0.5 + ((videoAdjustments.structure + 100) / 200) * 1.0;
+      contrastValue *= structureValue;
+    }
+    if (contrastValue !== 1.0) {
+      adjustmentParts.push(`contrast(${contrastValue.toFixed(2)})`);
+    }
+    
+    // Saturation
+    if (videoAdjustments.saturation !== 0) {
+      const saturation = 1 + (videoAdjustments.saturation / 100);
+      adjustmentParts.push(`saturate(${saturation.toFixed(2)})`);
+    }
+    
+    // Warmth (hue-rotate)
+    if (videoAdjustments.warmth !== 0) {
+      const hue = (videoAdjustments.warmth / 100) * 30;
+      adjustmentParts.push(`hue-rotate(${hue.toFixed(1)}deg)`);
+    }
+    
+    // Fade (opacity + desaturate)
+    if (videoAdjustments.fade !== 0) {
+      const fade = videoAdjustments.fade / 100;
+      adjustmentParts.push(`opacity(${(1 - fade * 0.3).toFixed(2)})`);
+      adjustmentParts.push(`saturate(${(1 - fade * 0.3).toFixed(2)})`);
+    }
+    
+    // Combine base filter with adjustments
+    const allParts = [];
+    if (baseFilterCSS && baseFilterCSS !== 'none') {
+      allParts.push(baseFilterCSS);
+    }
+    if (adjustmentParts.length > 0) {
+      allParts.push(adjustmentParts.join(' '));
+    }
+    
+    return allParts.length > 0 ? allParts.join(' ') : 'none';
+  }, [form.filter, videoAdjustments, getFilterCSS]);
 
   // Apply video filter
   const applyVideoFilter = (filterId) => {
@@ -728,11 +946,68 @@ const Create = () => {
         <body>
           <img src="${imageBase64}" alt="Filtered Image" onerror="console.error('Image load error')" onload="console.log('Image loaded successfully, src length:', this.src.length)" />
           ${textOverlays.map((overlay, index) => 
-            `<div class="text-overlay-${index}">${overlay.text}</div>`
+            `<div class="text-overlay-${index}" data-overlay-id="${overlay.id || index}" data-overlay-index="${index}">${overlay.text}</div>`
           ).join('')}
           ${imageOverlays.map((overlay, index) => 
             `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
           ).join('')}
+          <script>
+            (function() {
+              const textOverlays = document.querySelectorAll('[class^="text-overlay-"]');
+              let draggedElement = null;
+              let dragOffset = { x: 0, y: 0 };
+              
+              textOverlays.forEach(function(element) {
+                element.style.cursor = 'move';
+                element.style.userSelect = 'none';
+                element.style.touchAction = 'none';
+                
+                element.addEventListener('touchstart', function(e) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  draggedElement = element;
+                  const rect = element.getBoundingClientRect();
+                  const touch = e.touches[0];
+                  dragOffset.x = touch.clientX - rect.left - rect.width / 2;
+                  dragOffset.y = touch.clientY - rect.top - rect.height / 2;
+                  element.style.opacity = '0.7';
+                }, { passive: false });
+                
+                element.addEventListener('touchmove', function(e) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (draggedElement === element) {
+                    const touch = e.touches[0];
+                    const bodyRect = document.body.getBoundingClientRect();
+                    const x = ((touch.clientX - dragOffset.x) / bodyRect.width) * 100;
+                    const y = ((touch.clientY - dragOffset.y) / bodyRect.height) * 100;
+                    
+                    const overlayId = element.getAttribute('data-overlay-id');
+                    const overlayIndex = parseInt(element.getAttribute('data-overlay-index'));
+                    
+                    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                      window.ReactNativeWebView.postMessage(JSON.stringify({
+                        type: 'textDrag',
+                        id: overlayId,
+                        index: overlayIndex,
+                        x: Math.max(0, Math.min(100, x)),
+                        y: Math.max(0, Math.min(100, y))
+                      }));
+                    }
+                  }
+                }, { passive: false });
+                
+                element.addEventListener('touchend', function(e) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (draggedElement === element) {
+                    element.style.opacity = '1';
+                    draggedElement = null;
+                  }
+                }, { passive: false });
+              });
+            })();
+          </script>
         </body>
       </html>
     `;
@@ -1166,17 +1441,46 @@ const Create = () => {
                     {form.video ? (
                       <View style={{ width: "100%", height: 256, borderRadius: 16, overflow: "hidden" }}>
                       <Video
+                        ref={videoRef}
                         source={{ uri: form.video.uri }}
                           style={{ width: "100%", height: "100%" }}
                         useNativeControls
                         resizeMode={ResizeMode.COVER}
                         isLooping
+                        rate={videoSpeed}
+                        volume={videoVolume}
+                        onLoad={(status) => {
+                          if (status.isLoaded) {
+                            const duration = status.durationMillis / 1000;
+                            setVideoDuration(duration);
+                            if (videoTrimEnd === 0) {
+                              setVideoTrimEnd(duration);
+                            }
+                          }
+                        }}
+                        onError={(error) => {
+                          // Ignore seeking interrupted errors - they're harmless
+                          if (error?.error?.includes?.('Seeking interrupted')) {
+                            return;
+                          }
+                          // Log other errors for debugging
+                          if (error?.error) {
+                            console.log('Video error:', error.error);
+                          }
+                        }}
                       />
-                        {form.filter !== 'none' && (
+                        {/* Indicators Row */}
                           <View style={{
                             position: 'absolute',
                             top: 10,
                             left: 10,
+                          flexDirection: 'row',
+                          flexWrap: 'wrap',
+                          gap: 6,
+                          maxWidth: '80%',
+                        }}>
+                          {form.filter !== 'none' && (
+                            <View style={{
                             backgroundColor: 'rgba(0,0,0,0.7)',
                             paddingHorizontal: 12,
                             paddingVertical: 6,
@@ -1187,11 +1491,72 @@ const Create = () => {
                             </Text>
                           </View>
                         )}
+                          {Object.values(videoAdjustments).some(val => val !== 0) && (
+                          <View style={{
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            borderRadius: 8,
+                          }}>
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                ✨ Adjusted
+                            </Text>
+                          </View>
+                        )}
+                          {videoSpeed !== 1 && (
+                            <View style={{
+                              backgroundColor: 'rgba(0,0,0,0.7)',
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                            }}>
+                              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                ⚡ {videoSpeed}x
+                              </Text>
+                            </View>
+                          )}
+                          {(videoTrimStart > 0 || videoTrimEnd < videoDuration) && (
+                            <View style={{
+                              backgroundColor: 'rgba(0,0,0,0.7)',
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                            }}>
+                              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                ✂️ Trimmed
+                              </Text>
+                            </View>
+                          )}
+                          {videoTextOverlays.length > 0 && (
+                            <View style={{
+                              backgroundColor: 'rgba(0,0,0,0.7)',
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                            }}>
+                              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                📝 {videoTextOverlays.length} Text
+                              </Text>
+                            </View>
+                          )}
+                          {videoRotation !== 0 && (
+                            <View style={{
+                              backgroundColor: 'rgba(0,0,0,0.7)',
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                            }}>
+                              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                🔄 {videoRotation}°
+                              </Text>
+                            </View>
+                          )}
+                        </View>
                         {form.music && (
                           <View style={{
                             position: 'absolute',
                             top: 10,
-                            right: 50,
+                            right: 10,
                             backgroundColor: 'rgba(0,0,0,0.7)',
                             paddingHorizontal: 12,
                             paddingVertical: 6,
@@ -1199,33 +1564,9 @@ const Create = () => {
                           }}>
                             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
                               🎵 Music
-                            </Text>
+                          </Text>
                           </View>
                         )}
-                        {/* Edit Button for Video */}
-                        <TouchableOpacity
-                          onPress={() => {
-                            if (form.video) {
-                              setEditingMedia({ ...form.video, mediaType: 'video' });
-                              setShowEditor(true);
-                            }
-                          }}
-                          style={{
-                            position: 'absolute',
-                            bottom: 10,
-                            right: 10,
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            padding: 12,
-                            borderRadius: 8,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 6,
-                          }}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
-                            ✏️ Edit
-                          </Text>
-                        </TouchableOpacity>
                       </View>
                     ) : (
                     <View
@@ -1305,47 +1646,192 @@ const Create = () => {
                     Video Editing Options
                   </Text>
                   
-                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                  {/* Instagram-style Editing Tools */}
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 12, paddingVertical: 4 }}
+                  >
                     <TouchableOpacity
-                      onPress={() => setShowMusicModal(true)}
+                      onPress={() => setShowVideoAdjustModal(true)}
                       style={{
-                        flex: 1,
-                        padding: 12,
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
                         borderRadius: 12,
                         backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
                         borderWidth: 1,
                         borderColor: theme.border,
                         alignItems: 'center',
-                        flexDirection: 'row',
                         justifyContent: 'center',
-                        gap: 8,
+                        minWidth: 80,
                       }}
                     >
-                      <Text style={{ color: theme.textPrimary, fontSize: 14, fontFamily: 'Poppins-Medium' }}>
-                        {form.music ? '✓ Music' : '🎵 Add Music'}
+                      <Feather name="sliders" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        Adjust
                       </Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity
                       onPress={() => setShowVideoFilterModal(true)}
                       style={{
-                        flex: 1,
-                        padding: 12,
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
                         borderRadius: 12,
                         backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
                         borderWidth: 1,
                         borderColor: theme.border,
                         alignItems: 'center',
-                        flexDirection: 'row',
                         justifyContent: 'center',
-                        gap: 8,
+                        minWidth: 80,
                       }}
                     >
-                      <Text style={{ color: theme.textPrimary, fontSize: 14, fontFamily: 'Poppins-Medium' }}>
-                        {form.filter !== 'none' ? `✓ ${FILTERS.find(f => f.id === form.filter)?.name}` : '🎨 Filters'}
+                      <Feather name="image" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        {form.filter !== 'none' ? FILTERS.find(f => f.id === form.filter)?.name : 'Filters'}
                       </Text>
                     </TouchableOpacity>
-                  </View>
+                    
+                    <TouchableOpacity
+                      onPress={() => setShowTrimModal(true)}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 80,
+                      }}
+                    >
+                      <Feather name="scissors" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        Trim
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => setShowSpeedModal(true)}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 80,
+                      }}
+                    >
+                      <Feather name="zap" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        {videoSpeed !== 1 ? `${videoSpeed}x` : 'Speed'}
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => setShowCoverModal(true)}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 80,
+                      }}
+                    >
+                      <Feather name="image" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        Cover
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => setShowVolumeModal(true)}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 80,
+                      }}
+                    >
+                      <Feather name="volume-2" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        Volume
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => setShowVideoTextModal(true)}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 80,
+                      }}
+                    >
+                      <Feather name="type" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        Text
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => setShowCropModal(true)}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 80,
+                      }}
+                    >
+                      <Feather name="crop" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        Crop
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => setShowMusicModal(true)}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: 12,
+                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 80,
+                      }}
+                    >
+                      <Feather name="music" size={20} color={theme.textPrimary} />
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontFamily: 'Poppins-Medium', marginTop: 4 }}>
+                        {form.music ? 'Music' : 'Music'}
+                      </Text>
+                    </TouchableOpacity>
+                  </ScrollView>
 
                   {form.music && (
                     <TouchableOpacity
@@ -1426,6 +1912,21 @@ const Create = () => {
                           scrollEnabled={false}
                           showsVerticalScrollIndicator={false}
                           showsHorizontalScrollIndicator={false}
+                          javaScriptEnabled={true}
+                          onMessage={(event) => {
+                            try {
+                              const message = JSON.parse(event.nativeEvent.data);
+                              if (message.type === 'textDrag') {
+                                setTextOverlays(prev => prev.map((overlay, index) => 
+                                  (overlay.id === message.id || index === message.index) 
+                                    ? { ...overlay, x: message.x, y: message.y }
+                                    : overlay
+                                ));
+                              }
+                            } catch (error) {
+                              console.log('Error parsing WebView message:', error);
+                            }
+                          }}
                         />
                       ) : (
                         <View style={{ width: "100%", height: 400, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.surface }}>
@@ -1594,6 +2095,7 @@ const Create = () => {
                                   alignment: 'center',
                                   textStyle: 'normal',
                                 });
+                                setCurrentTextPosition({ x: 50, y: 50 });
                                 setShowTextModal(true);
                               }}
                               style={{
@@ -2574,6 +3076,701 @@ const Create = () => {
               </View>
             </Modal>
 
+            {/* Video Adjustments Modal - Instagram-style */}
+            <Modal
+              visible={showVideoAdjustModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowVideoAdjustModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.95)',
+              }}>
+                {/* Header */}
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: Platform.OS === 'ios' ? 50 : 20,
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.1)',
+                }}>
+                  <TouchableOpacity onPress={() => setShowVideoAdjustModal(false)}>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Adjust</Text>
+                  <TouchableOpacity onPress={() => {
+                    // Reset all adjustments
+                    setVideoAdjustments({
+                      brightness: 0,
+                      contrast: 0,
+                      saturation: 0,
+                      warmth: 0,
+                      lux: 0,
+                      fade: 0,
+                      highlights: 0,
+                      shadows: 0,
+                      structure: 0,
+                    });
+                    setSelectedVideoTool(null);
+                  }}>
+                    <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Video Preview */}
+                <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+                  {form.video && (
+                    <Video
+                      source={{ uri: form.video.uri }}
+                      style={{ width: '100%', height: '100%' }}
+                      resizeMode={ResizeMode.CONTAIN}
+                      shouldPlay={false}
+                      isLooping={false}
+                    />
+                  )}
+                </View>
+
+                {/* Tools Selection */}
+                {!selectedVideoTool && (
+                  <View style={{
+                    borderTopWidth: 1,
+                    borderTopColor: 'rgba(255,255,255,0.1)',
+                    paddingVertical: 12,
+                  }}>
+                    <ScrollView 
+                      horizontal 
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ paddingHorizontal: 16, gap: 16 }}
+                    >
+                      {[
+                        { id: 'brightness', name: 'Brightness', icon: 'sun' },
+                        { id: 'contrast', name: 'Contrast', icon: 'layers' },
+                        { id: 'saturation', name: 'Saturation', icon: 'droplet' },
+                        { id: 'warmth', name: 'Warmth', icon: 'thermometer' },
+                        { id: 'lux', name: 'Lux', icon: 'sun' },
+                        { id: 'fade', name: 'Fade', icon: 'minus-circle' },
+                        { id: 'highlights', name: 'Highlights', icon: 'circle' },
+                        { id: 'shadows', name: 'Shadows', icon: 'moon' },
+                        { id: 'structure', name: 'Structure', icon: 'grid' },
+                      ].map((tool) => (
+                        <TouchableOpacity
+                          key={tool.id}
+                          onPress={() => setSelectedVideoTool(tool.id)}
+                          style={{
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 70,
+                            gap: 8,
+                          }}
+                        >
+                          <Feather name={tool.icon} size={24} color="#fff" />
+                          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '500' }}>{tool.name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+
+                {/* Slider for selected tool */}
+                {selectedVideoTool && (
+                  <View style={{
+                    borderTopWidth: 1,
+                    borderTopColor: 'rgba(255,255,255,0.1)',
+                    paddingVertical: 20,
+                    paddingHorizontal: 16,
+                  }}>
+                    <View style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: 20,
+                    }}>
+                      <TouchableOpacity onPress={() => setSelectedVideoTool(null)}>
+                        <Feather name="chevron-left" size={24} color="#fff" />
+                      </TouchableOpacity>
+                      <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
+                        {[
+                          { id: 'brightness', name: 'Brightness' },
+                          { id: 'contrast', name: 'Contrast' },
+                          { id: 'saturation', name: 'Saturation' },
+                          { id: 'warmth', name: 'Warmth' },
+                          { id: 'lux', name: 'Lux' },
+                          { id: 'fade', name: 'Fade' },
+                          { id: 'highlights', name: 'Highlights' },
+                          { id: 'shadows', name: 'Shadows' },
+                          { id: 'structure', name: 'Structure' },
+                        ].find(t => t.id === selectedVideoTool)?.name}
+                      </Text>
+                      <TouchableOpacity 
+                        onPress={() => {
+                          setVideoAdjustments(prev => ({ ...prev, [selectedVideoTool]: 0 }));
+                        }}
+                      >
+                        <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Reset</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Slider
+                      style={{ width: '100%', height: 40 }}
+                      minimumValue={-100}
+                      maximumValue={100}
+                      value={videoAdjustments[selectedVideoTool] || 0}
+                      onValueChange={(value) => {
+                        setVideoAdjustments(prev => ({ ...prev, [selectedVideoTool]: Math.round(value) }));
+                      }}
+                      minimumTrackTintColor="#fff"
+                      maximumTrackTintColor="rgba(255,255,255,0.3)"
+                      thumbTintColor="#fff"
+                    />
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 8 }}>
+                      {videoAdjustments[selectedVideoTool] || 0}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </Modal>
+
+            {/* Video Trim Modal */}
+            <Modal
+              visible={showTrimModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowTrimModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.95)',
+              }}>
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: Platform.OS === 'ios' ? 50 : 20,
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.1)',
+                }}>
+                  <TouchableOpacity onPress={() => setShowTrimModal(false)}>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Trim Video</Text>
+                  <TouchableOpacity onPress={() => {
+                    setVideoTrimStart(0);
+                    setVideoTrimEnd(videoDuration);
+                    setShowTrimModal(false);
+                  }}>
+                    <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  {form.video && (
+                    <Video
+                      ref={videoRef}
+                      source={{ uri: form.video.uri }}
+                      style={{ width: '100%', height: 300 }}
+                      resizeMode={ResizeMode.CONTAIN}
+                      shouldPlay={false}
+                      onLoad={(status) => {
+                        if (status.isLoaded) {
+                          const duration = status.durationMillis / 1000;
+                          setVideoDuration(duration);
+                          setVideoTrimEnd(duration);
+                        }
+                      }}
+                    />
+                  )}
+                  
+                  <View style={{ width: '100%', marginTop: 30, paddingHorizontal: 20 }}>
+                    <Text style={{ color: '#fff', fontSize: 14, marginBottom: 10 }}>
+                      Start: {Math.floor(videoTrimStart)}s
+                    </Text>
+                    <Slider
+                      style={{ width: '100%', height: 40 }}
+                      minimumValue={0}
+                      maximumValue={videoDuration}
+                      value={videoTrimStart}
+                      onValueChange={(value) => {
+                        setVideoTrimStart(value);
+                      }}
+                      onSlidingComplete={async (value) => {
+                        // Only seek when user stops dragging
+                        if (videoRef.current) {
+                          try {
+                            await videoRef.current.setPositionAsync(value * 1000);
+                          } catch (error) {
+                            // Ignore seeking errors
+                            console.log('Seek error (ignored):', error);
+                          }
+                        }
+                      }}
+                      minimumTrackTintColor="#007AFF"
+                      maximumTrackTintColor="rgba(255,255,255,0.3)"
+                      thumbTintColor="#007AFF"
+                    />
+                    
+                    <Text style={{ color: '#fff', fontSize: 14, marginTop: 20, marginBottom: 10 }}>
+                      End: {Math.floor(videoTrimEnd)}s
+                    </Text>
+                    <Slider
+                      style={{ width: '100%', height: 40 }}
+                      minimumValue={0}
+                      maximumValue={videoDuration}
+                      value={videoTrimEnd}
+                      onValueChange={(value) => {
+                        if (value > videoTrimStart) {
+                          setVideoTrimEnd(value);
+                        }
+                      }}
+                      onSlidingComplete={(value) => {
+                        // Preview end position
+                        if (value > videoTrimStart) {
+                          safeSeek(value * 1000);
+                        }
+                      }}
+                      minimumTrackTintColor="#007AFF"
+                      maximumTrackTintColor="rgba(255,255,255,0.3)"
+                      thumbTintColor="#007AFF"
+                    />
+                    
+                    <Text style={{ color: '#fff', fontSize: 12, marginTop: 20, textAlign: 'center' }}>
+                      Duration: {Math.floor(videoTrimEnd - videoTrimStart)}s
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+
+            {/* Video Speed Modal */}
+            <Modal
+              visible={showSpeedModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowSpeedModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.95)',
+              }}>
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: Platform.OS === 'ios' ? 50 : 20,
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.1)',
+                }}>
+                  <TouchableOpacity onPress={() => setShowSpeedModal(false)}>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Speed</Text>
+                  <TouchableOpacity onPress={() => {
+                    setVideoSpeed(1.0);
+                    setShowSpeedModal(false);
+                  }}>
+                    <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    {[0.3, 0.5, 1, 2, 3].map((speed) => (
+                      <TouchableOpacity
+                        key={speed}
+                        onPress={() => setVideoSpeed(speed)}
+                        style={{
+                          paddingVertical: 16,
+                          paddingHorizontal: 24,
+                          borderRadius: 12,
+                          backgroundColor: videoSpeed === speed ? '#007AFF' : 'rgba(255,255,255,0.1)',
+                          minWidth: 80,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
+                          {speed}x
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  
+                  <Text style={{ color: '#fff', fontSize: 16, marginTop: 30, fontWeight: '600' }}>
+                    Selected: {videoSpeed}x
+                  </Text>
+                </View>
+              </View>
+            </Modal>
+
+            {/* Video Cover/Thumbnail Modal */}
+            <Modal
+              visible={showCoverModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowCoverModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.95)',
+              }}>
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: Platform.OS === 'ios' ? 50 : 20,
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.1)',
+                }}>
+                  <TouchableOpacity onPress={() => setShowCoverModal(false)}>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Select Cover</Text>
+                  <TouchableOpacity onPress={async () => {
+                    // Capture frame at current time as thumbnail
+                    if (form.video && videoRef.current) {
+                      try {
+                        // This would need video frame extraction - for now just save the time
+                        setForm({ ...form, thumbnail: { time: videoCoverTime } });
+                        setShowCoverModal(false);
+                        Alert.alert('Success', 'Cover frame selected');
+                      } catch (error) {
+                        Alert.alert('Error', 'Failed to set cover frame');
+                      }
+                    }
+                  }}>
+                    <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  {form.video && (
+                    <Video
+                      ref={videoRef}
+                      source={{ uri: form.video.uri }}
+                      style={{ width: '100%', height: 400 }}
+                      resizeMode={ResizeMode.CONTAIN}
+                      shouldPlay={false}
+                      onLoad={(status) => {
+                        if (status.isLoaded) {
+                          const duration = status.durationMillis / 1000;
+                          setVideoDuration(duration);
+                          setVideoCoverTime(duration / 2);
+                        }
+                      }}
+                      onError={(error) => {
+                        // Ignore seeking interrupted errors
+                        if (error?.error?.includes?.('Seeking interrupted')) {
+                          return;
+                        }
+                      }}
+                    />
+                  )}
+                  
+                  <View style={{ width: '100%', marginTop: 30, paddingHorizontal: 20 }}>
+                    <Text style={{ color: '#fff', fontSize: 14, marginBottom: 10, textAlign: 'center' }}>
+                      {Math.floor(videoCoverTime)}s / {Math.floor(videoDuration)}s
+                    </Text>
+                    <Slider
+                      style={{ width: '100%', height: 40 }}
+                      minimumValue={0}
+                      maximumValue={videoDuration}
+                      value={videoCoverTime}
+                      onValueChange={(value) => {
+                        setVideoCoverTime(value);
+                      }}
+                      onSlidingComplete={(value) => {
+                        // Only seek when user stops dragging
+                        safeSeek(value * 1000);
+                      }}
+                      minimumTrackTintColor="#007AFF"
+                      maximumTrackTintColor="rgba(255,255,255,0.3)"
+                      thumbTintColor="#007AFF"
+                    />
+                    <TouchableOpacity
+                      onPress={async () => {
+                        if (videoRef.current) {
+                          try {
+                            await safeSeek(videoCoverTime * 1000);
+                            await videoRef.current.playAsync();
+                            setTimeout(async () => {
+                              try {
+                                await videoRef.current?.pauseAsync();
+                              } catch (error) {
+                                // Ignore pause errors
+                              }
+                            }, 200);
+                          } catch (error) {
+                            // Ignore preview errors
+                          }
+                        }
+                      }}
+                      style={{
+                        marginTop: 20,
+                        backgroundColor: '#007AFF',
+                        padding: 12,
+                        borderRadius: 8,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Preview Frame</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+
+            {/* Video Volume Modal */}
+            <Modal
+              visible={showVolumeModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowVolumeModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.95)',
+              }}>
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: Platform.OS === 'ios' ? 50 : 20,
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.1)',
+                }}>
+                  <TouchableOpacity onPress={() => setShowVolumeModal(false)}>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Volume</Text>
+                  <TouchableOpacity onPress={() => {
+                    setVideoVolume(1.0);
+                    setShowVolumeModal(false);
+                  }}>
+                    <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  <Feather 
+                    name={videoVolume === 0 ? 'volume-x' : videoVolume < 0.5 ? 'volume-1' : 'volume-2'} 
+                    size={60} 
+                    color="#fff" 
+                  />
+                  
+                  <View style={{ width: '100%', marginTop: 40, paddingHorizontal: 20 }}>
+                    <Text style={{ color: '#fff', fontSize: 16, marginBottom: 20, textAlign: 'center' }}>
+                      {Math.round(videoVolume * 100)}%
+                    </Text>
+                    <Slider
+                      style={{ width: '100%', height: 40 }}
+                      minimumValue={0}
+                      maximumValue={1}
+                      value={videoVolume}
+                      onValueChange={setVideoVolume}
+                      minimumTrackTintColor="#007AFF"
+                      maximumTrackTintColor="rgba(255,255,255,0.3)"
+                      thumbTintColor="#007AFF"
+                    />
+                  </View>
+                </View>
+              </View>
+            </Modal>
+
+            {/* Video Text Overlay Modal */}
+            <Modal
+              visible={showVideoTextModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowVideoTextModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.95)',
+              }}>
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: Platform.OS === 'ios' ? 50 : 20,
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.1)',
+                }}>
+                  <TouchableOpacity onPress={() => {
+                    setShowVideoTextModal(false);
+                    setCurrentVideoText('');
+                  }}>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Add Text</Text>
+                  <TouchableOpacity onPress={() => {
+                    if (currentVideoText.trim()) {
+                      setVideoTextOverlays([...videoTextOverlays, {
+                        id: Date.now(),
+                        text: currentVideoText,
+                        x: 50,
+                        y: 50,
+                        style: { ...currentTextStyle },
+                      }]);
+                      setCurrentVideoText('');
+                    }
+                  }}>
+                    <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Add</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flex: 1, padding: 20 }}>
+                  <TextInput
+                    placeholder="Enter text..."
+                    placeholderTextColor="rgba(255,255,255,0.5)"
+                    value={currentVideoText}
+                    onChangeText={setCurrentVideoText}
+                    style={{
+                      backgroundColor: 'rgba(255,255,255,0.1)',
+                      borderRadius: 12,
+                      padding: 16,
+                      color: '#fff',
+                      fontSize: 16,
+                      marginBottom: 20,
+                    }}
+                    multiline
+                  />
+                  
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      {TEXT_COLORS.slice(0, 10).map((color) => (
+                        <TouchableOpacity
+                          key={color}
+                          onPress={() => setCurrentTextStyle({ ...currentTextStyle, color })}
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 20,
+                            backgroundColor: color,
+                            borderWidth: currentTextStyle.color === color ? 3 : 0,
+                            borderColor: '#007AFF',
+                          }}
+                        />
+                      ))}
+                    </View>
+                  </ScrollView>
+                  
+                  {videoTextOverlays.length > 0 && (
+                    <View>
+                      <Text style={{ color: '#fff', fontSize: 14, marginBottom: 10 }}>
+                        Text Overlays ({videoTextOverlays.length})
+                      </Text>
+                      {videoTextOverlays.map((overlay) => (
+                        <View key={overlay.id} style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          backgroundColor: 'rgba(255,255,255,0.1)',
+                          padding: 12,
+                          borderRadius: 8,
+                          marginBottom: 8,
+                        }}>
+                          <Text style={{ color: '#fff', flex: 1 }}>{overlay.text}</Text>
+                          <TouchableOpacity onPress={() => {
+                            setVideoTextOverlays(videoTextOverlays.filter(o => o.id !== overlay.id));
+                          }}>
+                            <Feather name="x" size={20} color="#ff3b30" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+            </Modal>
+
+            {/* Video Crop/Rotate Modal */}
+            <Modal
+              visible={showCropModal}
+              transparent={true}
+              animationType="slide"
+              onRequestClose={() => setShowCropModal(false)}
+            >
+              <View style={{
+                flex: 1,
+                backgroundColor: 'rgba(0,0,0,0.95)',
+              }}>
+                <View style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: Platform.OS === 'ios' ? 50 : 20,
+                  paddingBottom: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: 'rgba(255,255,255,0.1)',
+                }}>
+                  <TouchableOpacity onPress={() => setShowCropModal(false)}>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Crop & Rotate</Text>
+                  <TouchableOpacity onPress={() => {
+                    setVideoCrop({ x: 0, y: 0, width: 1, height: 1 });
+                    setVideoRotation(0);
+                    setShowCropModal(false);
+                  }}>
+                    <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  {form.video && (
+                    <Video
+                      source={{ uri: form.video.uri }}
+                      style={{ 
+                        width: '100%', 
+                        height: 300,
+                        transform: [{ rotate: `${videoRotation}deg` }],
+                      }}
+                      resizeMode={ResizeMode.CONTAIN}
+                      shouldPlay={false}
+                    />
+                  )}
+                  
+                  <View style={{ width: '100%', marginTop: 30 }}>
+                    <Text style={{ color: '#fff', fontSize: 16, marginBottom: 20, textAlign: 'center' }}>
+                      Rotation: {videoRotation}°
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center', marginBottom: 20 }}>
+                      {[0, 90, 180, 270].map((angle) => (
+                        <TouchableOpacity
+                          key={angle}
+                          onPress={() => setVideoRotation(angle)}
+                          style={{
+                            paddingVertical: 12,
+                            paddingHorizontal: 20,
+                            borderRadius: 8,
+                            backgroundColor: videoRotation === angle ? '#007AFF' : 'rgba(255,255,255,0.1)',
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 16 }}>{angle}°</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    
+                    <Text style={{ color: '#fff', fontSize: 14, marginBottom: 10, textAlign: 'center' }}>
+                      Crop (coming soon - requires video processing)
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+
             {/* Instagram-style Text Editor Modal - EXACT MATCH */}
             <Modal
               visible={showTextModal}
@@ -2592,19 +3789,11 @@ const Create = () => {
                 }}>
                   {/* Full-screen preview with text overlay */}
                   {editedImage && imageBase64 ? (
-                    <TouchableOpacity 
-                      activeOpacity={1}
+                    <View 
                       style={{ flex: 1, backgroundColor: '#000' }}
-                      onPress={() => {
-                        // Focus the hidden text input to open keyboard
-                        if (hiddenTextInputRef.current) {
-                          hiddenTextInputRef.current.focus();
-                        }
-                      }}
-                      pointerEvents="box-none"
                     >
                       <WebView
-                        key={`text-preview-base-${editedImage?.uri || 'none'}`}
+                        key={`text-preview-${editedImage?.uri || 'none'}-${textOverlays.length}-${currentTextPosition.x}-${currentTextPosition.y}`}
                         source={{
                           html: `
                             <!DOCTYPE html>
@@ -2643,23 +3832,30 @@ const Create = () => {
                                     const textStyle = overlay.style || currentTextStyle;
                                     const alignment = textStyle.alignment || 'center';
                                     
-                                    // Calculate positioning based on alignment
+                                    // Use x/y from overlay if set (from dragging), otherwise use alignment-based positioning
                                     let leftPos, transformValue;
-                                    if (alignment === 'left') {
-                                      leftPos = '5%';
-                                      transformValue = 'translateY(-50%)';
-                                    } else if (alignment === 'right') {
-                                      leftPos = '95%';
-                                      transformValue = 'translate(-100%, -50%)';
-                                    } else {
-                                      // center
-                                      leftPos = '50%';
+                                    if (overlay.x !== undefined && overlay.y !== undefined) {
+                                      // Dragged position - use center transform
+                                      leftPos = overlay.x + '%';
                                       transformValue = 'translate(-50%, -50%)';
+                                    } else {
+                                      // Initial position based on alignment
+                                      if (alignment === 'left') {
+                                        leftPos = '5%';
+                                        transformValue = 'translateY(-50%)';
+                                      } else if (alignment === 'right') {
+                                        leftPos = '95%';
+                                        transformValue = 'translate(-100%, -50%)';
+                                      } else {
+                                        // center
+                                        leftPos = '50%';
+                                        transformValue = 'translate(-50%, -50%)';
+                                      }
                                     }
                                     
                                     let textCSS = `
                                       position: absolute;
-                                      top: ${overlay.y || 50}%;
+                                      top: ${overlay.y !== undefined ? overlay.y : 50}%;
                                       left: ${leftPos};
                                       transform: ${transformValue};
                                       font-size: ${textStyle.fontSize}px;
@@ -2668,6 +3864,11 @@ const Create = () => {
                                       text-align: ${alignment};
                                       white-space: nowrap;
                                       z-index: ${index + 1};
+                                      pointer-events: auto;
+                                      touch-action: none;
+                                      -webkit-user-select: none;
+                                      user-select: none;
+                                      cursor: move;
                                     `;
                                     
                                     if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
@@ -2699,20 +3900,7 @@ const Create = () => {
                                     }`;
                                   }).join('\n')}
                                   ${currentText ? (() => {
-                                    const alignment = currentTextStyle.alignment || 'center';
-                                    let leftPos, transformValue;
-                                    if (alignment === 'left') {
-                                      leftPos = '5%';
-                                      transformValue = 'translateY(-50%)';
-                                    } else if (alignment === 'right') {
-                                      leftPos = '95%';
-                                      transformValue = 'translate(-100%, -50%)';
-                                    } else {
-                                      leftPos = '50%';
-                                      transformValue = 'translate(-50%, -50%)';
-                                    }
-                                    
-                                    let css = '.current-text { position: absolute; top: 50%; left: ' + leftPos + '; transform: ' + transformValue + '; font-size: ' + currentTextStyle.fontSize + 'px; font-family: \'' + currentTextStyle.fontFamily + '\', sans-serif; color: ' + currentTextStyle.color + '; text-align: ' + alignment + '; white-space: nowrap; z-index: 1000;';
+                                    let css = '.current-text { position: absolute; top: ' + currentTextPosition.y + '%; left: ' + currentTextPosition.x + '%; transform: translate(-50%, -50%); font-size: ' + currentTextStyle.fontSize + 'px; font-family: \'' + currentTextStyle.fontFamily + '\', sans-serif; color: ' + currentTextStyle.color + '; text-align: center; white-space: nowrap; z-index: 1000; pointer-events: auto; touch-action: none; -webkit-user-select: none; user-select: none; cursor: move;';
                                     
                                     if (currentTextStyle.backgroundColor && currentTextStyle.backgroundColor !== 'transparent') {
                                       css += ' background-color: ' + currentTextStyle.backgroundColor + '; padding: 4px 8px; border-radius: 4px;';
@@ -2736,12 +3924,98 @@ const Create = () => {
                               <body>
                                 <img src="${imageBase64}" alt="Image with Text" />
                                 ${textOverlays.map((overlay, index) => 
-                                  `<div class="text-overlay-${index}">${overlay.text}</div>`
+                                  `<div class="text-overlay-${index}" data-overlay-id="${overlay.id || index}" data-overlay-index="${index}">${overlay.text}</div>`
                                 ).join('')}
                                 ${imageOverlays.map((overlay, index) => 
                                   `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
                                 ).join('')}
                                 ${currentText ? `<div class="current-text">${currentText}</div>` : ''}
+                                <script>
+                                  setTimeout(function() {
+                                    const textOverlays = document.querySelectorAll('[class^="text-overlay-"]');
+                                    const currentTextElement = document.querySelector('.current-text');
+                                    let draggedElement = null;
+                                    let dragOffset = { x: 0, y: 0 };
+                                    
+                                    // Function to handle dragging for both overlay texts and current text
+                                    function setupDraggableElement(element, isCurrentText = false) {
+                                      element.style.cursor = 'move';
+                                      element.style.userSelect = 'none';
+                                      element.style.touchAction = 'none';
+                                      element.style.pointerEvents = 'auto';
+                                      
+                                      function handleStart(e) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        draggedElement = element;
+                                        const rect = element.getBoundingClientRect();
+                                        const touch = e.touches[0];
+                                        dragOffset.x = touch.clientX - rect.left - rect.width / 2;
+                                        dragOffset.y = touch.clientY - rect.top - rect.height / 2;
+                                        element.style.opacity = '0.7';
+                                      }
+                                      
+                                      function handleMove(e) {
+                                        if (draggedElement === element) {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          const touch = e.touches[0];
+                                          const bodyRect = document.body.getBoundingClientRect();
+                                          const x = ((touch.clientX - dragOffset.x) / bodyRect.width) * 100;
+                                          const y = ((touch.clientY - dragOffset.y) / bodyRect.height) * 100;
+                                          
+                                          if (isCurrentText) {
+                                            // For current text, send currentTextDrag message
+                                            if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                                              window.ReactNativeWebView.postMessage(JSON.stringify({
+                                                type: 'currentTextDrag',
+                                                x: Math.max(0, Math.min(100, x)),
+                                                y: Math.max(0, Math.min(100, y))
+                                              }));
+                                            }
+                                          } else {
+                                            // For overlay texts
+                                            const overlayId = element.getAttribute('data-overlay-id');
+                                            const overlayIndex = parseInt(element.getAttribute('data-overlay-index'));
+                                            
+                                            if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                                              window.ReactNativeWebView.postMessage(JSON.stringify({
+                                                type: 'textDrag',
+                                                id: overlayId,
+                                                index: overlayIndex,
+                                                x: Math.max(0, Math.min(100, x)),
+                                                y: Math.max(0, Math.min(100, y))
+                                              }));
+                                            }
+                                          }
+                                        }
+                                      }
+                                      
+                                      function handleEnd(e) {
+                                        if (draggedElement === element) {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          element.style.opacity = '1';
+                                          draggedElement = null;
+                                        }
+                                      }
+                                      
+                                      element.addEventListener('touchstart', handleStart, { passive: false });
+                                      element.addEventListener('touchmove', handleMove, { passive: false });
+                                      element.addEventListener('touchend', handleEnd, { passive: false });
+                                    }
+                                    
+                                    // Setup draggable for overlay texts
+                                    textOverlays.forEach(function(element) {
+                                      setupDraggableElement(element, false);
+                                    });
+                                    
+                                    // Setup draggable for current text if it exists
+                                    if (currentTextElement) {
+                                      setupDraggableElement(currentTextElement, true);
+                                    }
+                                  }, 100);
+                                </script>
                               </body>
                             </html>
                           `
@@ -2755,9 +4029,16 @@ const Create = () => {
                         androidLayerType="hardware"
                         originWhitelist={['*']}
                         javaScriptEnabled={true}
-                        cacheEnabled={true}
-                        cacheMode="LOAD_CACHE_ELSE_NETWORK"
-                        renderToHardwareTextureAndroid={true}
+                        cacheEnabled={false}
+                        cacheMode="LOAD_NO_CACHE"
+                        renderToHardwareTextureAndroid={false}
+                        androidHardwareAccelerationDisabled={false}
+                        nestedScrollEnabled={false}
+                        startInLoadingState={false}
+                        mixedContentMode="always"
+                        allowsInlineMediaPlayback={true}
+                        mediaPlaybackRequiresUserAction={false}
+                        onShouldStartLoadWithRequest={() => true}
                         onError={(syntheticEvent) => {
                           const { nativeEvent } = syntheticEvent;
                           console.warn('WebView error: ', nativeEvent);
@@ -2765,8 +4046,25 @@ const Create = () => {
                         onLoadEnd={() => {
                           // WebView loaded successfully
                         }}
+                        onMessage={(event) => {
+                          try {
+                            const message = JSON.parse(event.nativeEvent.data);
+                            if (message.type === 'textDrag') {
+                              setTextOverlays(prev => prev.map((overlay, index) => 
+                                (overlay.id === message.id || index === message.index) 
+                                  ? { ...overlay, x: message.x, y: message.y }
+                                  : overlay
+                              ));
+                            } else if (message.type === 'currentTextDrag') {
+                              setCurrentTextPosition({ x: message.x, y: message.y });
+                            }
+                          } catch (error) {
+                            console.log('Error parsing WebView message:', error);
+                          }
+                        }}
+                        ref={textWebViewRef}
                       />
-                    </TouchableOpacity>
+                    </View>
                   ) : (
                     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
                       <Text style={{ color: '#fff' }}>No image selected</Text>
@@ -2796,6 +4094,7 @@ const Create = () => {
                         onPress={() => {
                           setShowTextModal(false);
                           setCurrentText('');
+                          setCurrentTextPosition({ x: 50, y: 50 });
                           setShowTextStyles(false);
                           setShowColorPicker(false);
                           setShowBackgroundColors(false);
@@ -2833,8 +4132,8 @@ const Create = () => {
                             setTextOverlays([...textOverlays, {
                               text: currentText,
                               style: { ...currentTextStyle },
-                              x: 50,
-                              y: 50,
+                              x: currentTextPosition.x,
+                              y: currentTextPosition.y,
                               id: Date.now().toString(),
                             }]);
                             setCurrentText('');
@@ -2846,6 +4145,7 @@ const Create = () => {
                               alignment: 'center',
                               textStyle: 'normal',
                             });
+                            setCurrentTextPosition({ x: 50, y: 50 });
                           }
                           setShowTextModal(false);
                           setShowTextStyles(false);

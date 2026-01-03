@@ -248,10 +248,10 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
             // Wait a bit to ensure filter is applied and image is ready
             setTimeout(function() {
               try {
-                // Create canvas to capture the filtered image
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
+        // Create canvas to capture the filtered image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
                 // Get image dimensions - use natural dimensions for best quality
                 const imgWidth = imageElement.naturalWidth || imageElement.width;
                 const imgHeight = imageElement.naturalHeight || imageElement.height;
@@ -428,11 +428,11 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                 }
                 
                 // Convert to data URL with high quality
-                const dataURL = canvas.toDataURL('image/jpeg', 0.95);
+            const dataURL = canvas.toDataURL('image/jpeg', 0.95);
                 console.log('Successfully captured image, dataURL length:', dataURL.length);
                 console.log('Filter used:', currentFilter);
-                resolve(dataURL);
-              } catch (error) {
+            resolve(dataURL);
+          } catch (error) {
                 console.error('Error capturing image:', error);
                 console.error('Error stack:', error.stack);
                 reject(error);
@@ -475,7 +475,7 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
     };
   </script>
 </body>
-      </html>
+</html>
     `;
   }, [imageBase64, adjustments, generateFilterCSS]);
 
@@ -565,18 +565,18 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
               // Wait a moment for filter to apply, then capture
               setTimeout(function() {
                 console.log('Starting image capture with filter:', filterCSS);
-                try {
-                  if (typeof getImageData === 'function') {
+            try {
+              if (typeof getImageData === 'function') {
                     // Pass the filter CSS to ensure it's applied
                     console.log('Calling getImageData with filter:', filterCSS);
                     getImageData(filterCSS).then(function(dataURL) {
                       console.log('getImageData succeeded, dataURL length:', dataURL ? dataURL.length : 0);
-                      window.ReactNativeWebView.postMessage(JSON.stringify({
-                        type: 'imageData',
-                        data: dataURL
-                      }));
-                    }).catch(function(error) {
-                      console.error('Error getting image data:', error);
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'imageData',
+                    data: dataURL
+                  }));
+                }).catch(function(error) {
+                  console.error('Error getting image data:', error);
                       console.error('Error stack:', error.stack);
                       // Fallback: try direct capture with manual filter application
                       try {
@@ -654,22 +654,22 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                         }));
                       } catch (fallbackError) {
                         console.error('Fallback capture also failed:', fallbackError);
-                        window.ReactNativeWebView.postMessage(JSON.stringify({
-                          type: 'error',
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'error',
                           message: fallbackError.message || 'Failed to capture image'
-                        }));
+                  }));
                       }
-                    });
-                  } else {
+                });
+              } else {
                     // Fallback: direct canvas capture with manual filters
                     if (img.complete && (img.naturalWidth > 0 || img.width > 0)) {
-                      const canvas = document.createElement('canvas');
-                      const ctx = canvas.getContext('2d');
-                      canvas.width = img.naturalWidth || img.width;
-                      canvas.height = img.naturalHeight || img.height;
+                  const canvas = document.createElement('canvas');
+                  const ctx = canvas.getContext('2d');
+                  canvas.width = img.naturalWidth || img.width;
+                  canvas.height = img.naturalHeight || img.height;
                       
                       // Draw image first
-                      ctx.drawImage(img, 0, 0);
+                  ctx.drawImage(img, 0, 0);
                       
                       // Apply filters manually if needed
                       if (filterCSS && filterCSS !== 'none') {
@@ -720,22 +720,22 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                         ctx.putImageData(imageData, 0, 0);
                       }
                       
-                      const dataURL = canvas.toDataURL('image/jpeg', 0.95);
-                      window.ReactNativeWebView.postMessage(JSON.stringify({
-                        type: 'imageData',
-                        data: dataURL
-                      }));
-                    } else {
-                      window.ReactNativeWebView.postMessage(JSON.stringify({
-                        type: 'error',
-                        message: 'Image not loaded'
-                      }));
-                    }
-                  }
-                } catch(e) {
-                  console.error('Error in save:', e);
+                  const dataURL = canvas.toDataURL('image/jpeg', 0.95);
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'imageData',
+                    data: dataURL
+                  }));
+                } else {
                   window.ReactNativeWebView.postMessage(JSON.stringify({
                     type: 'error',
+                    message: 'Image not loaded'
+                  }));
+                }
+              }
+            } catch(e) {
+              console.error('Error in save:', e);
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'error',
                     message: e.message || 'Failed to export image'
                   }));
                 }
