@@ -515,21 +515,59 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             // Get filter and adjustments from item
             const filterId = item.filter || 'none';
             let adjustments = null;
+            let textOverlays = [];
+            let imageOverlays = [];
+            
             if (item.edits) {
               try {
                 const edits = typeof item.edits === 'string' ? JSON.parse(item.edits) : item.edits;
-                adjustments = edits.adjustments || null;
+                
+                // Handle both compressed and uncompressed formats for backward compatibility
+                if (edits.a !== undefined || edits.t !== undefined || edits.i !== undefined) {
+                  // Compressed format
+                  adjustments = edits.a || null;
+                  textOverlays = (edits.t || []).map(overlay => ({
+                    text: overlay.txt,
+                    style: {
+                      fontSize: overlay.stl.fs,
+                      fontFamily: overlay.stl.ff,
+                      color: overlay.stl.c,
+                      backgroundColor: overlay.stl.bc,
+                      alignment: overlay.stl.al,
+                      textStyle: overlay.stl.ts
+                    },
+                    x: overlay.x,
+                    y: overlay.y,
+                    id: overlay.id
+                  }));
+                  imageOverlays = (edits.i || []).map(overlay => ({
+                    uri: overlay.u,
+                    x: overlay.x,
+                    y: overlay.y,
+                    width: overlay.w,
+                    height: overlay.h,
+                    rotation: overlay.r
+                  }));
+                } else {
+                  // Legacy uncompressed format
+                  adjustments = edits.adjustments || null;
+                  textOverlays = edits.textOverlays || [];
+                  imageOverlays = edits.imageOverlays || [];
+                }
               } catch (e) {
                 // Silently handle parse errors
               }
             }
-            const filterCSS = getFilterCSS(filterId, adjustments);
             
-            // Apply filter using WebView for photos (similar to create screen)
-            if (filterCSS !== 'none') {
+            const filterCSS = getFilterCSS(filterId, adjustments);
+            const hasOverlays = textOverlays.length > 0 || imageOverlays.length > 0;
+            
+            // Use WebView if there are filters or overlays
+            if (filterCSS !== 'none' || hasOverlays) {
               const photoUri = String(item.photo);
-              // Create stable key based on photo URI and filter to prevent unnecessary re-renders
-              const webViewKey = `photo-${item.$id || photoUri}-${filterCSS}`;
+              // Create stable key based on photo URI, filter, and overlays to prevent unnecessary re-renders
+              const overlayKey = `${textOverlays.length}-${imageOverlays.length}-${JSON.stringify(textOverlays).length}-${JSON.stringify(imageOverlays).length}`;
+              const webViewKey = `photo-${item.$id || photoUri}-${filterCSS}-${overlayKey}`;
               
               return (
                 <View style={{ width: '100%', height: '100%' }}>
@@ -551,6 +589,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                 width: 100%;
                                 height: 100%;
                                 overflow: hidden;
+                                position: relative;
                               }
                               img {
                                 width: 100%;
@@ -558,10 +597,84 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                 object-fit: cover;
                                 filter: ${filterCSS};
                               }
+                              ${textOverlays.map((overlay, index) => {
+                                const textStyle = overlay.style || {};
+                                const alignment = textStyle.alignment || 'center';
+                                
+                                // Use x/y from overlay if set, otherwise use alignment-based positioning
+                                let leftPos, transformValue;
+                                if (overlay.x !== undefined && overlay.y !== undefined) {
+                                  // Dragged position - use center transform
+                                  leftPos = overlay.x + '%';
+                                  transformValue = 'translate(-50%, -50%)';
+                                } else {
+                                  // Initial position based on alignment
+                                  if (alignment === 'left') {
+                                    leftPos = '5%';
+                                    transformValue = 'translateY(-50%)';
+                                  } else if (alignment === 'right') {
+                                    leftPos = '95%';
+                                    transformValue = 'translate(-100%, -50%)';
+                                  } else {
+                                    // center
+                                    leftPos = '50%';
+                                    transformValue = 'translate(-50%, -50%)';
+                                  }
+                                }
+                                
+                                let textCSS = `
+                                  position: absolute;
+                                  top: ${overlay.y !== undefined ? overlay.y : 50}%;
+                                  left: ${leftPos};
+                                  transform: ${transformValue};
+                                  font-size: ${textStyle.fontSize || 24}px;
+                                  font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
+                                  color: ${textStyle.color || '#FFFFFF'};
+                                  text-align: ${alignment};
+                                  white-space: nowrap;
+                                  z-index: ${index + 1};
+                                  pointer-events: none;
+                                  user-select: none;
+                                `;
+                                
+                                if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
+                                  textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                }
+                                
+                                if (textStyle.textStyle === 'outline') {
+                                  textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                } else if (textStyle.textStyle === 'shadow') {
+                                  textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                } else if (textStyle.textStyle === 'neon') {
+                                  textCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
+                                } else if (textStyle.textStyle === 'gradient') {
+                                  textCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                }
+                                
+                                return `.text-overlay-${index} { ${textCSS} }`;
+                              }).join('\n')}
+                              ${imageOverlays.map((overlay, index) => {
+                                return `.image-overlay-${index} {
+                                  position: absolute;
+                                  top: ${overlay.y}%;
+                                  left: ${overlay.x}%;
+                                  width: ${overlay.width}%;
+                                  height: ${overlay.height}%;
+                                  transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
+                                  z-index: ${100 + index};
+                                  pointer-events: none;
+                                }`;
+                              }).join('\n')}
                             </style>
                           </head>
                           <body>
-                            <img src="${photoUri}" alt="Filtered Photo" />
+                            <img src="${photoUri}" alt="Photo with overlays" />
+                            ${textOverlays.map((overlay, index) => 
+                              `<div class="text-overlay-${index}">${overlay.text}</div>`
+                            ).join('')}
+                            ${imageOverlays.map((overlay, index) => 
+                              `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
+                            ).join('')}
                           </body>
                         </html>
                       `
@@ -581,7 +694,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               );
             }
             
-            // No filter, use regular Image
+            // No filter or overlays, use regular Image
             return (
               <Image
                 source={{ uri: String(item.photo) }}
@@ -1534,21 +1647,59 @@ const Home = () => {
                 // Get filter and adjustments from item
                 const filterId = item.filter || 'none';
                 let adjustments = null;
+                let textOverlays = [];
+                let imageOverlays = [];
+                
                 if (item.edits) {
                   try {
                     const edits = typeof item.edits === 'string' ? JSON.parse(item.edits) : item.edits;
-                    adjustments = edits.adjustments || null;
+                    
+                    // Handle both compressed and uncompressed formats for backward compatibility
+                    if (edits.a !== undefined || edits.t !== undefined || edits.i !== undefined) {
+                      // Compressed format
+                      adjustments = edits.a || null;
+                      textOverlays = (edits.t || []).map(overlay => ({
+                        text: overlay.txt,
+                        style: {
+                          fontSize: overlay.stl.fs,
+                          fontFamily: overlay.stl.ff,
+                          color: overlay.stl.c,
+                          backgroundColor: overlay.stl.bc,
+                          alignment: overlay.stl.al,
+                          textStyle: overlay.stl.ts
+                        },
+                        x: overlay.x,
+                        y: overlay.y,
+                        id: overlay.id
+                      }));
+                      imageOverlays = (edits.i || []).map(overlay => ({
+                        uri: overlay.u,
+                        x: overlay.x,
+                        y: overlay.y,
+                        width: overlay.w,
+                        height: overlay.h,
+                        rotation: overlay.r
+                      }));
+                    } else {
+                      // Legacy uncompressed format
+                      adjustments = edits.adjustments || null;
+                      textOverlays = edits.textOverlays || [];
+                      imageOverlays = edits.imageOverlays || [];
+                    }
                   } catch (e) {
                     // Silently handle parse errors
                   }
                 }
-                const filterCSS = getFilterCSS(filterId, adjustments);
                 
-                // Apply filter using WebView for photos
-                if (filterCSS !== 'none') {
+                const filterCSS = getFilterCSS(filterId, adjustments);
+                const hasOverlays = textOverlays.length > 0 || imageOverlays.length > 0;
+                
+                // Use WebView if there are filters or overlays
+                if (filterCSS !== 'none' || hasOverlays) {
                   const photoUri = String(item.photo);
-                  // Create stable key based on photo URI and filter to prevent unnecessary re-renders
-                  const webViewKey = `trending-photo-${item.$id || photoUri}-${filterCSS}`;
+                  // Create stable key based on photo URI, filter, and overlays to prevent unnecessary re-renders
+                  const overlayKey = `${textOverlays.length}-${imageOverlays.length}-${JSON.stringify(textOverlays).length}-${JSON.stringify(imageOverlays).length}`;
+                  const webViewKey = `trending-photo-${item.$id || photoUri}-${filterCSS}-${overlayKey}`;
                   
                   return (
                     <View style={{ width: '100%', height: '100%' }}>
@@ -1570,6 +1721,7 @@ const Home = () => {
                                     width: 100%;
                                     height: 100%;
                                     overflow: hidden;
+                                    position: relative;
                                   }
                                   img {
                                     width: 100%;
@@ -1577,10 +1729,84 @@ const Home = () => {
                                     object-fit: cover;
                                     filter: ${filterCSS};
                                   }
+                                  ${textOverlays.map((overlay, index) => {
+                                    const textStyle = overlay.style || {};
+                                    const alignment = textStyle.alignment || 'center';
+                                    
+                                    // Use x/y from overlay if set, otherwise use alignment-based positioning
+                                    let leftPos, transformValue;
+                                    if (overlay.x !== undefined && overlay.y !== undefined) {
+                                      // Dragged position - use center transform
+                                      leftPos = overlay.x + '%';
+                                      transformValue = 'translate(-50%, -50%)';
+                                    } else {
+                                      // Initial position based on alignment
+                                      if (alignment === 'left') {
+                                        leftPos = '5%';
+                                        transformValue = 'translateY(-50%)';
+                                      } else if (alignment === 'right') {
+                                        leftPos = '95%';
+                                        transformValue = 'translate(-100%, -50%)';
+                                      } else {
+                                        // center
+                                        leftPos = '50%';
+                                        transformValue = 'translate(-50%, -50%)';
+                                      }
+                                    }
+                                    
+                                    let textCSS = `
+                                      position: absolute;
+                                      top: ${overlay.y !== undefined ? overlay.y : 50}%;
+                                      left: ${leftPos};
+                                      transform: ${transformValue};
+                                      font-size: ${textStyle.fontSize || 24}px;
+                                      font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
+                                      color: ${textStyle.color || '#FFFFFF'};
+                                      text-align: ${alignment};
+                                      white-space: nowrap;
+                                      z-index: ${index + 1};
+                                      pointer-events: none;
+                                      user-select: none;
+                                    `;
+                                    
+                                    if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
+                                      textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                    }
+                                    
+                                    if (textStyle.textStyle === 'outline') {
+                                      textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                    } else if (textStyle.textStyle === 'shadow') {
+                                      textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                    } else if (textStyle.textStyle === 'neon') {
+                                      textCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
+                                    } else if (textStyle.textStyle === 'gradient') {
+                                      textCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                    }
+                                    
+                                    return `.text-overlay-${index} { ${textCSS} }`;
+                                  }).join('\n')}
+                                  ${imageOverlays.map((overlay, index) => {
+                                    return `.image-overlay-${index} {
+                                      position: absolute;
+                                      top: ${overlay.y}%;
+                                      left: ${overlay.x}%;
+                                      width: ${overlay.width}%;
+                                      height: ${overlay.height}%;
+                                      transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
+                                      z-index: ${100 + index};
+                                      pointer-events: none;
+                                    }`;
+                                  }).join('\n')}
                                 </style>
                               </head>
                               <body>
-                                <img src="${photoUri}" alt="Filtered Photo" />
+                                <img src="${photoUri}" alt="Photo with overlays" />
+                                ${textOverlays.map((overlay, index) => 
+                                  `<div class="text-overlay-${index}">${overlay.text}</div>`
+                                ).join('')}
+                                ${imageOverlays.map((overlay, index) => 
+                                  `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
+                                ).join('')}
                               </body>
                             </html>
                           `
@@ -1600,7 +1826,7 @@ const Home = () => {
                   );
                 }
                 
-                // No filter, use regular Image
+                // No filter or overlays, use regular Image
                 return (
                   <Image
                     source={{ uri: String(item.photo) }}
@@ -2140,14 +2366,201 @@ const Home = () => {
               {/* Video or Photo */}
               <View style={{ flex: 1, backgroundColor: theme.background, position: 'relative' }}>
                 {trendingModalVideo.postType === 'photo' && trendingModalVideo.photo && typeof trendingModalVideo.photo === 'string' && trendingModalVideo.photo.trim() !== '' ? (
-                  <Image
-                    source={{ uri: String(trendingModalVideo.photo) }}
-                    style={{ flex: 1, width: '100%', height: '100%' }}
-                    resizeMode="contain"
-                    onError={(error) => {
-                      console.log('Trending modal photo error:', error);
-                    }}
-                  />
+                  (() => {
+                    // Get filter and adjustments from item
+                    const filterId = trendingModalVideo.filter || 'none';
+                    let adjustments = null;
+                    let textOverlays = [];
+                    let imageOverlays = [];
+                    
+                    if (trendingModalVideo.edits) {
+                      try {
+                        const edits = typeof trendingModalVideo.edits === 'string' ? JSON.parse(trendingModalVideo.edits) : trendingModalVideo.edits;
+                        
+                        // Handle both compressed and uncompressed formats for backward compatibility
+                        if (edits.a !== undefined || edits.t !== undefined || edits.i !== undefined) {
+                          // Compressed format
+                          adjustments = edits.a || null;
+                          textOverlays = (edits.t || []).map(overlay => ({
+                            text: overlay.txt,
+                            style: {
+                              fontSize: overlay.stl.fs,
+                              fontFamily: overlay.stl.ff,
+                              color: overlay.stl.c,
+                              backgroundColor: overlay.stl.bc,
+                              alignment: overlay.stl.al,
+                              textStyle: overlay.stl.ts
+                            },
+                            x: overlay.x,
+                            y: overlay.y,
+                            id: overlay.id
+                          }));
+                          imageOverlays = (edits.i || []).map(overlay => ({
+                            uri: overlay.u,
+                            x: overlay.x,
+                            y: overlay.y,
+                            width: overlay.w,
+                            height: overlay.h,
+                            rotation: overlay.r
+                          }));
+                        } else {
+                          // Legacy uncompressed format
+                          adjustments = edits.adjustments || null;
+                          textOverlays = edits.textOverlays || [];
+                          imageOverlays = edits.imageOverlays || [];
+                        }
+                      } catch (e) {
+                        // Silently handle parse errors
+                      }
+                    }
+                    
+                    const filterCSS = getFilterCSS(filterId, adjustments);
+                    const hasOverlays = textOverlays.length > 0 || imageOverlays.length > 0;
+                    
+                    // Use WebView if there are filters or overlays
+                    if (filterCSS !== 'none' || hasOverlays) {
+                      const photoUri = String(trendingModalVideo.photo);
+                      // Create stable key based on photo URI, filter, and overlays to prevent unnecessary re-renders
+                      const overlayKey = `${textOverlays.length}-${imageOverlays.length}-${JSON.stringify(textOverlays).length}-${JSON.stringify(imageOverlays).length}`;
+                      const webViewKey = `trending-modal-photo-${trendingModalVideo.$id || photoUri}-${filterCSS}-${overlayKey}`;
+                      
+                      return (
+                        <View style={{ flex: 1, width: '100%', height: '100%' }}>
+                          <WebView
+                            key={webViewKey}
+                            source={{
+                              html: `
+                                <!DOCTYPE html>
+                                <html>
+                                  <head>
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                    <style>
+                                      * {
+                                        margin: 0;
+                                        padding: 0;
+                                        box-sizing: border-box;
+                                      }
+                                      body {
+                                        width: 100%;
+                                        height: 100%;
+                                        overflow: hidden;
+                                        position: relative;
+                                      }
+                                      img {
+                                        width: 100%;
+                                        height: 100%;
+                                        object-fit: contain;
+                                        filter: ${filterCSS};
+                                      }
+                                      ${textOverlays.map((overlay, index) => {
+                                        const textStyle = overlay.style || {};
+                                        const alignment = textStyle.alignment || 'center';
+                                        
+                                        // Use x/y from overlay if set, otherwise use alignment-based positioning
+                                        let leftPos, transformValue;
+                                        if (overlay.x !== undefined && overlay.y !== undefined) {
+                                          // Dragged position - use center transform
+                                          leftPos = overlay.x + '%';
+                                          transformValue = 'translate(-50%, -50%)';
+                                        } else {
+                                          // Initial position based on alignment
+                                          if (alignment === 'left') {
+                                            leftPos = '5%';
+                                            transformValue = 'translateY(-50%)';
+                                          } else if (alignment === 'right') {
+                                            leftPos = '95%';
+                                            transformValue = 'translate(-100%, -50%)';
+                                          } else {
+                                            // center
+                                            leftPos = '50%';
+                                            transformValue = 'translate(-50%, -50%)';
+                                          }
+                                        }
+                                        
+                                        let textCSS = `
+                                          position: absolute;
+                                          top: ${overlay.y !== undefined ? overlay.y : 50}%;
+                                          left: ${leftPos};
+                                          transform: ${transformValue};
+                                          font-size: ${textStyle.fontSize || 24}px;
+                                          font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
+                                          color: ${textStyle.color || '#FFFFFF'};
+                                          text-align: ${alignment};
+                                          white-space: nowrap;
+                                          z-index: ${index + 1};
+                                          pointer-events: none;
+                                          user-select: none;
+                                        `;
+                                        
+                                        if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
+                                          textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                        }
+                                        
+                                        if (textStyle.textStyle === 'outline') {
+                                          textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                        } else if (textStyle.textStyle === 'shadow') {
+                                          textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                        } else if (textStyle.textStyle === 'neon') {
+                                          textCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
+                                        } else if (textStyle.textStyle === 'gradient') {
+                                          textCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                        }
+                                        
+                                        return `.text-overlay-${index} { ${textCSS} }`;
+                                      }).join('\n')}
+                                      ${imageOverlays.map((overlay, index) => {
+                                        return `.image-overlay-${index} {
+                                          position: absolute;
+                                          top: ${overlay.y}%;
+                                          left: ${overlay.x}%;
+                                          width: ${overlay.width}%;
+                                          height: ${overlay.height}%;
+                                          transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
+                                          z-index: ${100 + index};
+                                          pointer-events: none;
+                                        }`;
+                                      }).join('\n')}
+                                    </style>
+                                  </head>
+                                  <body>
+                                    <img src="${photoUri}" alt="Photo with overlays" />
+                                    ${textOverlays.map((overlay, index) => 
+                                      `<div class="text-overlay-${index}">${overlay.text}</div>`
+                                    ).join('')}
+                                    ${imageOverlays.map((overlay, index) => 
+                                      `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
+                                    ).join('')}
+                                  </body>
+                                </html>
+                              `
+                            }}
+                            style={{ flex: 1, width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                            scrollEnabled={false}
+                            showsVerticalScrollIndicator={false}
+                            showsHorizontalScrollIndicator={false}
+                            javaScriptEnabled={false}
+                            domStorageEnabled={false}
+                            onError={(syntheticEvent) => {
+                              const { nativeEvent } = syntheticEvent;
+                              console.log('Trending modal WebView error: ', nativeEvent);
+                            }}
+                          />
+                        </View>
+                      );
+                    }
+                    
+                    // No filter or overlays, use regular Image
+                    return (
+                      <Image
+                        source={{ uri: String(trendingModalVideo.photo) }}
+                        style={{ flex: 1, width: '100%', height: '100%' }}
+                        resizeMode="contain"
+                        onError={(error) => {
+                          console.log('Trending modal photo error:', error);
+                        }}
+                      />
+                    );
+                  })()
                 ) : trendingModalVideo.video ? (
                   <>
                     <Video
