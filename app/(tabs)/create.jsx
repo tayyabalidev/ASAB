@@ -1030,14 +1030,14 @@ const Create = () => {
             }
             body {
               width: 100%;
-              height: 100%;
-              overflow: hidden;
+              height: auto;
+              min-height: 100%;
               position: relative;
             }
             img {
               width: 100%;
-              height: 100%;
-              object-fit: cover;
+              height: auto;
+              display: block;
               filter: ${(() => {
                 // If image came from PhotoEditor, adjustments are already baked in
                 // Only apply the filter (if any), not adjustments
@@ -1796,15 +1796,12 @@ const Create = () => {
           adjustments: editedImage?.adjustments || adjustments,
         };
 
-        // Include text overlays in edits (for reference, even though they're baked into image)
-        if (textOverlays.length > 0) {
-          finalEdits.textOverlays = textOverlays;
-        }
-
-        // Include image overlays in edits (for reference, even though they're baked into image)
-        if (imageOverlays.length > 0) {
+        // Include image overlays in edits only if not already baked into image
+        if (imageOverlays.length > 0 && !isMediaEdited) {
           finalEdits.imageOverlays = imageOverlays;
         }
+
+        // Note: textOverlays are always baked into the image when they exist, so don't save them to metadata
 
         await createPhotoPost({
           ...photoForm,
@@ -2752,7 +2749,7 @@ const Create = () => {
                                 source={{ html: webViewHTML }}
                                 style={{
                                   width: "100%",
-                                  height: 400,
+                                  height: 600,
                                   backgroundColor: "transparent",
                                 }}
                                 scrollEnabled={false}
