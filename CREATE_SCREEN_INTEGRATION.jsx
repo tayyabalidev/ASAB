@@ -25,7 +25,6 @@ useEffect(() => {
       if (isAvailable) {
         console.log('✅ Processing server is available');
       } else {
-        console.log('ℹ️ Processing server not available - using metadata only');
       }
     } catch (error) {
       console.log('Processing server check failed');
