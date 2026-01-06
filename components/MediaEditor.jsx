@@ -439,8 +439,11 @@ const MediaEditor = ({
     if (!stickerPanRespondersRef.current[sticker.id]) {
       stickerPanRespondersRef.current[sticker.id] = PanResponder.create({
         onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
         onPanResponderGrant: (evt) => {
+          evt.stopPropagation();
           const { pageX, pageY } = evt.nativeEvent;
           stickerStartPositions.current[sticker.id] = {
             startX: pageX - sticker.x,
@@ -449,6 +452,7 @@ const MediaEditor = ({
           setSelectedSticker(sticker.id);
         },
         onPanResponderMove: (evt) => {
+          evt.stopPropagation();
           const { pageX, pageY } = evt.nativeEvent;
           const startPos = stickerStartPositions.current[sticker.id];
           if (startPos) {
@@ -457,11 +461,13 @@ const MediaEditor = ({
             updateStickerPosition(sticker.id, newX, newY);
           }
         },
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (evt) => {
+          evt.stopPropagation();
           delete stickerStartPositions.current[sticker.id];
           setSelectedSticker(null);
         },
-        onPanResponderTerminate: () => {
+        onPanResponderTerminate: (evt) => {
+          evt.stopPropagation();
           delete stickerStartPositions.current[sticker.id];
           setSelectedSticker(null);
         },
@@ -510,23 +516,36 @@ const MediaEditor = ({
   // Store PanResponders in ref to avoid recreation
   const textPanRespondersRef = useRef({});
   
+  // Store text input refs for focus management
+  const textInputRefs = useRef({});
+  
   // Create or get PanResponder for a text (EXACTLY like stickers)
   const getTextPanResponder = useCallback((text) => {
     if (!textPanRespondersRef.current[text.id]) {
       textPanRespondersRef.current[text.id] = PanResponder.create({
         onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
         onPanResponderGrant: (evt) => {
           console.log('✅ Text PanResponder GRANT - text id:', text.id);
+          evt.stopPropagation();
           const { pageX, pageY } = evt.nativeEvent;
           textStartPositions.current[text.id] = {
             startX: pageX - text.x,
             startY: pageY - text.y,
           };
           setSelectedText(text.id);
+          // Focus the text input
+          setTimeout(() => {
+            if (textInputRefs.current[text.id] && !textInputRefs.current[text.id].isFocused()) {
+              textInputRefs.current[text.id].focus();
+            }
+          }, 100);
         },
         onPanResponderMove: (evt) => {
           console.log('🔄 Text PanResponder MOVE');
+          evt.stopPropagation();
           const { pageX, pageY } = evt.nativeEvent;
           const startPos = textStartPositions.current[text.id];
           if (startPos) {
@@ -536,10 +555,12 @@ const MediaEditor = ({
             updateTextPosition(text.id, newX, newY);
           }
         },
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (evt) => {
+          evt.stopPropagation();
           delete textStartPositions.current[text.id];
         },
-        onPanResponderTerminate: () => {
+        onPanResponderTerminate: (evt) => {
+          evt.stopPropagation();
           delete textStartPositions.current[text.id];
         },
         onPanResponderTerminationRequest: () => false,
@@ -854,6 +875,12 @@ const MediaEditor = ({
       setStickers(stickers.filter(s => s.id !== id));
     } else if (type === 'text') {
       setTexts(texts.filter(t => t.id !== id));
+      // Clean up text input ref
+      delete textInputRefs.current[id];
+      // Clear selection if this text was selected
+      if (selectedText === id) {
+        setSelectedText(null);
+      }
     } else if (type === 'drawing') {
       setDrawingPaths(drawingPaths.filter(d => d.id !== id));
     }
@@ -963,9 +990,9 @@ const MediaEditor = ({
       <GestureHandlerRootView style={{ flex: 1 }} shouldCancelWhenOutside={false}>
         <View 
           style={[styles.container, { backgroundColor: theme.background }]}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderTerminationRequest={() => false}
+          onStartShouldSetResponder={() => false}
+          onMoveShouldSetResponder={() => false}
+          onResponderTerminationRequest={() => true}
         >
         {/* Header - Fixed at top with safe area */}
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border, paddingTop: 50 }]}>
@@ -1017,6 +1044,7 @@ const MediaEditor = ({
                 resizeMode={ResizeMode.COVER}
                 isLooping
                 shouldPlay={false}
+                pointerEvents="none"
                 onLoad={(status) => {
                   if (status.isLoaded && status.durationMillis) {
                     const durationSeconds = status.durationMillis / 1000;
@@ -1075,6 +1103,7 @@ const MediaEditor = ({
                     originWhitelist={['*']}
                     javaScriptEnabled={true}
                     domStorageEnabled={true}
+                    pointerEvents="none"
                     onError={(syntheticEvent) => {
                       const { nativeEvent } = syntheticEvent;
                       console.log('WebView error: ', nativeEvent);
@@ -1103,6 +1132,7 @@ const MediaEditor = ({
                       }
                     ]} 
                     resizeMode="cover"
+                    pointerEvents="none"
                   />
                 )}
               </View>
@@ -1936,6 +1966,10 @@ const MediaEditor = ({
                   
                   {/* Text Input - Large and visible */}
                   <TextInput
+                    ref={(ref) => {
+                      textInputRefs.current[text.id] = ref;
+                    }}
+                    key={`text-input-${text.id}`}
                     value={text.text}
                     onChangeText={(newText) => updateText(text.id, { text: newText })}
                     style={[
@@ -1954,7 +1988,7 @@ const MediaEditor = ({
                     placeholder="Type your text here..."
                     placeholderTextColor={theme.textSecondary}
                     multiline
-                    autoFocus={selectedText === text.id}
+                    blurOnSubmit={false}
                   />
                   
                   {/* Text Styles - Instagram-like */}
