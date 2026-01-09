@@ -603,12 +603,12 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                   textOverlays = (edits.t || []).map(overlay => ({
                     text: overlay.txt,
                     style: {
-                      fontSize: overlay.stl.fs,
-                      fontFamily: overlay.stl.ff,
-                      color: overlay.stl.c,
-                      backgroundColor: overlay.stl.bc,
-                      alignment: overlay.stl.al,
-                      textStyle: overlay.stl.ts
+                      fontSize: overlay.stl?.fs,
+                      fontFamily: overlay.stl?.ff,
+                      color: overlay.stl?.c,
+                      backgroundColor: overlay.stl?.bc,
+                      alignment: overlay.stl?.al,
+                      textStyle: overlay.stl?.ts
                     },
                     x: overlay.x,
                     y: overlay.y,
@@ -664,10 +664,15 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                 height: 100%;
                                 overflow: hidden;
                                 position: relative;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
                               }
                               img {
-                                width: 100%;
-                                height: 100%;
+                                max-width: 100%;
+                                max-height: 100%;
+                                width: auto;
+                                height: auto;
                                 object-fit: contain;
                                 filter: ${filterCSS};
                               }
@@ -696,14 +701,20 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                   }
                                 }
                                 
-                                let textCSS = `
+                                const hasBackgroundColor = textStyle.backgroundColor && 
+                                  textStyle.backgroundColor !== 'transparent' && 
+                                  textStyle.backgroundColor !== '' && 
+                                  textStyle.backgroundColor !== null && 
+                                  textStyle.backgroundColor !== undefined;
+                                const isGradient = textStyle.textStyle === 'gradient';
+                                
+                                let containerCSS = `
                                   position: absolute;
                                   top: ${overlay.y !== undefined ? overlay.y : 50}%;
                                   left: ${leftPos};
                                   transform: ${transformValue};
                                   font-size: ${textStyle.fontSize || 24}px;
                                   font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
-                                  color: ${textStyle.color || '#FFFFFF'};
                                   text-align: ${alignment};
                                   white-space: nowrap;
                                   z-index: ${index + 1};
@@ -711,21 +722,25 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                   user-select: none;
                                 `;
                                 
-                                if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
-                                  textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                let textInnerCSS = `
+                                  color: ${textStyle.color || '#FFFFFF'};
+                                `;
+                                
+                                if (hasBackgroundColor) {
+                                  containerCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
                                 }
                                 
                                 if (textStyle.textStyle === 'outline') {
-                                  textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                  textInnerCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
                                 } else if (textStyle.textStyle === 'shadow') {
-                                  textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                  textInnerCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
                                 } else if (textStyle.textStyle === 'neon') {
-                                  textCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
-                                } else if (textStyle.textStyle === 'gradient') {
-                                  textCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                  textInnerCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
+                                } else if (isGradient) {
+                                  textInnerCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
                                 }
                                 
-                                return `.text-overlay-${index} { ${textCSS} }`;
+                                return `.text-overlay-${index} { ${containerCSS} } .text-overlay-${index} span { ${textInnerCSS} }`;
                               }).join('\n')}
                               ${imageOverlays.map((overlay, index) => {
                                 return `.image-overlay-${index} {
@@ -744,7 +759,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                           <body>
                             <img src="${photoUri}" alt="Photo with overlays" />
                             ${textOverlays.map((overlay, index) => 
-                              `<div class="text-overlay-${index}">${overlay.text}</div>`
+                              `<div class="text-overlay-${index}"><span>${overlay.text}</span></div>`
                             ).join('')}
                             ${imageOverlays.map((overlay, index) => 
                               `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
@@ -1822,12 +1837,12 @@ const Home = () => {
                       textOverlays = (edits.t || []).map(overlay => ({
                         text: overlay.txt,
                         style: {
-                          fontSize: overlay.stl.fs,
-                          fontFamily: overlay.stl.ff,
-                          color: overlay.stl.c,
-                          backgroundColor: overlay.stl.bc,
-                          alignment: overlay.stl.al,
-                          textStyle: overlay.stl.ts
+                          fontSize: overlay.stl?.fs,
+                          fontFamily: overlay.stl?.ff,
+                          color: overlay.stl?.c,
+                          backgroundColor: overlay.stl?.bc,
+                          alignment: overlay.stl?.al,
+                          textStyle: overlay.stl?.ts
                         },
                         x: overlay.x,
                         y: overlay.y,
@@ -1883,11 +1898,16 @@ const Home = () => {
                                     height: 100%;
                                     overflow: hidden;
                                     position: relative;
+                                    display: flex;
+                                    justify-content: center;
+                                    align-items: center;
                                   }
                                   img {
-                                    width: 100%;
-                                    height: 100%;
-                                    object-fit: cover;
+                                    max-width: 100%;
+                                    max-height: 100%;
+                                    width: auto;
+                                    height: auto;
+                                    object-fit: contain;
                                     filter: ${filterCSS};
                                   }
                                   ${textOverlays.map((overlay, index) => {
@@ -1915,14 +1935,20 @@ const Home = () => {
                                       }
                                     }
                                     
-                                    let textCSS = `
+                                    const hasBackgroundColor = textStyle.backgroundColor && 
+                                      textStyle.backgroundColor !== 'transparent' && 
+                                      textStyle.backgroundColor !== '' && 
+                                      textStyle.backgroundColor !== null && 
+                                      textStyle.backgroundColor !== undefined;
+                                    const isGradient = textStyle.textStyle === 'gradient';
+                                    
+                                    let containerCSS = `
                                       position: absolute;
                                       top: ${overlay.y !== undefined ? overlay.y : 50}%;
                                       left: ${leftPos};
                                       transform: ${transformValue};
                                       font-size: ${textStyle.fontSize || 24}px;
                                       font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
-                                      color: ${textStyle.color || '#FFFFFF'};
                                       text-align: ${alignment};
                                       white-space: nowrap;
                                       z-index: ${index + 1};
@@ -1930,21 +1956,25 @@ const Home = () => {
                                       user-select: none;
                                     `;
                                     
-                                    if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
-                                      textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                    let textInnerCSS = `
+                                      color: ${textStyle.color || '#FFFFFF'};
+                                    `;
+                                    
+                                    if (hasBackgroundColor) {
+                                      containerCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
                                     }
                                     
                                     if (textStyle.textStyle === 'outline') {
-                                      textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                      textInnerCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
                                     } else if (textStyle.textStyle === 'shadow') {
-                                      textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                      textInnerCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
                                     } else if (textStyle.textStyle === 'neon') {
-                                      textCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
-                                    } else if (textStyle.textStyle === 'gradient') {
-                                      textCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                      textInnerCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
+                                    } else if (isGradient) {
+                                      textInnerCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
                                     }
                                     
-                                    return `.text-overlay-${index} { ${textCSS} }`;
+                                    return `.text-overlay-${index} { ${containerCSS} } .text-overlay-${index} span { ${textInnerCSS} }`;
                                   }).join('\n')}
                                   ${imageOverlays.map((overlay, index) => {
                                     return `.image-overlay-${index} {
@@ -1963,7 +1993,7 @@ const Home = () => {
                               <body>
                                 <img src="${photoUri}" alt="Photo with overlays" />
                                 ${textOverlays.map((overlay, index) => 
-                                  `<div class="text-overlay-${index}">${overlay.text}</div>`
+                                  `<div class="text-overlay-${index}"><span>${overlay.text}</span></div>`
                                 ).join('')}
                                 ${imageOverlays.map((overlay, index) => 
                                   `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
@@ -2270,7 +2300,7 @@ const Home = () => {
                           width: '100%',
                           height: '100%',
                         }}
-                        resizeMode="cover"
+                        resizeMode="contain"
                       />
                     </View>
                   </View>
@@ -2545,12 +2575,12 @@ const Home = () => {
                           textOverlays = (edits.t || []).map(overlay => ({
                             text: overlay.txt,
                             style: {
-                              fontSize: overlay.stl.fs,
-                              fontFamily: overlay.stl.ff,
-                              color: overlay.stl.c,
-                              backgroundColor: overlay.stl.bc,
-                              alignment: overlay.stl.al,
-                              textStyle: overlay.stl.ts
+                              fontSize: overlay.stl?.fs,
+                              fontFamily: overlay.stl?.ff,
+                              color: overlay.stl?.c,
+                              backgroundColor: overlay.stl?.bc,
+                              alignment: overlay.stl?.al,
+                              textStyle: overlay.stl?.ts
                             },
                             x: overlay.x,
                             y: overlay.y,
@@ -2606,10 +2636,15 @@ const Home = () => {
                                         height: 100%;
                                         overflow: hidden;
                                         position: relative;
+                                        display: flex;
+                                        justify-content: center;
+                                        align-items: center;
                                       }
                                       img {
-                                        width: 100%;
-                                        height: 100%;
+                                        max-width: 100%;
+                                        max-height: 100%;
+                                        width: auto;
+                                        height: auto;
                                         object-fit: contain;
                                         filter: ${filterCSS};
                                       }
@@ -2638,14 +2673,20 @@ const Home = () => {
                                           }
                                         }
                                         
-                                        let textCSS = `
+                                        const hasBackgroundColor = textStyle.backgroundColor && 
+                                          textStyle.backgroundColor !== 'transparent' && 
+                                          textStyle.backgroundColor !== '' && 
+                                          textStyle.backgroundColor !== null && 
+                                          textStyle.backgroundColor !== undefined;
+                                        const isGradient = textStyle.textStyle === 'gradient';
+                                        
+                                        let containerCSS = `
                                           position: absolute;
                                           top: ${overlay.y !== undefined ? overlay.y : 50}%;
                                           left: ${leftPos};
                                           transform: ${transformValue};
                                           font-size: ${textStyle.fontSize || 24}px;
                                           font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
-                                          color: ${textStyle.color || '#FFFFFF'};
                                           text-align: ${alignment};
                                           white-space: nowrap;
                                           z-index: ${index + 1};
@@ -2653,21 +2694,25 @@ const Home = () => {
                                           user-select: none;
                                         `;
                                         
-                                        if (textStyle.backgroundColor && textStyle.backgroundColor !== 'transparent') {
-                                          textCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                        let textInnerCSS = `
+                                          color: ${textStyle.color || '#FFFFFF'};
+                                        `;
+                                        
+                                        if (hasBackgroundColor) {
+                                          containerCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
                                         }
                                         
                                         if (textStyle.textStyle === 'outline') {
-                                          textCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                          textInnerCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
                                         } else if (textStyle.textStyle === 'shadow') {
-                                          textCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                          textInnerCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
                                         } else if (textStyle.textStyle === 'neon') {
-                                          textCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
-                                        } else if (textStyle.textStyle === 'gradient') {
-                                          textCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                          textInnerCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
+                                        } else if (isGradient) {
+                                          textInnerCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
                                         }
                                         
-                                        return `.text-overlay-${index} { ${textCSS} }`;
+                                        return `.text-overlay-${index} { ${containerCSS} } .text-overlay-${index} span { ${textInnerCSS} }`;
                                       }).join('\n')}
                                       ${imageOverlays.map((overlay, index) => {
                                         return `.image-overlay-${index} {
@@ -2686,7 +2731,7 @@ const Home = () => {
                                   <body>
                                     <img src="${photoUri}" alt="Photo with overlays" />
                                     ${textOverlays.map((overlay, index) => 
-                                      `<div class="text-overlay-${index}">${overlay.text}</div>`
+                                      `<div class="text-overlay-${index}"><span>${overlay.text}</span></div>`
                                     ).join('')}
                                     ${imageOverlays.map((overlay, index) => 
                                       `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`

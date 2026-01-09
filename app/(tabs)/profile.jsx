@@ -1521,18 +1521,55 @@ const Profile = () => {
                           // Get filter and adjustments from photo
                           const filterId = photo.filter || 'none';
                           let adjustments = null;
+                          let textOverlays = [];
+                          let imageOverlays = [];
+                          
                           if (photo.edits) {
                             try {
                               const edits = typeof photo.edits === 'string' ? JSON.parse(photo.edits) : photo.edits;
-                              adjustments = edits.adjustments || null;
+                              
+                              // Handle both compressed and uncompressed formats
+                              if (edits.a !== undefined || edits.t !== undefined || edits.i !== undefined) {
+                                // Compressed format
+                                adjustments = edits.a || null;
+                                textOverlays = (edits.t || []).map(overlay => ({
+                                  text: overlay.txt,
+                                  style: {
+                                    fontSize: overlay.stl?.fs,
+                                    fontFamily: overlay.stl?.ff,
+                                    color: overlay.stl?.c,
+                                    backgroundColor: overlay.stl?.bc,
+                                    alignment: overlay.stl?.al,
+                                    textStyle: overlay.stl?.ts
+                                  },
+                                  x: overlay.x,
+                                  y: overlay.y,
+                                  id: overlay.id
+                                }));
+                                imageOverlays = (edits.i || []).map(overlay => ({
+                                  uri: overlay.u,
+                                  x: overlay.x,
+                                  y: overlay.y,
+                                  width: overlay.w,
+                                  height: overlay.h,
+                                  rotation: overlay.r
+                                }));
+                              } else {
+                                // Legacy uncompressed format
+                                adjustments = edits.adjustments || null;
+                                textOverlays = edits.textOverlays || [];
+                                imageOverlays = edits.imageOverlays || [];
+                              }
                             } catch (e) {
                               console.log('Error parsing edits:', e);
                             }
                           }
-                          const filterCSS = getFilterCSS(filterId, adjustments);
                           
-                          // Apply filter using WebView for photos
-                          if (filterCSS !== 'none') {
+                          const filterCSS = getFilterCSS(filterId, adjustments);
+                          const hasOverlays = textOverlays.length > 0 || imageOverlays.length > 0;
+                          
+                          // Use WebView if there are filters or overlays
+                          if (filterCSS !== 'none' || hasOverlays) {
                             return (
                               <View style={{ width: '100%', height: '100%' }}>
                                 <WebView
@@ -1552,17 +1589,98 @@ const Profile = () => {
                                               width: 100%;
                                               height: 100%;
                                               overflow: hidden;
+                                              position: relative;
                                             }
                                             img {
                                               width: 100%;
                                               height: 100%;
-                                              object-fit: cover;
+                                              object-fit: contain;
                                               filter: ${filterCSS};
                                             }
+                                            ${textOverlays.map((overlay, index) => {
+                                              const textStyle = overlay.style || {};
+                                              const alignment = textStyle.alignment || 'center';
+                                              
+                                              let leftPos, transformValue;
+                                              if (overlay.x !== undefined && overlay.y !== undefined) {
+                                                leftPos = overlay.x + '%';
+                                                transformValue = 'translate(-50%, -50%)';
+                                              } else {
+                                                if (alignment === 'left') {
+                                                  leftPos = '5%';
+                                                  transformValue = 'translateY(-50%)';
+                                                } else if (alignment === 'right') {
+                                                  leftPos = '95%';
+                                                  transformValue = 'translate(-100%, -50%)';
+                                                } else {
+                                                  leftPos = '50%';
+                                                  transformValue = 'translate(-50%, -50%)';
+                                                }
+                                              }
+                                              
+                                              const hasBackgroundColor = textStyle.backgroundColor && 
+                                                textStyle.backgroundColor !== 'transparent' && 
+                                                textStyle.backgroundColor !== '' && 
+                                                textStyle.backgroundColor !== null && 
+                                                textStyle.backgroundColor !== undefined;
+                                              const isGradient = textStyle.textStyle === 'gradient';
+                                              
+                                              let containerCSS = `
+                                                position: absolute;
+                                                top: ${overlay.y !== undefined ? overlay.y : 50}%;
+                                                left: ${leftPos};
+                                                transform: ${transformValue};
+                                                font-size: ${textStyle.fontSize || 24}px;
+                                                font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
+                                                text-align: ${alignment};
+                                                white-space: nowrap;
+                                                z-index: ${index + 1};
+                                                pointer-events: none;
+                                                user-select: none;
+                                              `;
+                                              
+                                              let textInnerCSS = `
+                                                color: ${textStyle.color || '#FFFFFF'};
+                                              `;
+                                              
+                                              if (hasBackgroundColor) {
+                                                containerCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                              }
+                                              
+                                              if (textStyle.textStyle === 'outline') {
+                                                textInnerCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                              } else if (textStyle.textStyle === 'shadow') {
+                                                textInnerCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                              } else if (textStyle.textStyle === 'neon') {
+                                                textInnerCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
+                                              } else if (isGradient) {
+                                                textInnerCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                              }
+                                              
+                                              return `.text-overlay-${index} { ${containerCSS} } .text-overlay-${index} span { ${textInnerCSS} }`;
+                                            }).join('\n')}
+                                            ${imageOverlays.map((overlay, index) => {
+                                              return `.image-overlay-${index} {
+                                                position: absolute;
+                                                top: ${overlay.y}%;
+                                                left: ${overlay.x}%;
+                                                width: ${overlay.width}%;
+                                                height: ${overlay.height}%;
+                                                transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
+                                                z-index: ${100 + index};
+                                                pointer-events: none;
+                                              }`;
+                                            }).join('\n')}
                                           </style>
                                         </head>
                                         <body>
-                                          <img src="${photo.photo || 'https://via.placeholder.com/300x300'}" alt="Filtered Photo" />
+                                          <img src="${photo.photo || 'https://via.placeholder.com/300x300'}" alt="Photo with overlays" />
+                                          ${textOverlays.map((overlay, index) => 
+                                            `<div class="text-overlay-${index}"><span>${overlay.text}</span></div>`
+                                          ).join('')}
+                                          ${imageOverlays.map((overlay, index) => 
+                                            `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
+                                          ).join('')}
                                         </body>
                                       </html>
                                     `
@@ -1576,12 +1694,12 @@ const Profile = () => {
                             );
                           }
                           
-                          // No filter, use regular Image
+                          // No filter or overlays, use regular Image
                           return (
                             <Image
                               source={{ uri: photo.photo || 'https://via.placeholder.com/300x300' }}
                               style={{ width: '100%', height: '100%' }}
-                              resizeMode="cover"
+                              resizeMode="contain"
                             />
                           );
                         })()}
@@ -2438,11 +2556,197 @@ const Profile = () => {
               </TouchableOpacity>
 
               <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <Image
-                  source={{ uri: selectedPhoto.photo || 'https://via.placeholder.com/300x300' }}
-                  style={{ width: '100%', height: '100%' }}
-                  resizeMode="contain"
-                />
+                {(() => {
+                  // Get filter and adjustments from photo
+                  const filterId = selectedPhoto.filter || 'none';
+                  let adjustments = null;
+                  let textOverlays = [];
+                  let imageOverlays = [];
+                  
+                  if (selectedPhoto.edits) {
+                    try {
+                      const edits = typeof selectedPhoto.edits === 'string' ? JSON.parse(selectedPhoto.edits) : selectedPhoto.edits;
+                      
+                      // Handle both compressed and uncompressed formats
+                      if (edits.a !== undefined || edits.t !== undefined || edits.i !== undefined) {
+                        // Compressed format
+                        adjustments = edits.a || null;
+                        textOverlays = (edits.t || []).map(overlay => ({
+                          text: overlay.txt,
+                          style: {
+                            fontSize: overlay.stl?.fs,
+                            fontFamily: overlay.stl?.ff,
+                            color: overlay.stl?.c,
+                            backgroundColor: overlay.stl?.bc,
+                            alignment: overlay.stl?.al,
+                            textStyle: overlay.stl?.ts
+                          },
+                          x: overlay.x,
+                          y: overlay.y,
+                          id: overlay.id
+                        }));
+                        imageOverlays = (edits.i || []).map(overlay => ({
+                          uri: overlay.u,
+                          x: overlay.x,
+                          y: overlay.y,
+                          width: overlay.w,
+                          height: overlay.h,
+                          rotation: overlay.r
+                        }));
+                      } else {
+                        // Legacy uncompressed format
+                        adjustments = edits.adjustments || null;
+                        textOverlays = edits.textOverlays || [];
+                        imageOverlays = edits.imageOverlays || [];
+                      }
+                    } catch (e) {
+                      console.log('Error parsing edits:', e);
+                    }
+                  }
+                  
+                  const filterCSS = getFilterCSS(filterId, adjustments);
+                  const hasOverlays = textOverlays.length > 0 || imageOverlays.length > 0;
+                  
+                  // Use WebView if there are filters or overlays
+                  if (filterCSS !== 'none' || hasOverlays) {
+                    return (
+                      <View style={{ width: '100%', height: '100%' }}>
+                        <WebView
+                          source={{
+                            html: `
+                              <!DOCTYPE html>
+                              <html>
+                                <head>
+                                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                  <style>
+                                    * {
+                                      margin: 0;
+                                      padding: 0;
+                                      box-sizing: border-box;
+                                    }
+                                    body {
+                                      width: 100%;
+                                      height: 100%;
+                                      overflow: hidden;
+                                      position: relative;
+                                      display: flex;
+                                      justify-content: center;
+                                      align-items: center;
+                                    }
+                                    img {
+                                      max-width: 100%;
+                                      max-height: 100%;
+                                      width: auto;
+                                      height: auto;
+                                      object-fit: contain;
+                                      filter: ${filterCSS};
+                                    }
+                                    ${textOverlays.map((overlay, index) => {
+                                      const textStyle = overlay.style || {};
+                                      const alignment = textStyle.alignment || 'center';
+                                      
+                                      let leftPos, transformValue;
+                                      if (overlay.x !== undefined && overlay.y !== undefined) {
+                                        leftPos = overlay.x + '%';
+                                        transformValue = 'translate(-50%, -50%)';
+                                      } else {
+                                        if (alignment === 'left') {
+                                          leftPos = '5%';
+                                          transformValue = 'translateY(-50%)';
+                                        } else if (alignment === 'right') {
+                                          leftPos = '95%';
+                                          transformValue = 'translate(-100%, -50%)';
+                                        } else {
+                                          leftPos = '50%';
+                                          transformValue = 'translate(-50%, -50%)';
+                                        }
+                                      }
+                                      
+                                      const hasBackgroundColor = textStyle.backgroundColor && 
+                                        textStyle.backgroundColor !== 'transparent' && 
+                                        textStyle.backgroundColor !== '' && 
+                                        textStyle.backgroundColor !== null && 
+                                        textStyle.backgroundColor !== undefined;
+                                      const isGradient = textStyle.textStyle === 'gradient';
+                                      
+                                      let containerCSS = `
+                                        position: absolute;
+                                        top: ${overlay.y !== undefined ? overlay.y : 50}%;
+                                        left: ${leftPos};
+                                        transform: ${transformValue};
+                                        font-size: ${textStyle.fontSize || 24}px;
+                                        font-family: '${textStyle.fontFamily || 'Poppins-Bold'}', sans-serif;
+                                        text-align: ${alignment};
+                                        white-space: nowrap;
+                                        z-index: ${index + 1};
+                                        pointer-events: none;
+                                        user-select: none;
+                                      `;
+                                      
+                                      let textInnerCSS = `
+                                        color: ${textStyle.color || '#FFFFFF'};
+                                      `;
+                                      
+                                      if (hasBackgroundColor) {
+                                        containerCSS += `background-color: ${textStyle.backgroundColor}; padding: 4px 8px; border-radius: 4px;`;
+                                      }
+                                      
+                                      if (textStyle.textStyle === 'outline') {
+                                        textInnerCSS += `-webkit-text-stroke: 2px ${textStyle.color || '#FFFFFF'}; -webkit-text-fill-color: transparent;`;
+                                      } else if (textStyle.textStyle === 'shadow') {
+                                        textInnerCSS += `text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -2px -2px 4px rgba(0,0,0,0.8);`;
+                                      } else if (textStyle.textStyle === 'neon') {
+                                        textInnerCSS += `text-shadow: 0 0 5px ${textStyle.color || '#FFFFFF'}, 0 0 10px ${textStyle.color || '#FFFFFF'}, 0 0 15px ${textStyle.color || '#FFFFFF'};`;
+                                      } else if (isGradient) {
+                                        textInnerCSS += `background: linear-gradient(45deg, ${textStyle.color || '#FFFFFF'}, #FF6B6B); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;`;
+                                      }
+                                      
+                                      return `.text-overlay-${index} { ${containerCSS} } .text-overlay-${index} span { ${textInnerCSS} }`;
+                                    }).join('\n')}
+                                    ${imageOverlays.map((overlay, index) => {
+                                      return `.image-overlay-${index} {
+                                        position: absolute;
+                                        top: ${overlay.y}%;
+                                        left: ${overlay.x}%;
+                                        width: ${overlay.width}%;
+                                        height: ${overlay.height}%;
+                                        transform: translate(-50%, -50%) rotate(${overlay.rotation}deg);
+                                        z-index: ${100 + index};
+                                        pointer-events: none;
+                                      }`;
+                                    }).join('\n')}
+                                  </style>
+                                </head>
+                                <body>
+                                  <img src="${selectedPhoto.photo || 'https://via.placeholder.com/300x300'}" alt="Photo with overlays" />
+                                  ${textOverlays.map((overlay, index) => 
+                                    `<div class="text-overlay-${index}"><span>${overlay.text}</span></div>`
+                                  ).join('')}
+                                  ${imageOverlays.map((overlay, index) => 
+                                    `<img src="${overlay.uri}" class="image-overlay-${index}" alt="Overlay ${index}" />`
+                                  ).join('')}
+                                </body>
+                              </html>
+                            `
+                          }}
+                          style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                          scrollEnabled={false}
+                          showsVerticalScrollIndicator={false}
+                          showsHorizontalScrollIndicator={false}
+                        />
+                      </View>
+                    );
+                  }
+                  
+                  // No filter or overlays, use regular Image
+                  return (
+                    <Image
+                      source={{ uri: selectedPhoto.photo || 'https://via.placeholder.com/300x300' }}
+                      style={{ width: '100%', height: '100%' }}
+                      resizeMode="contain"
+                    />
+                  );
+                })()}
               </View>
 
               {/* Photo Info Overlay */}

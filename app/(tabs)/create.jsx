@@ -1765,7 +1765,43 @@ const Create = () => {
           finalEdits.imageOverlays = imageOverlays;
         }
 
-        // Note: textOverlays are always baked into the image when they exist, so don't save them to metadata
+        // Save textOverlays if they exist and filters/adjustments are applied (so they render on top)
+        // Compress textOverlays to save space
+        if (textOverlays.length > 0 && (photoForm.filter !== 'none' || adjustments || editedImage?.adjustments)) {
+          finalEdits.t = textOverlays.map(overlay => ({
+            txt: overlay.text,
+            stl: {
+              fs: overlay.style?.fontSize || 24,
+              ff: overlay.style?.fontFamily || 'Poppins-Bold',
+              c: overlay.style?.color || '#FFFFFF',
+              bc: overlay.style?.backgroundColor || 'transparent',
+              al: overlay.style?.alignment || 'center',
+              ts: overlay.style?.textStyle || 'normal'
+            },
+            x: overlay.x || 50,
+            y: overlay.y || 50,
+            id: overlay.id || `text-${Date.now()}-${Math.random()}`
+          }));
+          // Also save adjustments in compressed format
+          if (finalEdits.adjustments) {
+            finalEdits.a = finalEdits.adjustments;
+          }
+          // Compress image overlays if they exist
+          if (finalEdits.imageOverlays && finalEdits.imageOverlays.length > 0) {
+            finalEdits.i = finalEdits.imageOverlays.map(overlay => ({
+              u: overlay.uri,
+              x: overlay.x,
+              y: overlay.y,
+              w: overlay.width,
+              h: overlay.height,
+              r: overlay.rotation || 0
+            }));
+            delete finalEdits.imageOverlays; // Remove uncompressed version
+          }
+        } else if (textOverlays.length > 0) {
+          // If no filters/adjustments, save in uncompressed format for backward compatibility
+          finalEdits.textOverlays = textOverlays;
+        }
 
         await createPhotoPost({
           ...photoForm,
