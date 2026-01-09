@@ -563,7 +563,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             position: 'absolute', 
             left: 0, 
             top: 0, 
-            width: '50%', // Only cover left half of the video
+            width: '50%', // Only contain left half of the video
             bottom: 0, 
             zIndex: 15 
           }}>
@@ -659,6 +659,10 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                 padding: 0;
                                 box-sizing: border-box;
                               }
+                              html {
+                                width: 100%;
+                                height: 100%;
+                              }
                               body {
                                 width: 100%;
                                 height: 100%;
@@ -667,6 +671,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                 display: flex;
                                 justify-content: center;
                                 align-items: center;
+                                margin: 0;
+                                padding: 0;
                               }
                               img {
                                 max-width: 100%;
@@ -675,6 +681,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                 height: auto;
                                 object-fit: contain;
                                 filter: ${filterCSS};
+                                display: block;
                               }
                               ${textOverlays.map((overlay, index) => {
                                 const textStyle = overlay.style || {};
@@ -844,7 +851,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                               video {
                                 width: 100%;
                                 height: 100%;
-                                object-fit: cover;
+                                object-fit: contain;
                                 filter: ${videoFilterCSS};
                               }
                             </style>
@@ -886,7 +893,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                   uri: videoUrl
                 }}
                 style={{ width: '100%', height: '100%' }}
-                resizeMode={ResizeMode.COVER}
+                resizeMode={ResizeMode.contain}
                 shouldPlay={play}
                 isLooping
                 isMuted={false}
@@ -946,7 +953,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 borderWidth: 2,
                 borderColor: themedColor('#fff', theme.border),
               }}
-              resizeMode="cover"
+              resizeMode="contain"
             />
                          {/* Follow/Following Icon */}
              {user?.$id !== (creator?.$id || (typeof item.creator === 'string' ? item.creator : item.creator?.$id)) && (
@@ -1893,6 +1900,10 @@ const Home = () => {
                                     padding: 0;
                                     box-sizing: border-box;
                                   }
+                                  html {
+                                    width: 100%;
+                                    height: 100%;
+                                  }
                                   body {
                                     width: 100%;
                                     height: 100%;
@@ -1901,6 +1912,8 @@ const Home = () => {
                                     display: flex;
                                     justify-content: center;
                                     align-items: center;
+                                    margin: 0;
+                                    padding: 0;
                                   }
                                   img {
                                     max-width: 100%;
@@ -1909,6 +1922,7 @@ const Home = () => {
                                     height: auto;
                                     object-fit: contain;
                                     filter: ${filterCSS};
+                                    display: block;
                                   }
                                   ${textOverlays.map((overlay, index) => {
                                     const textStyle = overlay.style || {};
@@ -2035,7 +2049,7 @@ const Home = () => {
                   uri: getIOSCompatibleVideoUrl(item.video) || item.video,
                 }}
                 style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
+                resizeMode="contain"
                 shouldPlay={false}
                 isMuted={true}
                 isLooping={false}
@@ -2101,7 +2115,7 @@ const Home = () => {
               <Image
                 source={hasAvatar && avatarSource ? avatarSource : images.profile}
                 style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
+                resizeMode="contain"
                 onError={() => {
                   // Fallback already handled by default source
                 }}
@@ -2200,7 +2214,7 @@ const Home = () => {
               bottom: 0,
               width: '100%',
               height: '100%',
-              resizeMode: 'cover'
+              resizeMode: 'contain'
             }}
             onError={(error) => {
               console.log('Background image failed to load:', error);
@@ -2631,6 +2645,10 @@ const Home = () => {
                                         padding: 0;
                                         box-sizing: border-box;
                                       }
+                                      html {
+                                        width: 100%;
+                                        height: 100%;
+                                      }
                                       body {
                                         width: 100%;
                                         height: 100%;
@@ -2639,6 +2657,8 @@ const Home = () => {
                                         display: flex;
                                         justify-content: center;
                                         align-items: center;
+                                        margin: 0;
+                                        padding: 0;
                                       }
                                       img {
                                         max-width: 100%;
@@ -2647,6 +2667,7 @@ const Home = () => {
                                         height: auto;
                                         object-fit: contain;
                                         filter: ${filterCSS};
+                                        display: block;
                                       }
                                       ${textOverlays.map((overlay, index) => {
                                         const textStyle = overlay.style || {};

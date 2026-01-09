@@ -1583,6 +1583,8 @@ const Create = () => {
       setUploading(true);
       try {
         let finalPhoto = photoForm.photo;
+        let textOverlaysBakedIntoImage = false;
+        let imageOverlaysBakedIntoImage = false;
 
         // Check if we need to merge text/overlays into the image
         const hasTextOverlays = textOverlays.length > 0;
@@ -1626,6 +1628,10 @@ const Create = () => {
                 mimeType: "image/jpeg",
                 size: fileSize,
               };
+
+              // Mark that overlays were baked into the image
+              textOverlaysBakedIntoImage = hasTextOverlays;
+              imageOverlaysBakedIntoImage = hasImageOverlays;
 
               setProcessingProgress(60);
             }
@@ -1761,46 +1767,50 @@ const Create = () => {
         };
 
         // Include image overlays in edits only if not already baked into image
-        if (imageOverlays.length > 0 && !isMediaEdited) {
+        if (imageOverlays.length > 0 && !isMediaEdited && !imageOverlaysBakedIntoImage) {
           finalEdits.imageOverlays = imageOverlays;
         }
 
-        // Save textOverlays if they exist and filters/adjustments are applied (so they render on top)
-        // Compress textOverlays to save space
-        if (textOverlays.length > 0 && (photoForm.filter !== 'none' || adjustments || editedImage?.adjustments)) {
-          finalEdits.t = textOverlays.map(overlay => ({
-            txt: overlay.text,
-            stl: {
-              fs: overlay.style?.fontSize || 24,
-              ff: overlay.style?.fontFamily || 'Poppins-Bold',
-              c: overlay.style?.color || '#FFFFFF',
-              bc: overlay.style?.backgroundColor || 'transparent',
-              al: overlay.style?.alignment || 'center',
-              ts: overlay.style?.textStyle || 'normal'
-            },
-            x: overlay.x || 50,
-            y: overlay.y || 50,
-            id: overlay.id || `text-${Date.now()}-${Math.random()}`
-          }));
-          // Also save adjustments in compressed format
-          if (finalEdits.adjustments) {
-            finalEdits.a = finalEdits.adjustments;
-          }
-          // Compress image overlays if they exist
-          if (finalEdits.imageOverlays && finalEdits.imageOverlays.length > 0) {
-            finalEdits.i = finalEdits.imageOverlays.map(overlay => ({
-              u: overlay.uri,
-              x: overlay.x,
-              y: overlay.y,
-              w: overlay.width,
-              h: overlay.height,
-              r: overlay.rotation || 0
+        // Save textOverlays ONLY if they were NOT baked into the image during capture
+        // If text overlays were baked into the image, don't save them in edits to avoid duplication
+        if (textOverlays.length > 0 && !textOverlaysBakedIntoImage) {
+          // Save textOverlays if filters/adjustments are applied (so they render on top)
+          if (photoForm.filter !== 'none' || adjustments || editedImage?.adjustments) {
+            // Compress textOverlays to save space
+            finalEdits.t = textOverlays.map(overlay => ({
+              txt: overlay.text,
+              stl: {
+                fs: overlay.style?.fontSize || 24,
+                ff: overlay.style?.fontFamily || 'Poppins-Bold',
+                c: overlay.style?.color || '#FFFFFF',
+                bc: overlay.style?.backgroundColor || 'transparent',
+                al: overlay.style?.alignment || 'center',
+                ts: overlay.style?.textStyle || 'normal'
+              },
+              x: overlay.x || 50,
+              y: overlay.y || 50,
+              id: overlay.id || `text-${Date.now()}-${Math.random()}`
             }));
-            delete finalEdits.imageOverlays; // Remove uncompressed version
+            // Also save adjustments in compressed format
+            if (finalEdits.adjustments) {
+              finalEdits.a = finalEdits.adjustments;
+            }
+            // Compress image overlays if they exist
+            if (finalEdits.imageOverlays && finalEdits.imageOverlays.length > 0) {
+              finalEdits.i = finalEdits.imageOverlays.map(overlay => ({
+                u: overlay.uri,
+                x: overlay.x,
+                y: overlay.y,
+                w: overlay.width,
+                h: overlay.height,
+                r: overlay.rotation || 0
+              }));
+              delete finalEdits.imageOverlays; // Remove uncompressed version
+            }
+          } else {
+            // If no filters/adjustments, save in uncompressed format for backward compatibility
+            finalEdits.textOverlays = textOverlays;
           }
-        } else if (textOverlays.length > 0) {
-          // If no filters/adjustments, save in uncompressed format for backward compatibility
-          finalEdits.textOverlays = textOverlays;
         }
 
         await createPhotoPost({

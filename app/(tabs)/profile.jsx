@@ -1585,17 +1585,29 @@ const Profile = () => {
                                               padding: 0;
                                               box-sizing: border-box;
                                             }
+                                            html {
+                                              width: 100%;
+                                              height: 100%;
+                                            }
                                             body {
                                               width: 100%;
                                               height: 100%;
                                               overflow: hidden;
                                               position: relative;
+                                              display: flex;
+                                              justify-content: center;
+                                              align-items: center;
+                                              margin: 0;
+                                              padding: 0;
                                             }
                                             img {
-                                              width: 100%;
-                                              height: 100%;
+                                              max-width: 100%;
+                                              max-height: 100%;
+                                              width: auto;
+                                              height: auto;
                                               object-fit: contain;
                                               filter: ${filterCSS};
+                                              display: block;
                                             }
                                             ${textOverlays.map((overlay, index) => {
                                               const textStyle = overlay.style || {};
@@ -2624,6 +2636,10 @@ const Profile = () => {
                                       padding: 0;
                                       box-sizing: border-box;
                                     }
+                                    html {
+                                      width: 100%;
+                                      height: 100%;
+                                    }
                                     body {
                                       width: 100%;
                                       height: 100%;
@@ -2632,6 +2648,8 @@ const Profile = () => {
                                       display: flex;
                                       justify-content: center;
                                       align-items: center;
+                                      margin: 0;
+                                      padding: 0;
                                     }
                                     img {
                                       max-width: 100%;
@@ -2640,6 +2658,7 @@ const Profile = () => {
                                       height: auto;
                                       object-fit: contain;
                                       filter: ${filterCSS};
+                                      display: block;
                                     }
                                     ${textOverlays.map((overlay, index) => {
                                       const textStyle = overlay.style || {};
