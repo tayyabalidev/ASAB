@@ -668,7 +668,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                               img {
                                 width: 100%;
                                 height: 100%;
-                                object-fit: cover;
+                                object-fit: contain;
                                 filter: ${filterCSS};
                               }
                               ${textOverlays.map((overlay, index) => {
@@ -773,7 +773,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               <Image
                 source={{ uri: String(item.photo) }}
                 style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
+                resizeMode="contain"
                 onError={(error) => {
                   console.log('Photo error:', error);
                 }}
@@ -1992,7 +1992,7 @@ const Home = () => {
                   <Image
                     source={{ uri: String(item.photo) }}
                     style={{ width: '100%', height: '100%' }}
-                    resizeMode="cover"
+                    resizeMode="contain"
                     onError={(error) => {
                       console.log('Trending photo error:', error);
                     }}

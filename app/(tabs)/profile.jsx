@@ -838,6 +838,15 @@ const Profile = () => {
     return bookmarks.map(b => b.$id).sort().join(',');
   }, [bookmarks]);
 
+  // Track loaded thumbnails to prevent reloading
+  const loadedThumbnailsRef = useRef(new Set());
+  
+  // Memoize the bookmarks list to prevent unnecessary re-renders
+  const memoizedBookmarks = useMemo(() => {
+    if (!bookmarks || bookmarks.length === 0) return [];
+    return bookmarks;
+  }, [bookmarkIdsString]); // Only recalculate when bookmark IDs change, not when array reference changes
+
   // Fetch bookmark videos when bookmarks change
   const isFetchingVideosRef = useRef(false);
   
@@ -869,9 +878,14 @@ const Profile = () => {
       setBookmarkVideosLoading(true);
       const newBookmarkVideos = {};
       
+      // Store bookmark IDs from bookmarkIdsString to avoid accessing bookmarks array
+      const bookmarkIdsArray = bookmarkIdsString.split(',');
+      
       try {
         // Process bookmarks sequentially to avoid overwhelming the API
-        for (const bookmark of bookmarks) {
+        // Use bookmarks array but only access it once at the start
+        const bookmarksToProcess = [...bookmarks];
+        for (const bookmark of bookmarksToProcess) {
           if (bookmark.postId) {
             try {
               const videoData = await getVideoById(bookmark.postId);
@@ -896,12 +910,34 @@ const Profile = () => {
         // Only update if we still have the same bookmarks (prevent race conditions)
         if (lastProcessedBookmarkIdsRef.current === bookmarkIdsString) {
           setBookmarkVideos(prev => {
-            // Only update if data actually changed to prevent unnecessary re-renders
-            const hasChanged = Object.keys(newBookmarkVideos).some(
-              key => JSON.stringify(prev[key]) !== JSON.stringify(newBookmarkVideos[key])
-            ) || Object.keys(prev).length !== Object.keys(newBookmarkVideos).length;
+            // Merge with existing data instead of replacing to prevent glitching
+            // Only update entries that actually changed or are new
+            const merged = { ...prev };
+            let hasChanged = false;
             
-            return hasChanged ? newBookmarkVideos : prev;
+            Object.keys(newBookmarkVideos).forEach(key => {
+              const newData = newBookmarkVideos[key];
+              const prevData = prev[key];
+              
+              // Only update if this is a new entry or data actually changed
+              if (!prevData || JSON.stringify(prevData) !== JSON.stringify(newData)) {
+                merged[key] = newData;
+                hasChanged = true;
+              }
+            });
+            
+            // Remove entries that are no longer in bookmarks using bookmarkIdsString
+            const currentBookmarkIds = new Set(bookmarkIdsArray);
+            Object.keys(prev).forEach(key => {
+              if (!currentBookmarkIds.has(key)) {
+                delete merged[key];
+                hasChanged = true;
+                // Also remove from loaded thumbnails ref
+                loadedThumbnailsRef.current.delete(key);
+              }
+            });
+            
+            return hasChanged ? merged : prev;
           });
         }
       } finally {
@@ -1621,19 +1657,28 @@ const Profile = () => {
                  <Text style={{ color: theme.textSecondary, textAlign: 'center' }}>{t('profile.sections.bookmarksError')}</Text>
                  <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>{bookmarksError.message}</Text>
                </View>
-             ) : bookmarks && bookmarks.length > 0 ? (
+             ) : memoizedBookmarks && memoizedBookmarks.length > 0 ? (
                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
-                 {bookmarks.map((bookmark, index) => {
+                 {memoizedBookmarks.map((bookmark, index) => {
                     // Get the fetched video data for this bookmark
                     const videoData = bookmarkVideos[bookmark.$id];
                     
-                    // Use stable thumbnail URI
-                    const thumbnailUri = videoData?.thumbnail || 'https://via.placeholder.com/300x300';
+                    // Use stable thumbnail URI - once loaded, keep using it to prevent reloading
+                    const bookmarkKey = bookmark.$id;
+                    const actualThumbnail = videoData?.thumbnail;
+                    const hasLoadedThumbnail = loadedThumbnailsRef.current.has(bookmarkKey);
+                    
+                    // Use actual thumbnail if available, otherwise placeholder
+                    // But if we've already loaded a thumbnail for this bookmark, keep using it
+                    const thumbnailUri = (hasLoadedThumbnail && actualThumbnail) 
+                      ? actualThumbnail 
+                      : (actualThumbnail || 'https://via.placeholder.com/300x300');
+                    
                     const hasVideo = !!videoData?.video;
                     
                     return (
                       <TouchableOpacity 
-                         key={`bookmark-${bookmark.$id}`}
+                         key={`bookmark-${bookmark.$id}-${bookmark.postId}`}
                         style={{
                           width: '48%',
                           aspectRatio: 1,
@@ -1654,7 +1699,7 @@ const Profile = () => {
                                    $id: bookmark.postId,
                                    title: videoData.title || videoData.title || t('profile.general.bookmarkedVideo'),
                                    video: videoData.video,
-                                  
+                                   
                                    creator: videoData.creator || videoData.creator || { username: t('profile.general.unknownUser') }
                                  };
                                  openVideoModal(completePost, index);
@@ -1669,9 +1714,21 @@ const Profile = () => {
                         <View style={{ width: '100%', height: '100%', position: 'relative' }}>
                           {/* Always show thumbnail image instead of Video component to prevent glitching */}
                           <Image
+                            key={`bookmark-img-${bookmark.$id}`}
                             source={{ uri: thumbnailUri }}
                             style={{ width: '100%', height: '100%' }}
                             resizeMode="cover"
+                            defaultSource={{ uri: 'https://via.placeholder.com/300x300' }}
+                            onLoad={() => {
+                              // Mark this thumbnail as loaded to prevent future reloads
+                              if (actualThumbnail && actualThumbnail !== 'https://via.placeholder.com/300x300') {
+                                loadedThumbnailsRef.current.add(bookmarkKey);
+                              }
+                            }}
+                            onError={() => {
+                              // If image fails to load, use placeholder
+                              // Don't mark as loaded so it can retry
+                            }}
                           />
                           {/* Play icon overlay to indicate it's a video */}
                           {hasVideo && (
