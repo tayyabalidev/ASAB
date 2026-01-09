@@ -1322,8 +1322,37 @@ const Create = () => {
                   const canvasX = (screenCenterX / bodyRect.width) * canvas.width;
                   const canvasY = (screenCenterY / bodyRect.height) * canvas.height;
                   
+                  // Convert element dimensions to canvas coordinates
+                  const canvasWidth = (rect.width / bodyRect.width) * canvas.width;
+                  const canvasHeight = (rect.height / bodyRect.height) * canvas.height;
+                  
                   ctx.save();
                   const computedStyle = window.getComputedStyle(textElement);
+                  
+                  // Draw background color if present
+                  const backgroundColor = computedStyle.backgroundColor;
+                  if (backgroundColor && backgroundColor !== 'transparent' && backgroundColor !== 'rgba(0, 0, 0, 0)') {
+                    ctx.fillStyle = backgroundColor;
+                    // Draw rounded rectangle background
+                    const borderRadius = 4; // Match CSS border-radius: 4px
+                    const x = canvasX - canvasWidth / 2;
+                    const y = canvasY - canvasHeight / 2;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(x + borderRadius, y);
+                    ctx.lineTo(x + canvasWidth - borderRadius, y);
+                    ctx.quadraticCurveTo(x + canvasWidth, y, x + canvasWidth, y + borderRadius);
+                    ctx.lineTo(x + canvasWidth, y + canvasHeight - borderRadius);
+                    ctx.quadraticCurveTo(x + canvasWidth, y + canvasHeight, x + canvasWidth - borderRadius, y + canvasHeight);
+                    ctx.lineTo(x + borderRadius, y + canvasHeight);
+                    ctx.quadraticCurveTo(x, y + canvasHeight, x, y + canvasHeight - borderRadius);
+                    ctx.lineTo(x, y + borderRadius);
+                    ctx.quadraticCurveTo(x, y, x + borderRadius, y);
+                    ctx.closePath();
+                    ctx.fill();
+                  }
+                  
+                  // Draw text
                   ctx.font = computedStyle.font || '24px Poppins-Bold';
                   ctx.fillStyle = computedStyle.color || '#FFFFFF';
                   ctx.textAlign = 'center';
