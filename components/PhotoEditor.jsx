@@ -201,7 +201,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
     
     img.onload = function() {
       originalImageLoaded = true;
-      console.log('Image loaded successfully');
     };
     
     img.onerror = function() {
@@ -214,7 +213,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
         const imageElement = document.getElementById('editedImage');
         if (imageElement) {
           imageElement.style.filter = filterCSS || 'none';
-          console.log('Filter updated:', filterCSS);
           return true;
         } else {
           console.error('Image element not found');
@@ -237,7 +235,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
         
         // Use the provided filter CSS or get it from the image element
         const currentFilter = filterCSS || imageElement.style.filter || 'none';
-        console.log('Capturing image with filter:', currentFilter);
         
         // Function to capture the image
         const captureImage = function() {
@@ -262,8 +259,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                   return;
                 }
                 
-                console.log('Image dimensions:', imgWidth, 'x', imgHeight);
-                
                 // Set canvas dimensions to match image
                 canvas.width = imgWidth;
                 canvas.height = imgHeight;
@@ -283,7 +278,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                 // Parse and apply all filters manually using pixel manipulation
                 if (currentFilter && currentFilter !== 'none') {
                   try {
-                    console.log('Applying filters manually to canvas pixels...');
                     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                     const data = imageData.data;
                     
@@ -327,8 +321,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                     if (opacityMatch) {
                       opacity = parseFloat(opacityMatch[1]);
                     }
-                    
-                    console.log('Filter values - brightness:', brightness, 'contrast:', contrast, 'saturation:', saturation, 'hue:', hueRotate, 'opacity:', opacity);
                     
                     // Apply filters to each pixel
                     for (let i = 0; i < data.length; i += 4) {
@@ -419,7 +411,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                     
                     // Put the modified image data back
                     ctx.putImageData(imageData, 0, 0);
-                    console.log('Manual filter application completed successfully');
                   } catch (manualError) {
                     console.error('Manual filter application failed:', manualError);
                     console.error('Error stack:', manualError.stack);
@@ -429,8 +420,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                 
                 // Convert to data URL with high quality
             const dataURL = canvas.toDataURL('image/jpeg', 0.95);
-                console.log('Successfully captured image, dataURL length:', dataURL.length);
-                console.log('Filter used:', currentFilter);
             resolve(dataURL);
           } catch (error) {
                 console.error('Error capturing image:', error);
@@ -446,14 +435,11 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
         
         // Check if image is loaded
         if (imageElement.complete && imageElement.naturalWidth > 0) {
-          console.log('Image already loaded, capturing...');
           // Image is already loaded, capture immediately
           captureImage();
         } else {
-          console.log('Waiting for image to load...');
           // Wait for image to load
           const loadHandler = function() {
-            console.log('Image load event fired');
             imageElement.removeEventListener('load', loadHandler);
             captureImage();
           };
@@ -463,7 +449,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
           setTimeout(function() {
             imageElement.removeEventListener('load', loadHandler);
             if (imageElement.complete && imageElement.naturalWidth > 0) {
-              console.log('Image loaded after timeout, capturing...');
               captureImage();
             } else {
               console.error('Image load timeout');
@@ -504,14 +489,12 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
             const img = document.getElementById('editedImage');
             if (img) {
               img.style.filter = '${escapedFilterCSS}';
-              console.log('Filter updated:', '${escapedFilterCSS}');
             } else {
               // Retry with delay if element not found
               setTimeout(function() {
                 const img2 = document.getElementById('editedImage');
                 if (img2) {
                   img2.style.filter = '${escapedFilterCSS}';
-                  console.log('Filter applied (delayed):', '${escapedFilterCSS}');
                 }
               }, 100);
             }
@@ -531,8 +514,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
       if (webViewRef.current) {
         // Generate the current filter CSS from adjustments using centralized function
         const currentFilterCSS = generateFilterCSS();
-        console.log('🔧 Generated filter CSS for save:', currentFilterCSS);
-        console.log('🔧 Current adjustments:', adjustments);
         
         // Escape the filter CSS for JavaScript injection
         const escapedFilterCSS = currentFilterCSS
@@ -541,8 +522,6 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
           .replace(/"/g, '\\"')
           .replace(/\n/g, '\\n')
           .replace(/\r/g, '\\r');
-        
-        console.log('🔧 Escaped filter CSS:', escapedFilterCSS);
         
         webViewRef.current.injectJavaScript(`
           (function() {
@@ -559,18 +538,14 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
               
               // Ensure filter is applied to the image element
               const filterCSS = '${escapedFilterCSS}';
-              console.log('Applying filter to image element:', filterCSS);
               img.style.filter = filterCSS;
               
               // Wait a moment for filter to apply, then capture
               setTimeout(function() {
-                console.log('Starting image capture with filter:', filterCSS);
             try {
               if (typeof getImageData === 'function') {
                     // Pass the filter CSS to ensure it's applied
-                    console.log('Calling getImageData with filter:', filterCSS);
                     getImageData(filterCSS).then(function(dataURL) {
-                      console.log('getImageData succeeded, dataURL length:', dataURL ? dataURL.length : 0);
                   window.ReactNativeWebView.postMessage(JSON.stringify({
                     type: 'imageData',
                     data: dataURL
@@ -580,12 +555,10 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
                       console.error('Error stack:', error.stack);
                       // Fallback: try direct capture with manual filter application
                       try {
-                        console.log('Trying fallback direct capture with manual filters...');
                         const canvas = document.createElement('canvas');
                         const ctx = canvas.getContext('2d');
                         canvas.width = img.naturalWidth || img.width;
                         canvas.height = img.naturalHeight || img.height;
-                        console.log('Canvas size:', canvas.width, 'x', canvas.height);
                         
                         // Draw image first
                         ctx.drawImage(img, 0, 0);

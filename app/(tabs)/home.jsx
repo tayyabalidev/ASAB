@@ -94,6 +94,80 @@ const getFilterCSS = (filterId, adjustmentsData = null) => {
   return filterCSS || 'none';
 };
 
+// Generate video filter CSS with adjustments (same as in create.jsx)
+const getVideoFilterCSS = (filterId, adjustmentsData = null) => {
+  const baseFilterCSS = getFilterCSS(filterId, null);
+
+  // Add video adjustments to filter CSS
+  const adjustmentParts = [];
+
+  if (adjustmentsData) {
+    // Brightness, Lux, Highlights, and Shadows combined
+    let brightnessValue = 1;
+    if (adjustmentsData.brightness !== 0) {
+      brightnessValue *= 1 + adjustmentsData.brightness / 200;
+    }
+    if (adjustmentsData.lux !== 0) {
+      brightnessValue *= 1 + adjustmentsData.lux / 300;
+    }
+    // Highlights and Shadows - combine with brightness
+    if (adjustmentsData.highlights !== 0) {
+      brightnessValue *= 1 + (adjustmentsData.highlights / 300);
+    }
+    if (adjustmentsData.shadows !== 0) {
+      brightnessValue *= 1 - (adjustmentsData.shadows / 400);
+    }
+    if (brightnessValue !== 1) {
+      adjustmentParts.push(`brightness(${brightnessValue.toFixed(2)})`);
+    }
+
+    // Contrast and Structure combined
+    let contrastValue = 1.0;
+    if (adjustmentsData.contrast !== 0) {
+      contrastValue = 0.5 + ((adjustmentsData.contrast + 100) / 200) * 1.0;
+    }
+    if (adjustmentsData.structure !== 0) {
+      const structureValue =
+        0.5 + ((adjustmentsData.structure + 100) / 200) * 1.0;
+      contrastValue *= structureValue;
+    }
+    if (contrastValue !== 1.0) {
+      adjustmentParts.push(`contrast(${contrastValue.toFixed(2)})`);
+    }
+
+    // Saturation
+    if (adjustmentsData.saturation !== 0) {
+      const saturation = 1 + adjustmentsData.saturation / 100;
+      adjustmentParts.push(`saturate(${saturation.toFixed(2)})`);
+    }
+
+    // Warmth (hue-rotate)
+    if (adjustmentsData.warmth !== 0) {
+      const hue = (adjustmentsData.warmth / 100) * 30;
+      adjustmentParts.push(`hue-rotate(${hue.toFixed(1)}deg)`);
+    }
+
+    // Fade (opacity + desaturate)
+    if (adjustmentsData.fade !== 0) {
+      const fade = adjustmentsData.fade / 100;
+      adjustmentParts.push(`opacity(${(1 - fade * 0.3).toFixed(2)})`);
+      adjustmentParts.push(`saturate(${(1 - fade * 0.3).toFixed(2)})`);
+    }
+
+  }
+
+  // Combine base filter with adjustments
+  const allParts = [];
+  if (baseFilterCSS && baseFilterCSS !== "none") {
+    allParts.push(baseFilterCSS);
+  }
+  if (adjustmentParts.length > 0) {
+    allParts.push(adjustmentParts.join(" "));
+  }
+
+  return allParts.length > 0 ? allParts.join(" ") : "none";
+};
+
 const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused, theme, isDarkMode }) => {
   const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
   const { t } = useTranslation();
@@ -707,33 +781,120 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             );
           })()
         ) : item.video ? (
-          <Video
-            source={{ 
-              uri: getIOSCompatibleVideoUrl(item.video) || item.video
-            }}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={play}
-            isLooping
-            isMuted={false}
-            useNativeControls={false}
-            onError={(error) => {
-              console.log('Video error:', error);
-            }}
-            onLoad={() => {
-              console.log('Video loaded successfully');
-            }}
-            onPlaybackStatusUpdate={(status) => {
-              if (status.didJustFinish) {
-                setPlay(false);
+          (() => {
+            // Get filter and video adjustments from item
+            const filterId = item.filter || 'none';
+            let videoAdjustments = null;
+            
+            if (item.edits) {
+              try {
+                const edits = typeof item.edits === 'string' ? JSON.parse(item.edits) : item.edits;
+                // Get video adjustments from edits
+                if (edits.adjustments) {
+                  videoAdjustments = edits.adjustments;
+                }
+              } catch (e) {
+                // Silently handle parse errors
               }
-            }}
-            {...(Platform.OS === 'ios' && {
-              allowsExternalPlayback: false,
-              playInSilentModeIOS: true,
-              ignoreSilentSwitch: 'ignore'
-            })}
-          />
+            }
+            
+            const videoFilterCSS = getVideoFilterCSS(filterId, videoAdjustments);
+            const videoUrl = getIOSCompatibleVideoUrl(item.video) || item.video;
+            
+            // Use WebView if there are filters or adjustments to apply CSS filters
+            if (videoFilterCSS !== 'none') {
+              return (
+                <View style={{ width: '100%', height: '100%' }}>
+                  <WebView
+                    key={`video-${item.$id || videoUrl}-${videoFilterCSS}`}
+                    source={{
+                      html: `
+                        <!DOCTYPE html>
+                        <html>
+                          <head>
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                            <style>
+                              * {
+                                margin: 0;
+                                padding: 0;
+                                box-sizing: border-box;
+                              }
+                              body {
+                                width: 100%;
+                                height: 100%;
+                                overflow: hidden;
+                                position: relative;
+                                background: #000;
+                              }
+                              video {
+                                width: 100%;
+                                height: 100%;
+                                object-fit: cover;
+                                filter: ${videoFilterCSS};
+                              }
+                            </style>
+                          </head>
+                          <body>
+                            <video 
+                              src="${videoUrl}" 
+                              autoplay 
+                              loop 
+                              muted
+                              playsinline
+                              webkit-playsinline
+                            ></video>
+                          </body>
+                        </html>
+                      `
+                    }}
+                    style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                    scrollEnabled={false}
+                    showsVerticalScrollIndicator={false}
+                    showsHorizontalScrollIndicator={false}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={false}
+                    mediaPlaybackRequiresUserAction={false}
+                    allowsInlineMediaPlayback={true}
+                    onError={(syntheticEvent) => {
+                      const { nativeEvent } = syntheticEvent;
+                      console.log('Video WebView error: ', nativeEvent);
+                    }}
+                  />
+                </View>
+              );
+            }
+            
+            // No filters/adjustments, use regular Video component
+            return (
+              <Video
+                source={{ 
+                  uri: videoUrl
+                }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={play}
+                isLooping
+                isMuted={false}
+                useNativeControls={false}
+                onError={(error) => {
+                  console.log('Video error:', error);
+                }}
+                onLoad={() => {
+                  console.log('Video loaded successfully');
+                }}
+                onPlaybackStatusUpdate={(status) => {
+                  if (status.didJustFinish) {
+                    setPlay(false);
+                  }
+                }}
+                {...(Platform.OS === 'ios' && {
+                  allowsExternalPlayback: false,
+                  playInSilentModeIOS: true,
+                  ignoreSilentSwitch: 'ignore'
+                })}
+              />
+            );
+          })()
         ) : (
           <View
             style={{

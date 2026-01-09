@@ -370,15 +370,7 @@ const Create = () => {
       try {
         const isAvailable = await checkProcessingServer();
         setUseProcessing(isAvailable);
-        if (isAvailable) {
-          console.log("✅ Processing server is available");
-        } else {
-          console.log(
-            "ℹ️ Processing server not available - using metadata only"
-          );
-        }
       } catch (error) {
-        console.log("Processing server check failed");
         setUseProcessing(false);
       }
     };
@@ -1107,7 +1099,7 @@ const Create = () => {
           </style>
         </head>
         <body>
-          <img src="${imageBase64}" alt="Filtered Image" onerror="console.error('Image load error')" onload="console.log('Image loaded successfully, src length:', this.src.length)" />
+          <img src="${imageBase64}" alt="Filtered Image" onerror="console.error('Image load error')" />
           ${textOverlays
             .map(
               (overlay, index) =>
@@ -1512,25 +1504,14 @@ const Create = () => {
                   type: "video/mp4",
                   size: form.video.size,
                 };
-
-                console.log("✅ Video processed successfully");
               }
 
               setProcessingProgress(100);
               setProcessingMedia(false);
             } catch (processError) {
-              console.log(
-                "⚠️ Server processing failed, filter will be applied on display:",
-                processError
-              );
               setProcessingMedia(false);
               // Continue with original video - filter metadata will be stored and applied via CSS
             }
-          } else {
-            // Server not available - filter will be stored in metadata and applied via CSS on display
-            console.log(
-              "ℹ️ Processing server not available, filter will be applied on display"
-            );
           }
         }
 
@@ -1646,14 +1627,9 @@ const Create = () => {
                 size: fileSize,
               };
 
-              console.log("✅ Captured image with all edits merged");
               setProcessingProgress(60);
             }
           } catch (captureError) {
-            console.log(
-              "⚠️ WebView capture failed, will use original image:",
-              captureError
-            );
             // Continue with original photo if capture fails
           }
         }
@@ -1712,13 +1688,8 @@ const Create = () => {
                     type: "image/jpeg",
                     size: photoForm.photo.size,
                   };
-                  console.log("✅ Photo processed via server");
                 }
               } catch (serverError) {
-                console.log(
-                  "⚠️ Server processing failed, trying client-side:",
-                  serverError
-                );
               }
             }
 
@@ -1756,11 +1727,9 @@ const Create = () => {
                       type: "image/jpeg",
                       size: photoForm.photo.size,
                     };
-                    console.log("✅ Photo processed via client-side");
                   }
                 }
               } catch (clientError) {
-                console.log("⚠️ Client-side processing failed:", clientError);
               }
             }
 
@@ -1769,11 +1738,6 @@ const Create = () => {
             // Use processed photo if available, otherwise use original (filters will be applied via CSS on display)
             if (processedPhoto) {
               finalPhoto = processedPhoto;
-              console.log("✅ Photo processed successfully");
-            } else {
-              console.log(
-                "ℹ️ Using original photo, filters will be applied on display"
-              );
             }
 
             setProcessingProgress(100);
@@ -5709,7 +5673,7 @@ const Create = () => {
                       <WebView
                         key={`text-preview-${editedImage?.uri || "none"}-${
                           textOverlays.length
-                        }-${currentTextPosition.x}-${currentTextPosition.y}`}
+                        }-${currentText ? "has-current" : "no-current"}`}
                         source={{
                           html: `
                             <!DOCTYPE html>
@@ -5959,6 +5923,10 @@ const Create = () => {
                                       element.style.touchAction = 'none';
                                       element.style.pointerEvents = 'auto';
                                       
+                                      // Store current position to use in handleEnd
+                                      let currentX = null;
+                                      let currentY = null;
+                                      
                                       function handleStart(e) {
                                         e.preventDefault();
                                         e.stopPropagation();
@@ -5968,6 +5936,9 @@ const Create = () => {
                                         dragOffset.x = touch.clientX - rect.left - rect.width / 2;
                                         dragOffset.y = touch.clientY - rect.top - rect.height / 2;
                                         element.style.opacity = '0.7';
+                                        // Reset position tracking
+                                        currentX = null;
+                                        currentY = null;
                                       }
                                       
                                       function handleMove(e) {
@@ -5976,18 +5947,20 @@ const Create = () => {
                                           e.stopPropagation();
                                           const touch = e.touches[0];
                                           const bodyRect = document.body.getBoundingClientRect();
-                                          const x = ((touch.clientX - dragOffset.x) / bodyRect.width) * 100;
-                                          const y = ((touch.clientY - dragOffset.y) / bodyRect.height) * 100;
+                                          const x = Math.max(0, Math.min(100, ((touch.clientX - dragOffset.x) / bodyRect.width) * 100));
+                                          const y = Math.max(0, Math.min(100, ((touch.clientY - dragOffset.y) / bodyRect.height) * 100));
+                                          
+                                          // Store position for use in handleEnd
+                                          currentX = x;
+                                          currentY = y;
+                                          
+                                          // Update position directly in DOM for smooth dragging (no WebView reload)
+                                          element.style.left = x + '%';
+                                          element.style.top = y + '%';
                                           
                                           if (isCurrentText) {
-                                            // For current text, send currentTextDrag message
-                                            if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-                                              window.ReactNativeWebView.postMessage(JSON.stringify({
-                                                type: 'currentTextDrag',
-                                                x: Math.max(0, Math.min(100, x)),
-                                                y: Math.max(0, Math.min(100, y))
-                                              }));
-                                            }
+                                            // Position is updated directly in DOM above, no need to send message during drag
+                                            // This prevents WebView reload which causes the black screen glitch
                                           } else {
                                             // For overlay texts
                                             const overlayId = element.getAttribute('data-overlay-id');
@@ -5998,8 +5971,8 @@ const Create = () => {
                                                 type: 'textDrag',
                                                 id: overlayId,
                                                 index: overlayIndex,
-                                                x: Math.max(0, Math.min(100, x)),
-                                                y: Math.max(0, Math.min(100, y))
+                                                x: x,
+                                                y: y
                                               }));
                                             }
                                           }
@@ -6011,7 +5984,32 @@ const Create = () => {
                                           e.preventDefault();
                                           e.stopPropagation();
                                           element.style.opacity = '1';
+                                          
+                                          if (isCurrentText) {
+                                            // Send final position when drag ends (only then update React state to avoid WebView reload)
+                                            // Use stored position if available, otherwise read from element style
+                                            let finalX, finalY;
+                                            if (currentX !== null && currentY !== null) {
+                                              finalX = currentX;
+                                              finalY = currentY;
+                                            } else {
+                                              // Fallback: read from style (shouldn't happen if drag occurred)
+                                              finalX = parseFloat(element.style.left) || 50;
+                                              finalY = parseFloat(element.style.top) || 50;
+                                            }
+                                            
+                                            if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                                              window.ReactNativeWebView.postMessage(JSON.stringify({
+                                                type: 'currentTextDrag',
+                                                x: finalX,
+                                                y: finalY
+                                              }));
+                                            }
+                                          }
+                                          
                                           draggedElement = null;
+                                          currentX = null;
+                                          currentY = null;
                                         }
                                       }
                                       
@@ -6074,6 +6072,7 @@ const Create = () => {
                                 )
                               );
                             } else if (message.type === "currentTextDrag") {
+                              // Only update state when drag ends to avoid WebView reload
                               setCurrentTextPosition({
                                 x: message.x,
                                 y: message.y,
@@ -7253,21 +7252,15 @@ const Create = () => {
                     fromPhotoEditor: true, // Mark as coming from PhotoEditor
                   };
                   setEditedImage(editedFileWithFlag);
-                  console.log("✅ Set editedImage state, URI:", editedFile.uri);
 
                   // IMPORTANT: Update originalImage too (like filter does)
                   // But keep manuallySetBase64Ref true so useEffect doesn't overwrite our base64
                   setOriginalImage(editedFileWithFlag);
-                  console.log(
-                    "✅ Set originalImage state, URI:",
-                    editedFile.uri
-                  );
 
                   setPhotoForm({
                     ...photoForm,
                     photo: editedFileWithFlag,
                   });
-                  console.log("✅ Set photoForm state");
 
                   // Close editor AFTER state updates
                   setShowPhotoEditor(false);
@@ -7277,27 +7270,11 @@ const Create = () => {
                   // Use a counter that increments to ensure key always changes
                   setImageUpdateKey((prev) => {
                     const newKey = (prev || 0) + 1;
-                    console.log(
-                      "✅ Updated imageUpdateKey from",
-                      prev,
-                      "to",
-                      newKey
-                    );
                     return newKey;
                   });
 
                   // Wait for React to process all state updates and re-render
                   await new Promise((resolve) => setTimeout(resolve, 300));
-
-                  // Log current state for debugging
-                  console.log(
-                    "✅ Final check - imageBase64 length:",
-                    editedBase64.length
-                  );
-                  console.log(
-                    "✅ Final check - editedImage URI:",
-                    editedFile.uri
-                  );
 
                   // Release the conversion lock after a delay (but keep manuallySetBase64Ref true)
                   setTimeout(() => {
@@ -7305,8 +7282,6 @@ const Create = () => {
                     // Keep manuallySetBase64Ref true so useEffect doesn't overwrite
                     // It will be reset when a new image is selected
                   }, 2000);
-
-                  console.log("✅ Photo editor save completed");
                   Alert.alert("Success", "Photo edited and saved!");
                 } catch (error) {
                   console.error("Error saving edited photo:", error);

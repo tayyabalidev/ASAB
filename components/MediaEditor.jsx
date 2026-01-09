@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withSpring,
+  runOnUI,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -204,6 +205,220 @@ const FilterButton = React.memo(({ filter, isSelected, onPress, theme }) => (
     </Text>
   </TouchableOpacity>
 ));
+
+// Text Item Component with Animated Values - prevents re-renders during drag
+const TextItem = React.memo(({ 
+  text, 
+  panResponder, 
+  isSelected, 
+  updateTextTransform,
+  deleteElement,
+  isCapturing,
+  textAnimatedPositions,
+  textIsDragging,
+}) => {
+  // Use ref to persist animated values - CRITICAL for preventing glitch
+  const animatedValuesRef = useRef(null);
+  
+  // Get existing animated values from parent ref
+  const existingAnimated = textAnimatedPositions.current[text.id];
+  
+  // Always call hooks unconditionally (React rules)
+  // But we'll reuse existing values if they exist
+  const initialX = existingAnimated?.x?.value ?? text.x;
+  const initialY = existingAnimated?.y?.value ?? text.y;
+  const animatedX = useSharedValue(initialX);
+  const animatedY = useSharedValue(initialY);
+  
+  // CRITICAL: If animated values already exist, reuse them completely
+  // Don't use the new ones we just created - this prevents glitch
+  if (existingAnimated?.x && existingAnimated?.y) {
+    // Reuse existing values - ignore the new ones we just created
+    animatedValuesRef.current = existingAnimated;
+    textAnimatedPositions.current[text.id] = existingAnimated;
+  } else {
+    // First render - use the newly created values
+    animatedValuesRef.current = { x: animatedX, y: animatedY };
+    // Store in parent ref IMMEDIATELY (synchronously) - critical for first drag!
+    textAnimatedPositions.current[text.id] = animatedValuesRef.current;
+  }
+  
+  const finalX = animatedValuesRef.current.x;
+  const finalY = animatedValuesRef.current.y;
+  
+  // CRITICAL: Store values synchronously in render phase (before useLayoutEffect)
+  // This ensures values exist immediately, even before component fully mounts
+  // This is the key fix for first-time drag glitch
+  const currentAnimated = animatedValuesRef.current;
+  if (!textAnimatedPositions.current[text.id] || 
+      textAnimatedPositions.current[text.id] !== currentAnimated) {
+    textAnimatedPositions.current[text.id] = currentAnimated;
+  }
+  
+  // Sync animated values with text position (only when not dragging)
+  // Use useLayoutEffect to ensure it runs synchronously before paint
+  useLayoutEffect(() => {
+    // Ensure values are stored (in case component re-renders)
+    textAnimatedPositions.current[text.id] = currentAnimated;
+    
+    // Sync with text position only if not dragging
+    if (!textIsDragging.current[text.id]) {
+      finalX.value = text.x;
+      finalY.value = text.y;
+    }
+  }, [text.id, currentAnimated, finalX, finalY, text.x, text.y]);
+  
+  // Create animated style - this runs on UI thread, no re-renders!
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      left: finalX.value,
+      top: finalY.value,
+    };
+  }, []);
+  
+  return (
+    <Animated.View
+      {...panResponder.panHandlers}
+      renderToHardwareTextureAndroid={true}
+      shouldRasterizeIOS={true}
+      collapsable={false}
+      style={[
+        styles.textContainer,
+        animatedStyle,
+        {
+          transform: [
+            { scale: text.scale },
+            { rotate: `${text.rotation}deg` }
+          ],
+          zIndex: isSelected ? 1000 : 1,
+        }
+      ]}
+    >
+      <View 
+        pointerEvents="box-none"
+        style={[
+          {
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            minHeight: 30,
+            width: '100%',
+          },
+          text.backgroundColor && {
+            backgroundColor: text.backgroundColor,
+            opacity: text.backgroundOpacity || 0.5,
+            borderRadius: 4,
+          }
+        ]}
+      >
+        {/* Outline layer (rendered behind main text) */}
+        {text.hasOutline && (
+          <Text
+            pointerEvents="none"
+            style={[
+              styles.textOverlay,
+              {
+                position: 'absolute',
+                fontSize: text.fontSize,
+                fontFamily: text.fontFamily,
+                textAlign: text.alignment || 'center',
+                color: text.outlineColor || '#000000',
+                textShadowColor: text.outlineColor || '#000000',
+                textShadowOffset: { width: (text.outlineWidth || 2) * 0.5, height: (text.outlineWidth || 2) * 0.5 },
+                textShadowRadius: (text.outlineWidth || 2) * 2,
+              }
+            ]}
+          >
+            {text.text}
+          </Text>
+        )}
+        {/* Main text */}
+        <Text
+          pointerEvents="none"
+          style={[
+            styles.textOverlay,
+            {
+              fontSize: text.fontSize,
+              color: text.color,
+              fontFamily: text.fontFamily || 'System',
+              fontWeight: text.fontWeight || 'normal',
+              textAlign: text.alignment || 'center',
+              // Text shadow
+              textShadowColor: text.hasShadow !== false ? (text.shadowColor || 'rgba(0,0,0,0.5)') : 'transparent',
+              textShadowOffset: text.hasShadow !== false ? (text.shadowOffset || { width: 1, height: 1 }) : { width: 0, height: 0 },
+              textShadowRadius: text.hasShadow !== false ? (text.shadowBlur || 2) : 0,
+            }
+          ]}
+        >
+          {text.text}
+        </Text>
+      </View>
+      {!isCapturing && isSelected && (
+        <>
+          <TouchableOpacity
+            style={[styles.transformButton, { top: -30, right: 0 }]}
+            onPress={() => updateTextTransform(text.id, { scale: Math.min(3, text.scale + 0.1) })}
+          >
+            <Text style={styles.transformButtonText}>+</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.transformButton, { top: -30, right: 25 }]}
+            onPress={() => updateTextTransform(text.id, { scale: Math.max(0.5, text.scale - 0.1) })}
+          >
+            <Text style={styles.transformButtonText}>−</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.transformButton, { top: -30, right: 50 }]}
+            onPress={() => updateTextTransform(text.id, { rotation: text.rotation + 15 })}
+          >
+            <Text style={styles.transformButtonText}>↻</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              deleteElement('text', text.id);
+            }}
+          >
+            <Text style={styles.deleteButtonText}>×</Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </Animated.View>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison to prevent re-renders during drag
+  // Only re-render if text properties actually changed (not position during drag)
+  if (prevProps.text.id !== nextProps.text.id) return false;
+  if (prevProps.isSelected !== nextProps.isSelected) return false;
+  if (prevProps.isCapturing !== nextProps.isCapturing) return false;
+  
+  // Check if text is currently being dragged
+  const isDragging = nextProps.textIsDragging.current[nextProps.text.id] === true;
+  const wasDragging = prevProps.textIsDragging.current[prevProps.text.id] === true;
+  
+  // If dragging now or was dragging, ignore position changes
+  if (isDragging || wasDragging) {
+    // During drag, only check non-position properties
+    if (prevProps.text.text !== nextProps.text.text) return false;
+    if (prevProps.text.fontSize !== nextProps.text.fontSize) return false;
+    if (prevProps.text.color !== nextProps.text.color) return false;
+    if (prevProps.text.scale !== nextProps.text.scale) return false;
+    if (prevProps.text.rotation !== nextProps.text.rotation) return false;
+    // Ignore x, y changes during drag - animated values handle them
+    return true; // props are equal (skip re-render)
+  }
+  
+  // Not dragging - compare all properties including position
+  if (prevProps.text.text !== nextProps.text.text) return false;
+  if (prevProps.text.fontSize !== nextProps.text.fontSize) return false;
+  if (prevProps.text.color !== nextProps.text.color) return false;
+  if (prevProps.text.scale !== nextProps.text.scale) return false;
+  if (prevProps.text.rotation !== nextProps.text.rotation) return false;
+  if (prevProps.text.x !== nextProps.text.x) return false;
+  if (prevProps.text.y !== nextProps.text.y) return false;
+  
+  return true; // props are equal (skip re-render)
+});
 
 // Memoized Sticker Item Component
 const StickerItem = React.memo(({ emoji, onPress }) => (
@@ -519,49 +734,174 @@ const MediaEditor = ({
   // Store text input refs for focus management
   const textInputRefs = useRef({});
   
+  // Track if user is dragging (vs tapping) for each text
+  const textIsDragging = useRef({});
+  
+  // Store animated values for text positions (to avoid re-renders during drag)
+  const textAnimatedPositions = useRef({});
+  
+  // Store selected text in ref to avoid re-renders during drag
+  const selectedTextRef = useRef(null);
+  useEffect(() => {
+    selectedTextRef.current = selectedText;
+  }, [selectedText]);
+  
+  // Store current texts in ref to access latest values in PanResponder
+  const textsRef = useRef(texts);
+  useEffect(() => {
+    textsRef.current = texts;
+  }, [texts]);
+  
+  // Create animated values for new texts and sync with state
+  useEffect(() => {
+    texts.forEach(text => {
+      let animatedPos = textAnimatedPositions.current[text.id];
+      
+      if (!animatedPos) {
+        // Create animated values for new text
+        // Note: We can't use useSharedValue here (not a component), so TextItem will create them
+        // But we'll ensure they're created synchronously in TextItem
+        animatedPos = null; // Will be created by TextItem component
+      } else if (!textIsDragging.current[text.id]) {
+        // Sync animated values with state (only if not currently dragging)
+        animatedPos.x.value = text.x;
+        animatedPos.y.value = text.y;
+      }
+    });
+    
+    // Clean up animated values for deleted texts
+    const currentIds = new Set(texts.map(t => t.id));
+    Object.keys(textAnimatedPositions.current).forEach(id => {
+      if (!currentIds.has(parseInt(id))) {
+        delete textAnimatedPositions.current[id];
+      }
+    });
+  }, [texts]);
+  
+  // Drag threshold - if movement exceeds this, it's a drag, not a tap
+  const DRAG_THRESHOLD = 10;
+  
   // Create or get PanResponder for a text (EXACTLY like stickers)
   const getTextPanResponder = useCallback((text) => {
     if (!textPanRespondersRef.current[text.id]) {
-      textPanRespondersRef.current[text.id] = PanResponder.create({
+      const textId = text.id; // Capture ID to avoid stale closure
+      textPanRespondersRef.current[textId] = PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponderCapture: () => true,
         onPanResponderGrant: (evt) => {
-          console.log('✅ Text PanResponder GRANT - text id:', text.id);
           evt.stopPropagation();
           const { pageX, pageY } = evt.nativeEvent;
-          textStartPositions.current[text.id] = {
-            startX: pageX - text.x,
-            startY: pageY - text.y,
+          
+          // Get current text position from ref to avoid stale closure
+          const currentText = textsRef.current.find(t => t.id === textId);
+          if (!currentText) return;
+          
+          // Initialize drag tracking
+          textIsDragging.current[textId] = false;
+          
+          // Store initial touch position and text position using current values
+          textStartPositions.current[textId] = {
+            startX: pageX - currentText.x,
+            startY: pageY - currentText.y,
+            initialPageX: pageX,
+            initialPageY: pageY,
           };
-          setSelectedText(text.id);
-          // Focus the text input
-          setTimeout(() => {
-            if (textInputRefs.current[text.id] && !textInputRefs.current[text.id].isFocused()) {
-              textInputRefs.current[text.id].focus();
+          
+          // Update ref immediately without causing re-render
+          selectedTextRef.current = textId;
+          
+          // Blur any currently focused text input to prevent interference
+          Object.keys(textInputRefs.current).forEach(id => {
+            if (textInputRefs.current[id] && textInputRefs.current[id].isFocused()) {
+              textInputRefs.current[id].blur();
             }
-          }, 100);
+          });
         },
-        onPanResponderMove: (evt) => {
-          console.log('🔄 Text PanResponder MOVE');
+        onPanResponderMove: (evt, gestureState) => {
           evt.stopPropagation();
           const { pageX, pageY } = evt.nativeEvent;
-          const startPos = textStartPositions.current[text.id];
+          const startPos = textStartPositions.current[textId];
+          
           if (startPos) {
-            const newX = pageX - startPos.startX;
-            const newY = pageY - startPos.startY;
-            console.log('📍 Moving text to:', newX, newY);
-            updateTextPosition(text.id, newX, newY);
+            // Calculate distance moved from initial touch
+            const dx = Math.abs(pageX - startPos.initialPageX);
+            const dy = Math.abs(pageY - startPos.initialPageY);
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            // If movement exceeds threshold, it's a drag
+            if (distance > DRAG_THRESHOLD) {
+              const wasDragging = textIsDragging.current[textId];
+              textIsDragging.current[textId] = true;
+              
+              // Calculate new position smoothly
+              const newX = Math.max(0, Math.min(SCREEN_WIDTH - 100, pageX - startPos.startX));
+              const newY = Math.max(0, Math.min(SCREEN_HEIGHT - 30, pageY - startPos.startY));
+              
+              // Update animated values directly (no re-render!)
+              const animatedPos = textAnimatedPositions.current[textId];
+              if (animatedPos && animatedPos.x && animatedPos.y) {
+                // Update on UI thread for maximum performance - no re-render!
+                animatedPos.x.value = newX;
+                animatedPos.y.value = newY;
+              } else {
+                // This should never happen - animated values should exist before drag
+                // If it does happen, log warning but don't update state (would cause glitch)
+                console.warn('Animated values missing for text', textId, '- TextItem may not have mounted yet');
+                // Don't update state here - wait for TextItem to create animated values
+              }
+              
+              // Update selected text state only once when drag starts (not on every move)
+              // Defer to avoid re-render during drag
+              if (!wasDragging && selectedTextRef.current !== textId) {
+                // Don't update during drag - wait until release
+                selectedTextRef.current = textId;
+              }
+            }
           }
         },
         onPanResponderRelease: (evt) => {
           evt.stopPropagation();
-          delete textStartPositions.current[text.id];
+          const wasDragging = textIsDragging.current[textId];
+          
+          // Sync animated values back to state when drag ends
+          if (wasDragging) {
+            const animatedPos = textAnimatedPositions.current[textId];
+            if (animatedPos && animatedPos.x && animatedPos.y) {
+              const finalX = animatedPos.x.value;
+              const finalY = animatedPos.y.value;
+              // Update state with final position (this will sync animated values in useEffect)
+              updateTextPosition(textId, finalX, finalY);
+            }
+          }
+          
+          // Update selected text state (deferred to avoid re-render during drag)
+          if (selectedTextRef.current === textId) {
+            // Use setTimeout to batch the state update after drag completes
+            setTimeout(() => {
+              setSelectedText(textId);
+            }, 0);
+          } else if (!wasDragging) {
+            setSelectedText(textId);
+          }
+          
+          // Only focus TextInput if it was a tap (not a drag)
+          if (!wasDragging) {
+            setTimeout(() => {
+              if (textInputRefs.current[textId] && !textInputRefs.current[textId].isFocused()) {
+                textInputRefs.current[textId].focus();
+              }
+            }, 100);
+          }
+          
+          delete textStartPositions.current[textId];
+          delete textIsDragging.current[textId];
         },
         onPanResponderTerminate: (evt) => {
           evt.stopPropagation();
-          delete textStartPositions.current[text.id];
+          delete textStartPositions.current[textId];
+          delete textIsDragging.current[textId];
         },
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
@@ -570,15 +910,23 @@ const MediaEditor = ({
     return textPanRespondersRef.current[text.id];
   }, [updateTextPosition]);
   
-  // Clean up PanResponders for deleted texts
+  // Ensure PanResponders are created for all texts immediately to prevent flicker on first drag
   useEffect(() => {
+    texts.forEach(text => {
+      if (!textPanRespondersRef.current[text.id]) {
+        // Create PanResponder immediately for new texts
+        getTextPanResponder(text);
+      }
+    });
+    
+    // Clean up PanResponders for deleted texts
     const currentIds = new Set(texts.map(t => t.id));
     Object.keys(textPanRespondersRef.current).forEach(id => {
       if (!currentIds.has(parseInt(id))) {
         delete textPanRespondersRef.current[id];
       }
     });
-  }, [texts]);
+  }, [texts, getTextPanResponder]);
 
   // Text styles similar to Instagram
   const TEXT_STYLES = [
@@ -616,8 +964,12 @@ const MediaEditor = ({
       shadowOffset: { width: 1, height: 1 },
       shadowBlur: 2,
     };
+    
+    // Pre-create PanResponder synchronously before adding to state
+    getTextPanResponder(newText);
+    
     setTexts([...texts, newText]);
-    setSelectedText(newText.id); // Auto-select new text
+    setSelectedText(newText.id);
   };
 
   // Apply text style
@@ -1222,116 +1574,24 @@ const MediaEditor = ({
               );
             })}
             
-            {/* Texts - Draggable using PanResponder (same as stickers) */}
+            {/* Texts - Draggable using PanResponder with Animated Values */}
             {texts.map(text => {
               const panResponder = getTextPanResponder(text);
+              // Use ref to check selection without causing re-render during drag
+              const isSelected = selectedText === text.id || selectedTextRef.current === text.id;
               
               return (
-                <Animated.View
+                <TextItem
                   key={text.id}
-                  {...panResponder.panHandlers}
-                  style={[
-                    styles.textContainer,
-                    {
-                      left: text.x,
-                      top: text.y,
-                      transform: [
-                        { scale: text.scale },
-                        { rotate: `${text.rotation}deg` }
-                      ],
-                      zIndex: selectedText === text.id ? 1000 : 1,
-                    }
-                  ]}
-                >
-                  <View 
-                    style={[
-                      {
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        minHeight: 30,
-                        width: '100%',
-                      },
-                      text.backgroundColor && {
-                        backgroundColor: text.backgroundColor,
-                        opacity: text.backgroundOpacity || 0.5,
-                        borderRadius: 4,
-                      }
-                    ]}
-                  >
-                      {/* Outline layer (rendered behind main text) */}
-                      {text.hasOutline && (
-                        <Text
-                          pointerEvents="none"
-                          style={[
-                            styles.textOverlay,
-                            {
-                              position: 'absolute',
-                              fontSize: text.fontSize,
-                              fontFamily: text.fontFamily,
-                              textAlign: text.alignment || 'center',
-                              color: text.outlineColor || '#000000',
-                              textShadowColor: text.outlineColor || '#000000',
-                              textShadowOffset: { width: (text.outlineWidth || 2) * 0.5, height: (text.outlineWidth || 2) * 0.5 },
-                              textShadowRadius: (text.outlineWidth || 2) * 2,
-                            }
-                          ]}
-                        >
-                          {text.text}
-                        </Text>
-                      )}
-                      {/* Main text */}
-                      <Text
-                        pointerEvents="none"
-                        style={[
-                          styles.textOverlay,
-                          {
-                            fontSize: text.fontSize,
-                            color: text.color,
-                            fontFamily: text.fontFamily || 'System',
-                            fontWeight: text.fontWeight || 'normal',
-                            textAlign: text.alignment || 'center',
-                            // Text shadow
-                            textShadowColor: text.hasShadow !== false ? (text.shadowColor || 'rgba(0,0,0,0.5)') : 'transparent',
-                            textShadowOffset: text.hasShadow !== false ? (text.shadowOffset || { width: 1, height: 1 }) : { width: 0, height: 0 },
-                            textShadowRadius: text.hasShadow !== false ? (text.shadowBlur || 2) : 0,
-                          }
-                        ]}
-                      >
-                        {text.text}
-                      </Text>
-                    </View>
-                  {!isCapturing && selectedText === text.id && (
-                    <>
-                      <TouchableOpacity
-                        style={[styles.transformButton, { top: -30, right: 0 }]}
-                        onPress={() => updateTextTransform(text.id, { scale: Math.min(3, text.scale + 0.1) })}
-                      >
-                        <Text style={styles.transformButtonText}>+</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.transformButton, { top: -30, right: 25 }]}
-                        onPress={() => updateTextTransform(text.id, { scale: Math.max(0.5, text.scale - 0.1) })}
-                      >
-                        <Text style={styles.transformButtonText}>−</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.transformButton, { top: -30, right: 50 }]}
-                        onPress={() => updateTextTransform(text.id, { rotation: text.rotation + 15 })}
-                      >
-                        <Text style={styles.transformButtonText}>↻</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          deleteElement('text', text.id);
-                        }}
-                      >
-                        <Text style={styles.deleteButtonText}>×</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-                </Animated.View>
+                  text={text}
+                  panResponder={panResponder}
+                  isSelected={isSelected}
+                  updateTextTransform={updateTextTransform}
+                  deleteElement={deleteElement}
+                  isCapturing={isCapturing}
+                  textAnimatedPositions={textAnimatedPositions}
+                  textIsDragging={textIsDragging}
+                />
               );
             })}
             
