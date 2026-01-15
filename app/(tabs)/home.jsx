@@ -823,6 +823,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             const videoFilterCSS = getVideoFilterCSS(filterId, videoAdjustments);
             const videoUrl = getIOSCompatibleVideoUrl(item.video) || item.video;
             
+           
+            
             // Use WebView if there are filters or adjustments to apply CSS filters
             if (videoFilterCSS !== 'none') {
               return (

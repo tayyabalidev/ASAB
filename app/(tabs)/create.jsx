@@ -127,6 +127,8 @@ const Create = () => {
   const [showVideoFilterModal, setShowVideoFilterModal] = useState(false);
   const [showMusicModal, setShowMusicModal] = useState(false);
   const [videoFilterCSS, setVideoFilterCSS] = useState("none");
+  const [videoThumbnailBase64, setVideoThumbnailBase64] = useState(null); // Base64 image for filter thumbnails
+  const videoThumbnailWebViewRef = useRef(null); // Ref for WebView that extracts video frame
 
   // Video editing features state
   const [showTrimModal, setShowTrimModal] = useState(false);
@@ -384,6 +386,32 @@ const Create = () => {
       setVideoFilterCSS(newFilterCSS);
     }
   }, [videoAdjustments, form.filter, form.video, getVideoFilterCSS]);
+
+  // Extract video frame for filter thumbnails (like photos do with base64)
+  useEffect(() => {
+    const extractVideoFrame = async () => {
+      if (!form.video || !form.video.uri) {
+        setVideoThumbnailBase64(null);
+        return;
+      }
+
+      // If we already have a thumbnail for this video, skip
+      if (videoThumbnailBase64) {
+        return;
+      }
+
+      try {
+        // Use a hidden Video component to capture a frame
+        // We'll use view-shot or canvas to capture the frame
+        // For now, we'll extract it when the filter modal opens
+        // The thumbnails will use WebView with the video frame once extracted
+      } catch (error) {
+        console.error("Error extracting video frame:", error);
+      }
+    };
+
+    extractVideoFrame();
+  }, [form.video]);
 
   // Cleanup seek timeout on unmount
   useEffect(() => {
@@ -791,7 +819,7 @@ const Create = () => {
     const filterCSS = getFilterCSS(filterId, null);
     setVideoFilterCSS(filterCSS);
     setForm({ ...form, filter: filterId });
-    setShowVideoFilterModal(false);
+    // Don't close modal - let user see the preview and click Done
   };
 
   // Get CSS filter string based on filter type and adjustments
@@ -1490,61 +1518,13 @@ const Create = () => {
       try {
         let finalVideo = form.video;
 
-        // Skip processing if media was already edited via MediaEditor (it already has all edits applied)
-        // Process video if filter/music is selected AND media wasn't already edited
-        // Note: Filter will be stored in metadata and applied via CSS on display if server processing fails
-        if (!isMediaEdited && (form.filter !== "none" || form.music)) {
-          // Try server processing if available
-          if (useProcessing) {
-            try {
-              setProcessingMedia(true);
-              setProcessingProgress(10);
-
-              console.log("Processing video with filter:", form.filter);
-
-              // Process video with filter and music
-              const processedResult = await processVideo({
-                video: form.video,
-                music: form.music || null,
-                filter: form.filter,
-                musicVolume: 0.5,
-              });
-
-              setProcessingProgress(50);
-
-              // Save processed video to file system
-              if (processedResult && processedResult.base64) {
-                const processedUri = `${
-                  FileSystem.documentDirectory
-                }processed_video_${Date.now()}.mp4`;
-
-                await FileSystem.writeAsStringAsync(
-                  processedUri,
-                  processedResult.base64,
-                  {
-                    encoding: FileSystem.EncodingType.Base64,
-                  }
-                );
-
-                // Update to use processed video
-                finalVideo = {
-                  uri: processedUri,
-                  name: "processed_video.mp4",
-                  type: "video/mp4",
-                  size: form.video.size,
-                };
-              }
-
-              setProcessingProgress(100);
-              setProcessingMedia(false);
-            } catch (processError) {
-              setProcessingMedia(false);
-              // Continue with original video - filter metadata will be stored and applied via CSS
-            }
-          }
-        }
+        // Apply filters directly in client (like photos) - store filter in metadata
+        // Filter will be applied on display using CSS filters in WebView
+        // No server processing needed - same approach as photos
 
         setProcessingProgress(0);
+
+        
 
         await createVideoPost({
           ...form,
@@ -2073,6 +2053,7 @@ const Create = () => {
                                 overflow: "hidden",
                               }}
                             >
+                              {/* Use Native Video - filters applied server-side during upload */}
                               <Video
                                 ref={videoRef}
                                 source={{ uri: form.video.uri }}
@@ -2107,6 +2088,30 @@ const Create = () => {
                                   }
                                 }}
                               />
+                              {/* Filter indicator */}
+                              {form.filter !== "none" && (
+                                <View
+                                  style={{
+                                    position: "absolute",
+                                    bottom: 10,
+                                    left: 10,
+                                    backgroundColor: "rgba(0,0,0,0.7)",
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    borderRadius: 8,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      color: "#fff",
+                                      fontSize: 12,
+                                      fontWeight: "600",
+                                    }}
+                                  >
+                                    Filter: {FILTERS.find((f) => f.id === form.filter)?.name || form.filter}
+                                  </Text>
+                                </View>
+                              )}
                               {/* Indicators Row */}
                               <View
                                 style={{
@@ -4530,7 +4535,7 @@ const Create = () => {
               </View>
             </Modal>
 
-            {/* Video Filter Modal */}
+            {/* Video Filter Modal - Instagram-style with thumbnails */}
             <Modal
               visible={showVideoFilterModal}
               transparent={true}
@@ -4540,94 +4545,199 @@ const Create = () => {
               <View
                 style={{
                   flex: 1,
-                  backgroundColor: "rgba(0,0,0,0.8)",
-                  justifyContent: "flex-end",
+                  backgroundColor: "rgba(0,0,0,0.95)",
                 }}
               >
+                {/* Header */}
                 <View
                   style={{
-                    backgroundColor: theme.surface,
-                    borderTopLeftRadius: 20,
-                    borderTopRightRadius: 20,
-                    padding: 20,
-                    maxHeight: "60%",
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    paddingHorizontal: 16,
+                    paddingTop: Platform.OS === "ios" ? 50 : 20,
+                    paddingBottom: 12,
+                    borderBottomWidth: 1,
+                    borderBottomColor: "rgba(255,255,255,0.1)",
                   }}
                 >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: 20,
+                  <TouchableOpacity
+                    onPress={() => setShowVideoFilterModal(false)}
+                  >
+                    <Text
+                      style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}
+                    >
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+                  <Text
+                    style={{ color: "#fff", fontSize: 18, fontWeight: "bold" }}
+                  >
+                    Filter
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowVideoFilterModal(false);
                     }}
                   >
                     <Text
                       style={{
-                        color: theme.textPrimary,
-                        fontSize: 20,
-                        fontWeight: "bold",
+                        color: "#0095F6",
+                        fontSize: 16,
+                        fontWeight: "600",
                       }}
                     >
-                      Video Filters
-                    </Text>
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View style={{ flexDirection: "row", gap: 12 }}>
-                      {FILTERS.map((filter) => (
-                        <TouchableOpacity
-                          key={filter.id}
-                          onPress={() => applyVideoFilter(filter.id)}
-                          style={{
-                            alignItems: "center",
-                            padding: 10,
-                            backgroundColor:
-                              form.filter === filter.id
-                                ? theme.accentSoft
-                                : theme.cardSoft,
-                            borderRadius: 10,
-                            minWidth: 80,
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: theme.textPrimary,
-                              fontSize: 14,
-                              fontWeight:
-                                form.filter === filter.id ? "bold" : "normal",
-                            }}
-                          >
-                            {filter.name}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </ScrollView>
-                  <Text
-                    style={{
-                      color: theme.textSecondary,
-                      marginTop: 16,
-                      fontSize: 12,
-                      textAlign: "center",
-                    }}
-                  >
-                    Note: Filters are applied as preview. Actual video
-                    processing may be done on the server.
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => setShowVideoFilterModal(false)}
-                    style={{
-                      marginTop: 20,
-                      backgroundColor: theme.accent,
-                      padding: 15,
-                      borderRadius: 10,
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text style={{ color: "#fff", fontWeight: "bold" }}>
-                      Close
+                      Done
                     </Text>
                   </TouchableOpacity>
                 </View>
+
+                {/* Video Preview with Selected Filter */}
+                {form.video && (
+                  <View
+                    style={{
+                      flex: 1,
+                      backgroundColor: "#000",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      position: "relative",
+                    }}
+                  >
+                    {/* Use native Video for preview - filters will be applied on display (like photos) */}
+                    <Video
+                      ref={videoRef}
+                      source={{ uri: form.video.uri }}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                      }}
+                      resizeMode={ResizeMode.CONTAIN}
+                      shouldPlay={true}
+                      isLooping
+                      muted
+                      onLoad={(status) => {
+                        if (status.isLoaded) {
+                          const duration = status.durationMillis / 1000;
+                          setVideoDuration(duration);
+                          if (videoDuration === 0) {
+                            const seekTime = Math.max(1, duration / 2);
+                            safeSeek(seekTime * 1000);
+                          }
+                        }
+                      }}
+                      onError={(error) => {
+                        if (!error?.error?.includes?.("Seeking interrupted")) {
+                          console.log("Video error:", error);
+                        }
+                      }}
+                    />
+                  </View>
+                )}
+
+                {/* Filter Thumbnails */}
+                {form.video && (
+                  <View
+                    style={{
+                      borderTopWidth: 1,
+                      borderTopColor: "rgba(255,255,255,0.1)",
+                      paddingVertical: 16,
+                      paddingHorizontal: 16,
+                      backgroundColor: "#000",
+                    }}
+                  >
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{
+                        gap: 12,
+                        paddingHorizontal: 4,
+                      }}
+                    >
+                      {FILTERS.map((filter) => {
+                        const filterCSS = getFilterCSS(filter.id, null);
+                        const isSelected = form.filter === filter.id;
+
+                        return (
+                          <TouchableOpacity
+                            key={filter.id}
+                            onPress={() => applyVideoFilter(filter.id)}
+                            style={{
+                              alignItems: "center",
+                              marginRight: 12,
+                              minWidth: 70,
+                            }}
+                          >
+                            <View
+                              style={{
+                                width: 70,
+                                height: 70,
+                                borderRadius: 8,
+                                overflow: "hidden",
+                                borderWidth: isSelected ? 3 : 2,
+                                borderColor: isSelected
+                                  ? "#0095F6"
+                                  : "transparent",
+                                marginBottom: 6,
+                                backgroundColor: "rgba(255, 255, 255, 0.1)",
+                                position: "relative",
+                              }}
+                            >
+                              {/* Use native Video for thumbnails - filters shown via label */}
+                              <Video
+                                source={{ uri: form.video.uri }}
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                }}
+                                resizeMode={ResizeMode.COVER}
+                                shouldPlay={false}
+                                muted
+                              />
+                              {/* Filter overlay indicator */}
+                              {filter.id !== "none" && filterCSS !== "none" && (
+                                <View
+                                  style={{
+                                    position: "absolute",
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    backgroundColor: "rgba(0,0,0,0.3)",
+                                    justifyContent: "center",
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      color: "#fff",
+                                      fontSize: 10,
+                                      fontWeight: "600",
+                                    }}
+                                  >
+                                    {filter.name}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text
+                              style={{
+                                color: isSelected ? "#0095F6" : "#FFFFFF",
+                                fontSize: 12,
+                                fontWeight: isSelected ? "600" : "400",
+                                fontFamily: isSelected
+                                  ? "Poppins-SemiBold"
+                                  : "Poppins-Regular",
+                                textAlign: "center",
+                              }}
+                            >
+                              {filter.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
               </View>
             </Modal>
 

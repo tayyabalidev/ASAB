@@ -473,6 +473,19 @@ const processMultipleClips = async (videoFiles, clipsData, options, outputPath, 
 // Video filter presets (FFmpeg filters) - returns filter string and intensity multiplier
 const videoFilters = {
   'none': { filter: '', intensity: 1.0 },
+  // Instagram-style location filters
+  'wavy': { filter: 'eq=brightness=0.05:contrast=0.95:saturation=0.85', intensity: 1.0 },
+  'paris': { filter: 'eq=brightness=0.08:contrast=1.1:saturation=1.15', intensity: 1.0 },
+  'losangeles': { filter: 'eq=brightness=0.15:contrast=1.05:saturation=1.2', intensity: 1.0 },
+  'oslo': { filter: 'eq=brightness=-0.05:contrast=1.1:saturation=0.9', intensity: 1.0 },
+  'tokyo': { filter: 'eq=brightness=0.1:contrast=1.15:saturation=1.1', intensity: 1.0 },
+  'london': { filter: 'eq=brightness=-0.1:contrast=1.2:saturation=0.95', intensity: 1.0 },
+  'moscow': { filter: 'eq=brightness=-0.08:contrast=1.25:saturation=0.88', intensity: 1.0 },
+  'berlin': { filter: 'eq=brightness=-0.02:contrast=1.15:saturation=1.05', intensity: 1.0 },
+  'rome': { filter: 'eq=brightness=0.12:contrast=1.08:saturation=1.18', intensity: 1.0 },
+  'madrid': { filter: 'eq=brightness=0.05:contrast=1.2:saturation=1.12', intensity: 1.0 },
+  'amsterdam': { filter: 'eq=brightness=0.08:contrast=1.05:saturation=1.1', intensity: 1.0 },
+  // Classic filters
   'vintage': { filter: 'curves=vintage', intensity: 1.0 },
   'blackwhite': { filter: 'hue=s=0', intensity: 1.0 },
   'sepia': { filter: 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131', intensity: 1.0 },
