@@ -716,7 +716,10 @@ const UserProfile = () => {
                     {/* Support Creator Button */}
                     <View style={{ alignItems: 'center' }}>
                       <TouchableOpacity
-                        onPress={() => router.push('/donation')}
+                        onPress={() => router.push({
+                          pathname: '/donation',
+                          params: { creatorId: profileUser?.$id || id }
+                        })}
                         style={{
                           borderRadius: 8,
                           shadowColor: '#32CD32',

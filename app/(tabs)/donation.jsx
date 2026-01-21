@@ -1,19 +1,33 @@
-import React, { useState, useMemo } from "react";
-import { router } from "expo-router";
+import React, { useState, useMemo, useEffect } from "react";
+import { router, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { View, Text, TouchableOpacity, TextInput, Alert, ScrollView, Image } from "react-native";
 import { useTranslation } from "react-i18next";
 import { icons } from "../../constants";
 import { useGlobalContext } from "../../context/GlobalProvider";
+import { useStripe } from "@stripe/stripe-react-native";
+import { processDonationPayment } from "../../lib/paymentService";
+import { 
+  createDonation, 
+  updateDonationStatus, 
+  getRecentDonations,
+  getCreatorTotalDonations 
+} from "../../lib/appwrite";
 
 const DonationPage = () => {
   const { user, isRTL } = useGlobalContext();
   const { t } = useTranslation();
+  const stripe = useStripe();
+  const params = useLocalSearchParams();
+  const creatorId = params.creatorId || user?.$id; // Use creatorId from params, or default to current user
   const [selectedAmount, setSelectedAmount] = useState(null);
   const [customAmount, setCustomAmount] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [donationMessage, setDonationMessage] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [creatorData, setCreatorData] = useState(null);
+  const [totalRaised, setTotalRaised] = useState(0);
+  const [recentDonations, setRecentDonations] = useState([]);
 
   const presetAmounts = useMemo(
     () => [
@@ -35,6 +49,31 @@ const DonationPage = () => {
     ],
     [t]
   );
+
+  // Load creator data and donation stats
+  useEffect(() => {
+    const loadCreatorData = async () => {
+      try {
+        // Load total raised
+        const total = await getCreatorTotalDonations(creatorId);
+        setTotalRaised(total);
+
+        // Load recent donations
+        const recent = await getRecentDonations(creatorId, 5);
+        setRecentDonations(recent);
+
+        // For now, use current user as creator data
+        // In production, fetch creator data by creatorId
+        setCreatorData(user);
+      } catch (error) {
+        console.error('Error loading creator data:', error);
+      }
+    };
+
+    if (creatorId) {
+      loadCreatorData();
+    }
+  }, [creatorId, user]);
 
   const handleAmountSelect = (amount) => {
     if (selectedAmount === amount) {
@@ -70,6 +109,11 @@ const DonationPage = () => {
       return;
     }
 
+    if (!user || !user.$id) {
+      Alert.alert(t("common.error"), "Please sign in to make a donation");
+      return;
+    }
+
     const finalAmount = selectedAmount || parseFloat(customAmount);
     
     if (isNaN(finalAmount) || finalAmount <= 0) {
@@ -80,39 +124,81 @@ const DonationPage = () => {
     setIsProcessing(true);
 
     try {
-      // Simulate payment processing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
       const platformFee = finalAmount * 0.10;
       const creatorReceives = finalAmount - platformFee;
-      
-      Alert.alert(
-        t("donation.successTitle"),
-        t("donation.successMessage", {
-          amount: finalAmount.toFixed(2),
-          creator: creatorReceives.toFixed(2),
-        }),
-        [
-          {
-            text: t("donation.shareButton"),
-            onPress: () => {
-              Alert.alert(t("donation.shareThanksTitle"), t("donation.shareThanksMessage"));
-              // Reset form after sharing
-              resetForm();
-            }
-          },
-          {
-            text: t("donation.doneButton"),
-            onPress: () => {
-              // Reset form before going back
-              resetForm();
-              router.replace('/home');
-            }
-          }
-        ]
+
+      // Create donation record first (with pending status)
+      const donation = await createDonation({
+        donorId: user.$id,
+        creatorId: creatorId,
+        amount: finalAmount,
+        platformFee: platformFee,
+        creatorReceives: creatorReceives,
+        message: donationMessage,
+        status: "pending"
+      });
+
+      // Process payment with Stripe SDK
+      if (!stripe) {
+        throw new Error("Stripe is not initialized. Please check your Stripe publishable key configuration in .env file and restart Expo.");
+      }
+
+      // Check if Stripe is properly initialized
+      if (!stripe.initPaymentSheet || !stripe.presentPaymentSheet) {
+        throw new Error("Stripe SDK methods not available. Make sure StripeProvider is properly configured with a valid publishable key.");
+      }
+
+      const paymentResult = await processDonationPayment(
+        stripe,
+        finalAmount,
+        user.$id,
+        creatorId
       );
+
+      if (paymentResult.success) {
+        // Update donation status to completed
+        await updateDonationStatus(donation.$id, "completed", paymentResult.paymentIntentId);
+
+        // Refresh donation stats
+        const total = await getCreatorTotalDonations(creatorId);
+        setTotalRaised(total);
+        const recent = await getRecentDonations(creatorId, 5);
+        setRecentDonations(recent);
+
+        Alert.alert(
+          t("donation.successTitle"),
+          t("donation.successMessage", {
+            amount: finalAmount.toFixed(2),
+            creator: creatorReceives.toFixed(2),
+          }),
+          [
+            {
+              text: t("donation.shareButton"),
+              onPress: () => {
+                Alert.alert(t("donation.shareThanksTitle"), t("donation.shareThanksMessage"));
+                resetForm();
+              }
+            },
+            {
+              text: t("donation.doneButton"),
+              onPress: () => {
+                resetForm();
+                router.replace('/home');
+              }
+            }
+          ]
+        );
+      } else {
+        // Payment failed
+        await updateDonationStatus(donation.$id, "failed");
+        Alert.alert(t("common.error"), "Payment failed. Please try again.");
+      }
     } catch (error) {
-      Alert.alert(t("common.error"), t("donation.errors.processFailed"));
+      console.error('Donation error:', error);
+      Alert.alert(
+        t("common.error"), 
+        error.message || t("donation.errors.processFailed")
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -120,6 +206,18 @@ const DonationPage = () => {
 
   const getSelectedAmountValue = () => {
     return selectedAmount || (customAmount ? parseFloat(customAmount) : 0);
+  };
+
+  // Helper function to get time ago
+  const getTimeAgo = (date) => {
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - date) / 1000);
+    
+    if (diffInSeconds < 60) return "just now";
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
+    return `${Math.floor(diffInSeconds / 604800)} weeks ago`;
   };
 
   return (
@@ -164,10 +262,16 @@ const DonationPage = () => {
           
           {/* Progress Bar */}
           <View className="w-full bg-gray-700 rounded-full h-2 mb-2">
-            <View className="bg-green-400 h-2 rounded-full" style={{ width: '65%' }} />
+            <View 
+              className="bg-green-400 h-2 rounded-full" 
+              style={{ width: `${Math.min((totalRaised / 2000) * 100, 100)}%` }} 
+            />
           </View>
           <Text className="text-gray-400 text-sm" style={{ textAlign: isRTL ? "right" : "center" }}>
-            {t("donation.progressLabel", { raised: "1,250", goal: "2,000" })}
+            {t("donation.progressLabel", { 
+              raised: totalRaised.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), 
+              goal: "2,000" 
+            })}
           </Text>
         </View>
 
@@ -361,22 +465,47 @@ const DonationPage = () => {
             {t("donation.supportersTitle")}
           </Text>
           <View className="space-y-2">
-            {t("donation.recent", { returnObjects: true }).map((donation, index) => (
-              <View key={index} className="flex-row items-center justify-between bg-gray-800 p-3 rounded-lg">
-                <View className="flex-row items-center">
-                  <View className="w-8 h-8 bg-green-400 rounded-full items-center justify-center mr-3">
-                    <Text className="text-black text-xs font-bold">
-                      {donation.name.charAt(0)}
-                    </Text>
+            {recentDonations.length > 0 ? (
+              recentDonations.map((donation, index) => {
+                const donationDate = new Date(donation.$createdAt);
+                const timeAgo = getTimeAgo(donationDate);
+                
+                return (
+                  <View key={donation.$id || index} className="flex-row items-center justify-between bg-gray-800 p-3 rounded-lg">
+                    <View className="flex-row items-center">
+                      <View className="w-8 h-8 bg-green-400 rounded-full items-center justify-center mr-3">
+                        {donation.donorAvatar ? (
+                          <Image
+                            source={{ uri: donation.donorAvatar }}
+                            className="w-full h-full rounded-full"
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Text className="text-black text-xs font-bold">
+                            {donation.donorName?.charAt(0) || 'A'}
+                          </Text>
+                        )}
+                      </View>
+                      <Text className="text-white font-medium">
+                        {donation.donorName || "Anonymous"}
+                      </Text>
+                    </View>
+                    <View className="items-end">
+                      <Text className="text-green-400 font-bold">
+                        ${parseFloat(donation.amount).toFixed(2)}
+                      </Text>
+                      <Text className="text-gray-400 text-xs">{timeAgo}</Text>
+                    </View>
                   </View>
-                  <Text className="text-white font-medium">{donation.name}</Text>
-                </View>
-                <View className="items-end">
-                  <Text className="text-green-400 font-bold">{donation.amount}</Text>
-                  <Text className="text-gray-400 text-xs">{donation.time}</Text>
-                </View>
+                );
+              })
+            ) : (
+              <View className="bg-gray-800 p-6 rounded-lg items-center justify-center">
+                <Text className="text-gray-400 text-center" style={{ textAlign: isRTL ? "right" : "center" }}>
+                  {t("donation.noSupportersYet") || "No supporters yet. Be the first to support this creator!"}
+                </Text>
               </View>
-            ))}
+            )}
           </View>
         </View>
 

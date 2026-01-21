@@ -1,12 +1,17 @@
+// Load environment variables FIRST before using them
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const sharp = require('sharp');
 const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
-require('dotenv').config();
+// Initialize Stripe with secret key (trim whitespace)
+const stripeSecretKey = (process.env.STRIPE_SECRET_KEY || '').trim();
+const stripe = stripeSecretKey ? require('stripe')(stripeSecretKey) : null;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -846,10 +851,172 @@ app.get('/api/health', (req, res) => {
 });
 
 // Start server
+// ==================== PAYMENT PROCESSING ENDPOINTS ====================
+
+// Create Payment Intent for Donation
+app.post('/api/create-payment-intent', async (req, res) => {
+  try {
+    const { amount, currency = 'usd', donorId, creatorId } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+
+    if (!stripe || !process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ 
+        error: 'Stripe not configured. Please set STRIPE_SECRET_KEY in environment variables.' 
+      });
+    }
+
+    // Convert amount to cents (Stripe uses smallest currency unit)
+    const amountInCents = Math.round(parseFloat(amount) * 100);
+
+    // Create payment intent
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amountInCents,
+      currency: currency.toLowerCase(),
+      metadata: {
+        donorId: donorId || '',
+        creatorId: creatorId || '',
+        type: 'donation'
+      },
+      automatic_payment_methods: {
+        enabled: true,
+      },
+    });
+
+    res.json({
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id
+    });
+  } catch (error) {
+    console.error('Error creating payment intent:', error);
+    res.status(500).json({ error: error.message || 'Failed to create payment intent' });
+  }
+});
+
+// Confirm Payment and Process Donation
+app.post('/api/confirm-payment', async (req, res) => {
+  try {
+    const { paymentIntentId, paymentMethodId, donationData } = req.body;
+
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: 'Payment intent ID is required' });
+    }
+
+    if (!stripe || !process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ 
+        error: 'Stripe not configured' 
+      });
+    }
+
+    // Retrieve payment intent to check current status
+    let paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    // If payment already succeeded (from Stripe SDK confirmation), just verify and return
+    if (paymentIntent.status === 'succeeded') {
+      console.log('Payment already succeeded via Stripe SDK');
+      return res.json({
+        success: true,
+        paymentIntentId: paymentIntent.id,
+        amount: paymentIntent.amount / 100, // Convert back from cents
+        status: paymentIntent.status,
+        donationData: donationData || {}
+      });
+    }
+
+    // If payment method is provided and payment hasn't succeeded yet, confirm it
+    // This handles cases where we need server-side confirmation
+    if (paymentMethodId && paymentIntent.status !== 'succeeded') {
+      try {
+        // Confirm the payment intent with the payment method
+        paymentIntent = await stripe.paymentIntents.confirm(paymentIntentId, {
+          payment_method: paymentMethodId,
+        });
+
+        if (paymentIntent.status === 'succeeded') {
+          return res.json({
+            success: true,
+            paymentIntentId: paymentIntent.id,
+            amount: paymentIntent.amount / 100,
+            status: paymentIntent.status,
+            donationData: donationData || {}
+          });
+        } else {
+          return res.json({
+            success: false,
+            status: paymentIntent.status,
+            message: `Payment status: ${paymentIntent.status}`,
+            requiresAction: paymentIntent.status === 'requires_action'
+          });
+        }
+      } catch (confirmError) {
+        console.error('Error confirming payment intent:', confirmError);
+        return res.status(500).json({ 
+          error: confirmError.message || 'Failed to confirm payment',
+          status: paymentIntent.status
+        });
+      }
+    }
+
+    // Payment not yet succeeded and no payment method provided
+    return res.json({
+      success: false,
+      status: paymentIntent.status,
+      message: `Payment status: ${paymentIntent.status}`,
+      requiresAction: paymentIntent.status === 'requires_action'
+    });
+  } catch (error) {
+    console.error('Error confirming payment:', error);
+    res.status(500).json({ error: error.message || 'Failed to confirm payment' });
+  }
+});
+
+// Webhook endpoint for Stripe events (for production)
+app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    return res.status(400).send('Webhook secret not configured');
+  }
+
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  switch (event.type) {
+    case 'payment_intent.succeeded':
+      const paymentIntent = event.data.object;
+      console.log('PaymentIntent succeeded:', paymentIntent.id);
+      // Here you can update your database, send notifications, etc.
+      break;
+    case 'payment_intent.payment_failed':
+      const failedPayment = event.data.object;
+      console.log('PaymentIntent failed:', failedPayment.id);
+      break;
+    default:
+      console.log(`Unhandled event type ${event.type}`);
+  }
+
+  res.json({ received: true });
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Video/Photo Processing Server running on port ${PORT}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
   console.log(`📁 Processed directory: ${processedDir}`);
+  if (process.env.STRIPE_SECRET_KEY) {
+    console.log(`💳 Stripe payment processing enabled`);
+  } else {
+    console.log(`⚠️  Stripe not configured - payment features disabled`);
+  }
 });
 
 // Graceful shutdown

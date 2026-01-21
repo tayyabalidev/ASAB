@@ -5,6 +5,8 @@ import GlobalProvider, { useGlobalContext } from '../context/GlobalProvider';
 import { useFonts } from 'expo-font';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking'; // ✅ fix: use from expo-linking
+import { StripeProvider } from '@stripe/stripe-react-native';
+import Constants from 'expo-constants';
 import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser, getOrCreateGoogleUser } from '../lib/appwrite';
 
 SplashScreen.preventAutoHideAsync();
@@ -243,16 +245,46 @@ export default function RootLayout() {
     SplashScreen.hideAsync();
   }, [loaded]);
 
+  // Get Stripe publishable key from environment
+  // Expo automatically makes EXPO_PUBLIC_* variables available at build time
+  // Try multiple sources for the key
+  const stripePublishableKey = 
+    process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || 
+    Constants.expoConfig?.extra?.stripePublishableKey ||
+    Constants.expoConfig?.extra?.env?.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ||
+    null;
+
+  // Debug: Log if key is missing (check on mount)
+  useEffect(() => {
+    console.log('🔍 Checking Stripe publishable key...');
+    console.log('process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY:', process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ? 'Found' : 'Not found');
+    console.log('Constants.expoConfig?.extra?.stripePublishableKey:', Constants.expoConfig?.extra?.stripePublishableKey ? 'Found' : 'Not found');
+    
+    if (!stripePublishableKey) {
+      console.error('❌ Stripe publishable key not found!');
+      console.error('Make sure .env file has EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY and restart Expo with: npx expo start -c');
+    } else {
+      console.log('✅ Stripe publishable key loaded:', stripePublishableKey.substring(0, 20) + '...');
+    }
+  }, []);
+
   // Always render the app, even if fonts fail to load
+  // StripeProvider requires a valid publishable key (starts with pk_test_ or pk_live_)
+  if (!stripePublishableKey) {
+    console.error('⚠️ Cannot initialize StripeProvider without publishable key');
+  }
+  
   return (
-    <GlobalProvider>
-      <OAuthHandler />
-      <Stack>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="post/[id]" options={{ headerShown: false }} />
-      </Stack>
-    </GlobalProvider>
+    <StripeProvider publishableKey={stripePublishableKey || ''}>
+      <GlobalProvider>
+        <OAuthHandler />
+        <Stack>
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="post/[id]" options={{ headerShown: false }} />
+        </Stack>
+      </GlobalProvider>
+    </StripeProvider>
   );
 }

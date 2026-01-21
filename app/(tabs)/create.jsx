@@ -35,6 +35,9 @@ import {
   processVideo,
   processPhoto,
   checkProcessingServer,
+  checkAppwriteFunctions,
+  processVideoAuto,
+  processVideoWithAppwrite,
 } from "../../lib/videoProcessor";
 import { exportEditedMedia } from "../../lib/mediaExporter";
 import {
@@ -129,6 +132,7 @@ const Create = () => {
   const [videoFilterCSS, setVideoFilterCSS] = useState("none");
   const [videoThumbnailBase64, setVideoThumbnailBase64] = useState(null); // Base64 image for filter thumbnails
   const videoThumbnailWebViewRef = useRef(null); // Ref for WebView that extracts video frame
+  const [processedVideoUri, setProcessedVideoUri] = useState(null); // URI of server-processed video
 
   // Video editing features state
   const [showTrimModal, setShowTrimModal] = useState(false);
@@ -206,6 +210,7 @@ const Create = () => {
   const [processingMedia, setProcessingMedia] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [useProcessing, setUseProcessing] = useState(false);
+  const [useAppwriteFunctions, setUseAppwriteFunctions] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [editingMedia, setEditingMedia] = useState(null);
   const [isMediaEdited, setIsMediaEdited] = useState(false); // Track if media was edited via MediaEditor
@@ -368,15 +373,26 @@ const Create = () => {
 
   // Check if processing server is available on mount
   useEffect(() => {
-    const checkServer = async () => {
+    const checkServers = async () => {
       try {
-        const isAvailable = await checkProcessingServer();
-        setUseProcessing(isAvailable);
+        // Check separate processing server
+        const isServerAvailable = await checkProcessingServer();
+        setUseProcessing(isServerAvailable);
+        
+        // Check Appwrite Functions
+        const isAppwriteAvailable = await checkAppwriteFunctions();
+        setUseAppwriteFunctions(isAppwriteAvailable);
+        
+        console.log('📊 Server Status Check:', {
+          separateServer: isServerAvailable ? '✅ Available' : '❌ Not Available',
+          appwriteFunctions: isAppwriteAvailable ? '✅ Available' : '❌ Not Available'
+        });
       } catch (error) {
         setUseProcessing(false);
+        setUseAppwriteFunctions(false);
       }
     };
-    checkServer();
+    checkServers();
   }, []);
 
   // Update video filter CSS when adjustments change
@@ -577,10 +593,21 @@ const Create = () => {
         }
 
         if (selectType === "video") {
-          setForm({
-            ...form,
-            video: file,
+          console.log("📹 Video selected:", {
+            uri: file.uri ? "present" : "missing",
+            name: file.name,
+            type: file.type,
+            size: file.size
           });
+          
+          // Update form with video - use functional update to ensure we have latest state
+          setForm((prevForm) => ({
+            ...prevForm,
+            video: file,
+            filter: "none", // Reset filter when new video is selected
+          }));
+          
+          console.log("✅ Video set in form");
           setIsMediaEdited(false); // Reset edit flag when new video is selected
           // Reset all video editing states
           setVideoTrimStart(0);
@@ -592,6 +619,8 @@ const Create = () => {
           setVideoTextOverlays([]);
           setVideoCrop({ x: 0, y: 0, width: 1, height: 1 });
           setVideoRotation(0);
+          setProcessedVideoUri(null); // Clear processed video when new video is selected
+          setVideoFilterCSS("none");
           setVideoAdjustments({
             brightness: 0,
             contrast: 0,
@@ -814,11 +843,183 @@ const Create = () => {
     return allParts.length > 0 ? allParts.join(" ") : "none";
   }, [form.filter, videoAdjustments, getFilterCSS]);
 
-  // Apply video filter
-  const applyVideoFilter = (filterId) => {
+  // Apply video trim and/or speed changes - process on server for preview
+  const applyVideoTrimAndSpeed = async () => {
+    // Determine if trim is needed
+    const needsTrim = videoDuration > 0 && (videoTrimStart > 0 || (videoTrimEnd > 0 && videoTrimEnd < videoDuration));
+    const trimData = needsTrim && videoDuration > 0 ? { 
+      start: videoTrimStart, 
+      end: videoTrimEnd > 0 && videoTrimEnd <= videoDuration ? videoTrimEnd : videoDuration 
+    } : null;
+    const needsSpeed = videoSpeed !== 1.0;
+    
+    // If processing is available and we have trim or speed changes, process the video
+    if ((useProcessing || useAppwriteFunctions) && form.video && (needsTrim || needsSpeed || form.filter !== "none")) {
+      try {
+        setProcessingMedia(true);
+        setProcessingProgress(10);
+        
+        console.log("🔄 Processing video with trim/speed changes:", {
+          trim: trimData,
+          speed: videoSpeed,
+          filter: form.filter
+        });
+        
+        let processedResult = null;
+        
+        // Try Appwrite Functions first if available
+        if (useAppwriteFunctions) {
+          try {
+            processedResult = await processVideoAuto({
+              video: form.video,
+              music: null,
+              filter: form.filter || "none",
+              filterIntensity: 100,
+              musicVolume: 0.5,
+              trim: trimData,
+              videoSpeed: videoSpeed,
+            });
+          } catch (appwriteError) {
+            console.warn("⚠️ Appwrite Functions failed, trying separate server:", appwriteError.message);
+            // Fallback to separate server if Appwrite fails
+            if (useProcessing) {
+              try {
+                processedResult = await processVideo({
+                  video: form.video,
+                  music: null,
+                  filter: form.filter || "none",
+                  filterIntensity: 100,
+                  musicVolume: 0.5,
+                  trim: trimData,
+                  videoSpeed: videoSpeed,
+                });
+              } catch (serverError) {
+                console.error("❌ Separate server also failed:", serverError);
+                throw appwriteError; // Throw original error
+              }
+            } else {
+              throw appwriteError;
+            }
+          }
+        } 
+        // Use separate server if Appwrite Functions not available
+        else if (useProcessing) {
+          processedResult = await processVideo({
+            video: form.video,
+            music: null,
+            filter: form.filter || "none",
+            filterIntensity: 100,
+            musicVolume: 0.5,
+            trim: trimData,
+            videoSpeed: videoSpeed,
+          });
+        }
+        
+        if (processedResult && processedResult.base64) {
+          const processedUri = `${FileSystem.documentDirectory}preview_video_${Date.now()}.mp4`;
+          
+          await FileSystem.writeAsStringAsync(
+            processedUri,
+            processedResult.base64,
+            {
+              encoding: FileSystem.EncodingType.Base64,
+            }
+          );
+          
+          setProcessedVideoUri(processedUri);
+          console.log("✅ Preview video processed with trim/speed:", processedUri);
+        }
+        
+        setProcessingProgress(100);
+        setProcessingMedia(false);
+      } catch (error) {
+        console.error("❌ Preview processing error:", error);
+        setProcessingMedia(false);
+        // Don't clear processedVideoUri on error - keep previous processed video if it exists
+        // Trim/speed values are saved in state, so they will be applied during final upload
+        // Show user-friendly message
+        Alert.alert(
+          "Processing Unavailable",
+          "Video preview processing is not available right now. Your trim and speed settings will be applied when you upload the video.",
+          [{ text: "OK" }]
+        );
+      }
+    } else {
+      // If no processing server available, trim/speed changes will still be applied during final upload
+      // The values are saved in state (videoTrimStart, videoTrimEnd, videoSpeed)
+      console.log("ℹ️ No processing server available - trim/speed will be applied during upload");
+    }
+  };
+
+  // Apply video filter - process on server for real-time preview
+  const applyVideoFilter = async (filterId) => {
     const filterCSS = getFilterCSS(filterId, null);
     setVideoFilterCSS(filterCSS);
     setForm({ ...form, filter: filterId });
+    
+    // If processing is available (either Appwrite Functions or separate server), process video in real-time for preview
+    if ((useProcessing || useAppwriteFunctions) && form.video && filterId !== "none") {
+      try {
+        setProcessingMedia(true);
+        setProcessingProgress(10);
+        
+        console.log("🔄 Processing video preview with filter:", filterId);
+        console.log("🔧 Available processing:", {
+          appwrite: useAppwriteFunctions ? "✅" : "❌",
+          separate: useProcessing ? "✅" : "❌"
+        });
+        
+        // Determine if trim is needed for preview
+        // Only apply trim if video duration is known and trim values are set
+        const needsTrim = videoDuration > 0 && (videoTrimStart > 0 || (videoTrimEnd > 0 && videoTrimEnd < videoDuration));
+        const trimData = needsTrim && videoDuration > 0 ? { 
+          start: videoTrimStart, 
+          end: videoTrimEnd > 0 && videoTrimEnd <= videoDuration ? videoTrimEnd : videoDuration 
+        } : null;
+        
+        // Use processVideoAuto which handles both Appwrite Functions and separate server based on config
+        // No fallback - use whatever is configured
+        const processedResult = await processVideoAuto({
+          video: form.video,
+          music: null,
+          filter: filterId,
+          filterIntensity: 100,
+          musicVolume: 0.5,
+          trim: trimData,
+          videoSpeed: videoSpeed,
+        });
+        
+        if (processedResult && processedResult.base64) {
+          const processedUri = `${FileSystem.documentDirectory}preview_video_${Date.now()}.mp4`;
+          
+          await FileSystem.writeAsStringAsync(
+            processedUri,
+            processedResult.base64,
+            {
+              encoding: FileSystem.EncodingType.Base64,
+            }
+          );
+          
+          setProcessedVideoUri(processedUri);
+          console.log("✅ Preview video processed:", processedUri);
+        }
+        
+        setProcessingProgress(100);
+        setProcessingMedia(false);
+      } catch (error) {
+        console.error("❌ Preview processing error:", error);
+        setProcessingMedia(false);
+        // Don't clear processedVideoUri on error - keep previous processed video if it exists
+        // Filter state is saved in form.filter, so it will be applied during upload
+      }
+    } else {
+      // Clear processed video if no filter is selected
+      if (filterId === "none") {
+        setProcessedVideoUri(null);
+      }
+      // Otherwise, if no processing available, keep existing processedVideoUri if it exists
+    }
+    
     // Don't close modal - let user see the preview and click Done
   };
 
@@ -1498,17 +1699,35 @@ const Create = () => {
 
   const submit = async () => {
     if (postType === "video") {
+      console.log("📤 Submit button clicked");
+      console.log("📋 Form state:", {
+        hasPrompt: !!form.prompt,
+        hasTitle: !!form.title,
+        hasVideo: !!form.video,
+        videoDetails: form.video ? {
+          uri: form.video.uri ? "present" : "missing",
+          name: form.video.name,
+          type: form.video.type
+        } : "null"
+      });
+
       if (!form.prompt || form.prompt.trim() === "") {
+        console.log("❌ Validation failed: Prompt required");
         return Alert.alert(t("common.error"), t("alerts.promptRequired"));
       }
 
       if (!form.title || form.title.trim() === "") {
+        console.log("❌ Validation failed: Title required");
         return Alert.alert(t("common.error"), t("alerts.titleRequired"));
       }
 
       if (!form.video) {
+        console.log("❌ Validation failed: Video required");
+        console.log("🔍 Current form.video:", form.video);
         return Alert.alert(t("common.error"), t("alerts.videoRequired"));
       }
+      
+      console.log("✅ All validations passed, starting upload...");
 
       if (!user || !user.$id) {
         return Alert.alert(t("common.error"), t("alerts.loginToUpload"));
@@ -1518,22 +1737,186 @@ const Create = () => {
       try {
         let finalVideo = form.video;
 
-        // Apply filters directly in client (like photos) - store filter in metadata
-        // Filter will be applied on display using CSS filters in WebView
-        // No server processing needed - same approach as photos
+        // Process video with filter on server if filter is selected
+        // IMPORTANT: Use Appwrite Functions if available, otherwise use separate server
+        let processedVideo = finalVideo;
+        
+        // Determine if trim is needed
+        // Only apply trim if video duration is known and trim values are set
+        const needsTrim = videoDuration > 0 && (videoTrimStart > 0 || (videoTrimEnd > 0 && videoTrimEnd < videoDuration));
+        const trimData = needsTrim && videoDuration > 0 ? { 
+          start: videoTrimStart, 
+          end: videoTrimEnd > 0 && videoTrimEnd <= videoDuration ? videoTrimEnd : videoDuration 
+        } : null;
+        const needsSpeed = videoSpeed !== 1.0;
+        
+        // Try processing if filter is not "none", music is provided, trim is set, or speed is set
+        if (form.filter !== "none" || form.music || needsTrim || needsSpeed) {
+          try {
+            setProcessingMedia(true);
+            setProcessingProgress(10);
+
+            console.log("🔄 Processing video with filter:", form.filter);
+            console.log("📹 Video file:", form.video);
+            console.log("🔧 Available servers:", {
+              appwrite: useAppwriteFunctions ? "✅" : "❌",
+              separate: useProcessing ? "✅" : "❌"
+            });
+
+            let processedResult = null;
+
+            // Try Appwrite Functions first if available
+            if (useAppwriteFunctions) {
+              try {
+                console.log("☁️ Using Appwrite Functions for processing...");
+                console.log("📤 Video details:", {
+                  uri: form.video.uri ? "present" : "missing",
+                  name: form.video.name,
+                  type: form.video.type,
+                  size: form.video.size
+                });
+                
+                processedResult = await processVideoAuto({
+                  video: form.video,
+                  music: form.music || null,
+                  filter: form.filter,
+                  filterIntensity: 100,
+                  musicVolume: 0.5,
+                  trim: trimData,
+                  videoSpeed: videoSpeed,
+                });
+                
+                console.log("✅ Appwrite Functions processing result:", {
+                  success: !!processedResult,
+                  hasBase64: !!(processedResult && processedResult.base64),
+                  resultKeys: processedResult ? Object.keys(processedResult) : []
+                });
+              } catch (appwriteError) {
+                console.error("❌ Appwrite Functions error:", appwriteError);
+                console.warn("⚠️ Appwrite Functions failed, trying separate server:", appwriteError.message);
+                // Fallback to separate server if Appwrite fails
+                if (useProcessing) {
+                  try {
+                    processedResult = await processVideo({
+                      video: form.video,
+                      music: form.music || null,
+                      filter: form.filter,
+                      filterIntensity: 100,
+                      musicVolume: 0.5,
+                      trim: trimData,
+                      videoSpeed: videoSpeed,
+                    });
+                  } catch (serverError) {
+                    console.error("❌ Separate server also failed:", serverError);
+                    throw appwriteError; // Throw original error
+                  }
+                } else {
+                  // No fallback available - throw error
+                  throw appwriteError;
+                }
+              }
+            } 
+            // Use separate server if Appwrite Functions not available
+            else if (useProcessing) {
+              console.log("🖥️ Using separate server for processing...");
+              processedResult = await processVideo({
+                video: form.video,
+                music: form.music || null,
+                filter: form.filter,
+                filterIntensity: 100,
+                musicVolume: 0.5,
+                trim: trimData,
+                videoSpeed: videoSpeed,
+              });
+              console.log("✅ Separate server processing:", processedResult ? "Success" : "Failed");
+            } else {
+              console.log("ℹ️ No processing server available - using original video");
+            }
+            
+            console.log("✅ Final processing result:", processedResult ? "Success" : "Failed");
+
+            setProcessingProgress(50);
+
+            // Save processed video to file system
+            if (processedResult && processedResult.base64) {
+              const processedUri = `${FileSystem.documentDirectory}processed_video_${Date.now()}.mp4`;
+
+              await FileSystem.writeAsStringAsync(
+                processedUri,
+                processedResult.base64,
+                {
+                  encoding: FileSystem.EncodingType.Base64,
+                }
+              );
+
+              // Get file info to get actual size
+              const fileInfo = await FileSystem.getInfoAsync(processedUri);
+              const fileSize = fileInfo.size || form.video.size;
+
+              // Update to use processed video
+              processedVideo = {
+                uri: processedUri,
+                name: "processed_video.mp4",
+                type: "video/mp4",
+                size: fileSize,
+              };
+
+              console.log("💾 Processed video saved:", processedUri);
+            }
+
+            setProcessingProgress(100);
+            setProcessingMedia(false);
+          } catch (processError) {
+            console.error("❌ Video processing error:", processError);
+            console.error("❌ Error details:", {
+              message: processError.message,
+              stack: processError.stack,
+              name: processError.name
+            });
+            setProcessingMedia(false);
+            // Continue with original video - don't block upload
+            console.warn("⚠️ Video processing failed, using original video:", processError.message);
+            console.log("ℹ️ Continuing upload with original video (no filter applied)");
+            processedVideo = finalVideo;
+          }
+        } else {
+          // No processing needed - use original video
+          console.log("ℹ️ No filter/music/trim/speed selected - using original video");
+        }
 
         setProcessingProgress(0);
 
-        
-
-        await createVideoPost({
-          ...form,
-          video: finalVideo,
-          userId: user.$id,
+        console.log("📤 Starting video upload to Appwrite...");
+        console.log("📹 Video to upload:", {
+          uri: processedVideo.uri ? "present" : "missing",
+          name: processedVideo.name,
+          type: processedVideo.type,
+          size: processedVideo.size
         });
 
-        Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
-        router.push("/home");
+        try {
+          await createVideoPost({
+            ...form,
+            video: processedVideo,
+            userId: user.$id,
+          });
+
+          console.log("✅ Video uploaded successfully!");
+          Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
+          
+          // Navigate to home and refresh data
+          router.push("/home");
+          
+          // Force refresh home screen data after a short delay
+          // This ensures the new video appears in the feed
+          setTimeout(() => {
+            console.log("🔄 Triggering home screen refresh...");
+            // The home screen will auto-refresh on focus due to useFocusEffect
+          }, 500);
+        } catch (uploadError) {
+          console.error("❌ Video upload error:", uploadError);
+          throw uploadError; // Re-throw to be caught by outer catch
+        }
       } catch (error) {
         // Check for network-related errors and show user-friendly messages
         const errorMessage = error.message || error.toString();
@@ -1543,7 +1926,7 @@ const Create = () => {
           errorMessage.includes("Network") ||
           errorMessage.includes("network") ||
           errorMessage.includes("timeout") ||
-          errorMessage.includes("Network request failed") ||
+          errorMessage.includes("Check your internet connection") ||
           errorMessage.includes("503") ||
           errorMessage.includes("client read error") ||
           errorMessage.includes("Service Unavailable")
@@ -1572,6 +1955,7 @@ const Create = () => {
           link: "",
         });
         setVideoFilterCSS("none");
+        setProcessedVideoUri(null); // Clear processed video
         setIsMediaEdited(false); // Reset edit flag
         setUploading(false);
       }
@@ -2053,11 +2437,12 @@ const Create = () => {
                                 overflow: "hidden",
                               }}
                             >
-                              {/* Use Native Video - filters applied server-side during upload */}
+                              {/* Use processed video if available, otherwise use original */}
                               <Video
+                                key={processedVideoUri || form.video.uri}
                                 ref={videoRef}
-                                source={{ uri: form.video.uri }}
-                                style={{ width: "100%", height: "100%" }}
+                                source={{ uri: processedVideoUri || form.video.uri }}
+                                  style={{ width: "100%", height: "100%" }}
                                 useNativeControls
                                 resizeMode={ResizeMode.COVER}
                                 isLooping
@@ -4603,10 +4988,11 @@ const Create = () => {
                       position: "relative",
                     }}
                   >
-                    {/* Use native Video for preview - filters will be applied on display (like photos) */}
+                    {/* Use processed video if available (server-processed with filter), otherwise use original */}
                     <Video
+                      key={processedVideoUri || form.video.uri}
                       ref={videoRef}
-                      source={{ uri: form.video.uri }}
+                      source={{ uri: processedVideoUri || form.video.uri }}
                       style={{
                         width: "100%",
                         height: "100%",
@@ -4631,6 +5017,24 @@ const Create = () => {
                         }
                       }}
                     />
+                    {/* Show processing indicator */}
+                    {processingMedia && (
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: "50%",
+                          left: "50%",
+                          transform: [{ translateX: -50 }, { translateY: -50 }],
+                          backgroundColor: "rgba(0,0,0,0.7)",
+                          padding: 16,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Text style={{ color: "#fff", fontSize: 14 }}>
+                          Processing filter...
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 )}
 
@@ -5021,9 +5425,9 @@ const Create = () => {
                     Trim Video
                   </Text>
                   <TouchableOpacity
-                    onPress={() => {
-                      setVideoTrimStart(0);
-                      setVideoTrimEnd(videoDuration);
+                    onPress={async () => {
+                      // Keep current trim values and apply them
+                      await applyVideoTrimAndSpeed();
                       setShowTrimModal(false);
                     }}
                   >
@@ -5186,8 +5590,9 @@ const Create = () => {
                     Speed
                   </Text>
                   <TouchableOpacity
-                    onPress={() => {
-                      setVideoSpeed(1.0);
+                    onPress={async () => {
+                      // Apply speed changes and close modal
+                      await applyVideoTrimAndSpeed();
                       setShowSpeedModal(false);
                     }}
                   >
@@ -5198,7 +5603,7 @@ const Create = () => {
                         fontWeight: "600",
                       }}
                     >
-                      Reset
+                      Done
                     </Text>
                   </TouchableOpacity>
                 </View>

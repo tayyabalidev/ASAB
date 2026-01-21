@@ -1,0 +1,10 @@
+{
+  "name": "appwrite-function-process-video-filter",
+  "version": "1.0.0",
+  "description": "Appwrite Function to process videos with filters using FFmpeg",
+  "main": "index.js",
+  "dependencies": {
+    "node-appwrite": "^15.0.0",
+    "fluent-ffmpeg": "^2.1.2"
+  }
+}

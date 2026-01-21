@@ -17,6 +17,7 @@ import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
 import { images } from "../../constants";
 import { useTranslation } from "react-i18next";
+import { isAdminUser } from "../../lib/admin";
 
 // Get CSS filter string based on filter type and adjustments (same as in create.jsx and home.jsx)
 const getFilterCSS = (filterId, adjustmentsData = null) => {
@@ -1308,6 +1309,36 @@ const Profile = () => {
                 <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 14 }}>Advertisements</Text>
               </View>
             </TouchableOpacity>
+
+            {isAdminUser(user) && (
+              <TouchableOpacity
+                onPress={() => router.push('/admin')}
+                style={{
+                  flex: 1,
+                  marginLeft: 12,
+                  borderRadius: 8,
+                  shadowColor: themedColor("rgba(99,102,241,0.35)", "rgba(99,102,241,0.35)"),
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 4,
+                  elevation: 3,
+                  backgroundColor: themedColor("rgba(99,102,241,0.18)", "rgba(99,102,241,0.14)"),
+                  borderWidth: 1,
+                  borderColor: themedColor("rgba(99,102,241,0.35)", theme.border),
+                }}
+              >
+                <View style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderRadius: 8,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                  <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 14 }}>Admin</Text>
+                </View>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 

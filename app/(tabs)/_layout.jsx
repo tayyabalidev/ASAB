@@ -156,6 +156,14 @@ const TabLayout = () => {
           }}
         />
         <Tabs.Screen
+          name="admin"
+          options={{
+            title: "Admin",
+            headerShown: false,
+            href: null, // Hide from tab bar
+          }}
+        />
+        <Tabs.Screen
           name="go-live"
           options={{
             title: tabLabels.goLive,
