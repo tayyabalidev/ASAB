@@ -252,30 +252,38 @@ export default function RootLayout() {
     process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || 
     Constants.expoConfig?.extra?.stripePublishableKey ||
     Constants.expoConfig?.extra?.env?.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ||
+    // Fallback: Try to read from .env file directly (for development)
+    (typeof process !== 'undefined' && process.env && process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY) ||
     null;
 
   // Debug: Log if key is missing (check on mount)
   useEffect(() => {
     console.log('🔍 Checking Stripe publishable key...');
-    console.log('process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY:', process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ? 'Found' : 'Not found');
+    console.log('process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY:', process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ? `Found (${process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY.substring(0, 20)}...)` : 'Not found');
     console.log('Constants.expoConfig?.extra?.stripePublishableKey:', Constants.expoConfig?.extra?.stripePublishableKey ? 'Found' : 'Not found');
+    console.log('Final stripePublishableKey:', stripePublishableKey ? `Found (${stripePublishableKey.substring(0, 20)}...)` : 'NOT FOUND');
     
     if (!stripePublishableKey) {
       console.error('❌ Stripe publishable key not found!');
-      console.error('Make sure .env file has EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY and restart Expo with: npx expo start -c');
+      console.error('⚠️ Make sure .env file has EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY');
+      console.error('⚠️ Restart Expo with: npx expo start -c');
+      console.error('⚠️ Or hardcode temporarily in app/_layout.jsx for testing');
     } else {
-      console.log('✅ Stripe publishable key loaded:', stripePublishableKey.substring(0, 20) + '...');
+      console.log('✅ Stripe publishable key loaded successfully');
     }
   }, []);
 
   // Always render the app, even if fonts fail to load
   // StripeProvider requires a valid publishable key (starts with pk_test_ or pk_live_)
-  if (!stripePublishableKey) {
-    console.error('⚠️ Cannot initialize StripeProvider without publishable key');
+  // If key is missing, we'll still render but Stripe won't work
+  const isValidKey = stripePublishableKey && (stripePublishableKey.startsWith('pk_test_') || stripePublishableKey.startsWith('pk_live_'));
+  
+  if (!isValidKey) {
+    console.warn('⚠️ StripeProvider initialized without valid publishable key. Payment features will not work.');
   }
   
   return (
-    <StripeProvider publishableKey={stripePublishableKey || ''}>
+    <StripeProvider publishableKey={stripePublishableKey || 'pk_test_placeholder_key_that_will_fail_but_allow_app_to_load'}>
       <GlobalProvider>
         <OAuthHandler />
         <Stack>

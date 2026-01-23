@@ -798,20 +798,15 @@ const UserProfile = () => {
                     useNativeControls={false}
                     posterSource={modalVideo.thumbnail ? { uri: modalVideo.thumbnail } : undefined}
                     onPlaybackStatusUpdate={status => {
-                      console.log("Video status:", status);
                       if (status.didJustFinish) setModalVisible(false);
                     }}
                     onError={(error) => {
-                      console.error("Video error:", error);
                     }}
                     onLoadStart={() => {
-                      console.log("Video loading started for:", modalVideo.video);
                     }}
                     onLoad={() => {
-                      console.log("Video loaded successfully for:", modalVideo.video);
                     }}
                     onReadyForDisplay={() => {
-                      console.log("Video ready for display");
                     }}
                   />
                   

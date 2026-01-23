@@ -901,10 +901,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 isMuted={false}
                 useNativeControls={false}
                 onError={(error) => {
-                  console.log('Video error:', error);
                 }}
                 onLoad={() => {
-                  console.log('Video loaded successfully');
                 }}
                 onPlaybackStatusUpdate={(status) => {
                   if (status.didJustFinish) {
@@ -2058,10 +2056,8 @@ const Home = () => {
                 useNativeControls={false}
                 posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
                 onError={(error) => {
-                  console.log('Trending video error:', error);
                 }}
                 onLoad={() => {
-                  console.log('Trending video loaded');
                 }}
                 {...(Platform.OS === 'ios' && {
                   allowsExternalPlayback: false,
@@ -2810,7 +2806,6 @@ const Home = () => {
                         ignoreSilentSwitch: 'ignore'
                       })}
                       onError={(error) => {
-                        console.log('Trending modal video error:', error);
                       }}
                       onLoad={() => {
                         console.log('Trending modal video loaded');

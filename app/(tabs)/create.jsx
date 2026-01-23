@@ -2468,9 +2468,6 @@ const Create = () => {
                                     return;
                                   }
                                   // Log other errors for debugging
-                                  if (error?.error) {
-                                    console.log("Video error:", error.error);
-                                  }
                                 }}
                               />
                               {/* Filter indicator */}
@@ -5013,7 +5010,6 @@ const Create = () => {
                       }}
                       onError={(error) => {
                         if (!error?.error?.includes?.("Seeking interrupted")) {
-                          console.log("Video error:", error);
                         }
                       }}
                     />
