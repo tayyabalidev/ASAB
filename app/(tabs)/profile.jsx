@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getUserBookmarks, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
 import { images } from "../../constants";
@@ -225,28 +225,11 @@ const Profile = () => {
   const { data: photos, refetch: refetchPhotos } = useAppwrite(() => getUserPhotos(user.$id), [user?.$id]);
   const { data: followers } = useAppwrite(() => getFollowers(user?.$id), [user?.$id]);
   const { data: following } = useAppwrite(() => getFollowing(user?.$id), [user?.$id]);
-  const { data: bookmarks, loading: bookmarksLoading, error: bookmarksError, refetch: refetchBookmarks } = useAppwrite(() => {
-   
-    if (!user?.$id) {
-    
-      return Promise.resolve([]);
-    }
-    
-    return getUserBookmarks(user.$id);
-  }, [user?.$id]);
-  
-  // Debug: Log bookmarks hook data
   
 
-  // Refresh bookmarks when screen comes into focus (with debounce)
-  const lastRefreshTimeRef = useRef(0);
-  const isRefreshingRef = useRef(false);
-  
+  // Refresh data when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      const now = Date.now();
-      const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
-      
       // Refresh posts and photos when profile screen comes into focus
       if (refetchPosts) {
         refetchPosts();
@@ -254,21 +237,8 @@ const Profile = () => {
       if (refetchPhotos) {
         refetchPhotos();
       }
-      
-      // Only refresh bookmarks if it's been more than 2 seconds since last refresh
-      // and we're not already refreshing
-      if (timeSinceLastRefresh > 2000 && !isRefreshingRef.current) {
-        if (user?.$id && refetchBookmarks) {
-          isRefreshingRef.current = true;
-          setIsRefreshingBookmarks(true);
-          refetchBookmarks().finally(() => {
-            setIsRefreshingBookmarks(false);
-            isRefreshingRef.current = false;
-            lastRefreshTimeRef.current = now;
-          });
-        }
-      }
-    }, [user?.$id, refetchBookmarks, refetchPosts, refetchPhotos])
+      // Bookmarks will be refreshed automatically by useEffect when activeSection is 'bookmarks'
+    }, [refetchPosts, refetchPhotos])
   );
 
   // Stop videos when profile loses focus
@@ -322,10 +292,6 @@ const Profile = () => {
   const [loadingLikes, setLoadingLikes] = useState(false);
     const [shareCount, setShareCount] = useState(0);
   
-  // Bookmark videos state
-  const [bookmarkVideos, setBookmarkVideos] = useState({});
-  const [bookmarkVideosLoading, setBookmarkVideosLoading] = useState(false);
-  const lastProcessedBookmarkIdsRef = useRef('');
  
   // Following/Followers modal state
   const [followModalVisible, setFollowModalVisible] = useState(false);
@@ -334,7 +300,11 @@ const Profile = () => {
 
   // Profile section state
   const [activeSection, setActiveSection] = useState('videos'); // 'videos', 'pics', or 'bookmarks'
-  const [isRefreshingBookmarks, setIsRefreshingBookmarks] = useState(false);
+  
+  // Bookmarks state
+  const [bookmarks, setBookmarks] = useState([]);
+  const [bookmarksLoading, setBookmarksLoading] = useState(false);
+  const [bookmarkedPosts, setBookmarkedPosts] = useState([]); // Full post data
   
   // Photo modal state
   const [photoModalVisible, setPhotoModalVisible] = useState(false);
@@ -413,20 +383,81 @@ const Profile = () => {
     );
   };
 
-  // Function to handle section change and refresh bookmarks if needed
+  // Function to handle section change
   const handleSectionChange = (section) => {
     setActiveSection(section);
-    // If switching to bookmarks, refresh the data only if not already on bookmarks
-    // and not currently refreshing
-    if (section === 'bookmarks' && activeSection !== 'bookmarks' && user?.$id && refetchBookmarks && !isRefreshingRef.current) {
-      isRefreshingRef.current = true;
-      setIsRefreshingBookmarks(true);
-      refetchBookmarks().finally(() => {
-        setIsRefreshingBookmarks(false);
-        isRefreshingRef.current = false;
-      });
-    }
   };
+
+  // Fetch bookmarks when bookmarks section is active
+  useEffect(() => {
+    const fetchBookmarks = async () => {
+      if (activeSection === 'bookmarks' && user?.$id) {
+        setBookmarksLoading(true);
+        try {
+          const bookmarkList = await getUserBookmarks(user.$id);
+          setBookmarks(bookmarkList);
+          
+          // Fetch full post data for each bookmark
+          const postsData = [];
+          for (const bookmark of bookmarkList) {
+            try {
+              // Try to determine postType from postData, or try both collections
+              let postType = 'video';
+              try {
+                const postData = JSON.parse(bookmark.postData);
+                postType = postData.postType || postData.pt || 'video';
+              } catch (e) {
+                // If parsing fails, try to determine by attempting to fetch
+              }
+              
+              // Try to fetch as video first
+              if (postType === 'video' || !postType) {
+                try {
+                  const video = await getVideoById(bookmark.postId);
+                  postsData.push({ ...video, postType: 'video', bookmarkId: bookmark.$id });
+                  continue;
+                } catch (videoError) {
+                  // If video fetch fails, try as photo
+                  try {
+                    const photo = await getPhotoById(bookmark.postId);
+                    postsData.push({ ...photo, postType: 'photo', bookmarkId: bookmark.$id });
+                    continue;
+                  } catch (photoError) {
+                    console.error(`Error fetching post ${bookmark.postId} as both video and photo:`, videoError, photoError);
+                  }
+                }
+              } else {
+                // postType is 'photo', fetch as photo
+                try {
+                  const photo = await getPhotoById(bookmark.postId);
+                  postsData.push({ ...photo, postType: 'photo', bookmarkId: bookmark.$id });
+                } catch (error) {
+                  // If photo fetch fails, try as video
+                  try {
+                    const video = await getVideoById(bookmark.postId);
+                    postsData.push({ ...video, postType: 'video', bookmarkId: bookmark.$id });
+                  } catch (videoError) {
+                    console.error(`Error fetching post ${bookmark.postId}:`, error, videoError);
+                  }
+                }
+              }
+            } catch (error) {
+              console.error(`Error processing bookmark ${bookmark.postId}:`, error);
+            }
+          }
+          setBookmarkedPosts(postsData);
+        } catch (error) {
+          console.error('Error fetching bookmarks:', error);
+          setBookmarks([]);
+          setBookmarkedPosts([]);
+        } finally {
+          setBookmarksLoading(false);
+        }
+      }
+    };
+
+    fetchBookmarks();
+  }, [activeSection, user?.$id]);
 
   // Calculate total likes from all posts
   const totalLikes = posts?.reduce((total, post) => total + (post.likes?.length || 0), 0) || 0;
@@ -833,123 +864,8 @@ const Profile = () => {
     }
   }, [modalVideo, user?.$id]);
 
-  // Memoize bookmark IDs to prevent unnecessary re-renders
-  const bookmarkIdsString = useMemo(() => {
-    if (!bookmarks || bookmarks.length === 0) return '';
-    return bookmarks.map(b => b.$id).sort().join(',');
-  }, [bookmarks]);
-
   // Track loaded thumbnails to prevent reloading
   const loadedThumbnailsRef = useRef(new Set());
-  
-  // Memoize the bookmarks list to prevent unnecessary re-renders
-  const memoizedBookmarks = useMemo(() => {
-    if (!bookmarks || bookmarks.length === 0) return [];
-    return bookmarks;
-  }, [bookmarkIdsString]); // Only recalculate when bookmark IDs change, not when array reference changes
-
-  // Fetch bookmark videos when bookmarks change
-  const isFetchingVideosRef = useRef(false);
-  
-  useEffect(() => {
-    // Early return if no bookmarks
-    if (!bookmarkIdsString || !bookmarks || bookmarks.length === 0) {
-      if (bookmarkIdsString === '') {
-        setBookmarkVideos({});
-        lastProcessedBookmarkIdsRef.current = '';
-      }
-      return;
-    }
-
-    // Check if we've already processed these exact bookmarks
-    if (bookmarkIdsString === lastProcessedBookmarkIdsRef.current) {
-      return;
-    }
-    
-    // Prevent concurrent fetches
-    if (isFetchingVideosRef.current) {
-      return;
-    }
-    
-    // Mark as processing immediately to prevent duplicate calls
-    lastProcessedBookmarkIdsRef.current = bookmarkIdsString;
-    isFetchingVideosRef.current = true;
-    
-    const fetchBookmarkVideos = async () => {
-      setBookmarkVideosLoading(true);
-      const newBookmarkVideos = {};
-      
-      // Store bookmark IDs from bookmarkIdsString to avoid accessing bookmarks array
-      const bookmarkIdsArray = bookmarkIdsString.split(',');
-      
-      try {
-        // Process bookmarks sequentially to avoid overwhelming the API
-        // Use bookmarks array but only access it once at the start
-        const bookmarksToProcess = [...bookmarks];
-        for (const bookmark of bookmarksToProcess) {
-          if (bookmark.postId) {
-            try {
-              const videoData = await getVideoById(bookmark.postId);
-              newBookmarkVideos[bookmark.$id] = {
-                title: videoData.title || t('profile.general.bookmarkedVideo'),
-                thumbnail: videoData.thumbnail || 'https://via.placeholder.com/300x300',
-                creator: videoData.creator || { username: t('profile.general.unknownUser') },
-                video: videoData.video
-              };
-            } catch (error) {
-              // Use fallback data on error
-              newBookmarkVideos[bookmark.$id] = {
-                title: t('profile.general.bookmarkedVideo'),
-                thumbnail: 'https://via.placeholder.com/300x300',
-                creator: { username: t('profile.general.unknownUser') },
-                video: null
-              };
-            }
-          }
-        }
-        
-        // Only update if we still have the same bookmarks (prevent race conditions)
-        if (lastProcessedBookmarkIdsRef.current === bookmarkIdsString) {
-          setBookmarkVideos(prev => {
-            // Merge with existing data instead of replacing to prevent glitching
-            // Only update entries that actually changed or are new
-            const merged = { ...prev };
-            let hasChanged = false;
-            
-            Object.keys(newBookmarkVideos).forEach(key => {
-              const newData = newBookmarkVideos[key];
-              const prevData = prev[key];
-              
-              // Only update if this is a new entry or data actually changed
-              if (!prevData || JSON.stringify(prevData) !== JSON.stringify(newData)) {
-                merged[key] = newData;
-                hasChanged = true;
-              }
-            });
-            
-            // Remove entries that are no longer in bookmarks using bookmarkIdsString
-            const currentBookmarkIds = new Set(bookmarkIdsArray);
-            Object.keys(prev).forEach(key => {
-              if (!currentBookmarkIds.has(key)) {
-                delete merged[key];
-                hasChanged = true;
-                // Also remove from loaded thumbnails ref
-                loadedThumbnailsRef.current.delete(key);
-              }
-            });
-            
-            return hasChanged ? merged : prev;
-          });
-        }
-      } finally {
-        setBookmarkVideosLoading(false);
-        isFetchingVideosRef.current = false;
-      }
-    };
-    
-    fetchBookmarkVideos();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookmarkIdsString]); // Only depend on bookmarkIdsString to prevent unnecessary re-runs
 
   // Fetch unread notification count
   useEffect(() => {
@@ -1358,7 +1274,7 @@ const Profile = () => {
                 style={{
                   flex: 1,
                   paddingVertical: 10,
-                  paddingHorizontal: 16,
+                  paddingHorizontal: 12,
                   borderRadius: 10,
                   backgroundColor: activeSection === 'videos' ? theme.accentSoft : 'transparent',
                 }}
@@ -1379,7 +1295,7 @@ const Profile = () => {
                 style={{
                   flex: 1,
                   paddingVertical: 10,
-                  paddingHorizontal: 16,
+                  paddingHorizontal: 12,
                   borderRadius: 10,
                   backgroundColor: activeSection === 'pics' ? theme.accentSoft : 'transparent',
                 }}
@@ -1400,7 +1316,7 @@ const Profile = () => {
                 style={{
                   flex: 1,
                   paddingVertical: 10,
-                  paddingHorizontal: 16,
+                  paddingHorizontal: 12,
                   borderRadius: 10,
                   backgroundColor: activeSection === 'bookmarks' ? theme.accentSoft : 'transparent',
                 }}
@@ -1413,7 +1329,7 @@ const Profile = () => {
                     color: activeSection === 'bookmarks' ? theme.textPrimary : theme.textSecondary,
                   }}
                 >
-                  {t('profile.sections.bookmarks')}
+                  Bookmarks
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1804,148 +1720,175 @@ const Profile = () => {
                   marginBottom: 16,
                 }}
               >
-                {t('profile.sections.yourBookmarks')}
+                Bookmarks
               </Text>
-            
-              {bookmarksLoading || isRefreshingBookmarks ? (
+              {bookmarksLoading ? (
                 <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-                  <Text style={{ color: theme.textSecondary, textAlign: 'center' }}>
-                    {isRefreshingBookmarks ? t('profile.sections.bookmarksRefreshing') : t('profile.sections.bookmarksLoading')}
-                  </Text>
+                  <ActivityIndicator size="large" color={theme.accent} />
                 </View>
-              ) : bookmarksError ? (
-               <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-                 <Text style={{ color: theme.textSecondary, textAlign: 'center' }}>{t('profile.sections.bookmarksError')}</Text>
-                 <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>{bookmarksError.message}</Text>
-               </View>
-             ) : memoizedBookmarks && memoizedBookmarks.length > 0 ? (
-               <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
-                 {memoizedBookmarks.map((bookmark, index) => {
-                    // Get the fetched video data for this bookmark
-                    const videoData = bookmarkVideos[bookmark.$id];
-                    
-                    // Use stable thumbnail URI - once loaded, keep using it to prevent reloading
-                    const bookmarkKey = bookmark.$id;
-                    const actualThumbnail = videoData?.thumbnail;
-                    const hasLoadedThumbnail = loadedThumbnailsRef.current.has(bookmarkKey);
-                    
-                    // Use actual thumbnail if available, otherwise placeholder
-                    // But if we've already loaded a thumbnail for this bookmark, keep using it
-                    const thumbnailUri = (hasLoadedThumbnail && actualThumbnail) 
-                      ? actualThumbnail 
-                      : (actualThumbnail || 'https://via.placeholder.com/300x300');
-                    
-                    const hasVideo = !!videoData?.video;
-                    
-                    return (
-                      <TouchableOpacity 
-                         key={`bookmark-${bookmark.$id}-${bookmark.postId}`}
-                        style={{
-                          width: '48%',
-                          aspectRatio: 1,
-                          backgroundColor: theme.surface,
-                          borderRadius: 16,
-                          marginBottom: 12,
-                          overflow: 'hidden',
-                          borderWidth: 1,
-                          borderColor: theme.border,
+              ) : bookmarkedPosts && bookmarkedPosts.length > 0 ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
+                  {bookmarkedPosts.map((post, index) => (
+                    <View
+                      key={post.$id || post.bookmarkId || index}
+                      style={{
+                        width: '48%',
+                        aspectRatio: 1,
+                        backgroundColor: theme.surface,
+                        borderRadius: 16,
+                        marginBottom: 12,
+                        overflow: 'hidden',
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        position: 'relative',
+                      }}
+                    >
+                      <TouchableOpacity
+                        style={{ width: '100%', height: '100%' }}
+                        onPress={() => {
+                          if (post.postType === 'photo') {
+                            setSelectedPhoto(post);
+                            setPhotoIndex(index);
+                            setPhotoModalVisible(true);
+                          } else {
+                            openVideoModal(post, index);
+                          }
                         }}
-                         onPress={() => {
-                           // For bookmarks, we need to fetch the actual video data first
-                           if (bookmark.postId) {
-                             // Get video by ID using the already imported function
-                             getVideoById(bookmark.postId)
-                               .then((videoData) => {
-                                 const completePost = {
-                                   $id: bookmark.postId,
-                                   title: videoData.title || videoData.title || t('profile.general.bookmarkedVideo'),
-                                   video: videoData.video,
-                                   
-                                   creator: videoData.creator || videoData.creator || { username: t('profile.general.unknownUser') }
-                                 };
-                                 openVideoModal(completePost, index);
-                               })
-                               .catch((error) => {
-                                
-                                 Alert.alert(t('common.error'), t('profile.alerts.videoLoadError'));
-                               });
-                           }
-                         }}
-                       >
-                        <View style={{ width: '100%', height: '100%', position: 'relative' }}>
-                          {/* Always show thumbnail image instead of Video component to prevent glitching */}
-                          <Image
-                            key={`bookmark-img-${bookmark.$id}`}
-                            source={{ uri: thumbnailUri }}
-                            style={{ width: '100%', height: '100%' }}
-                            resizeMode="cover"
-                            defaultSource={{ uri: 'https://via.placeholder.com/300x300' }}
-                            onLoad={() => {
-                              // Mark this thumbnail as loaded to prevent future reloads
-                              if (actualThumbnail && actualThumbnail !== 'https://via.placeholder.com/300x300') {
-                                loadedThumbnailsRef.current.add(bookmarkKey);
+                      >
+                        <View style={{ width: '100%', height: '100%' }}>
+                          {post.postType === 'photo' ? (
+                            (() => {
+                              // Get filter and adjustments from photo
+                              const filterId = post.filter || 'none';
+                              let adjustments = null;
+                              let textOverlays = [];
+                              let imageOverlays = [];
+                              
+                              if (post.edits) {
+                                try {
+                                  const edits = typeof post.edits === 'string' ? JSON.parse(post.edits) : post.edits;
+                                  adjustments = edits.adjustments || null;
+                                  textOverlays = edits.textOverlays || [];
+                                  imageOverlays = edits.imageOverlays || [];
+                                } catch (e) {
+                                  console.error('Error parsing photo edits:', e);
+                                }
                               }
-                            }}
-                            onError={() => {
-                              // If image fails to load, use placeholder
-                              // Don't mark as loaded so it can retry
-                            }}
-                          />
-                          {/* Play icon overlay to indicate it's a video */}
-                          {hasVideo && (
-                            <View
-                              style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                bottom: 0,
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                              }}
-                            >
-                              <View
-                                style={{
-                                  width: 48,
-                                  height: 48,
-                                  borderRadius: 24,
-                                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                                  justifyContent: 'center',
-                                  alignItems: 'center',
-                                }}
-                              >
-                                <Text style={{ fontSize: 20, marginLeft: 4 }}>▶</Text>
-                              </View>
-                            </View>
+                              
+                              const filterCSS = getFilterCSS(filterId, adjustments);
+                              
+                              // If there are filters, adjustments, or overlays, use WebView
+                              if (filterCSS !== 'none' || textOverlays.length > 0 || imageOverlays.length > 0) {
+                                return (
+                                  <View style={{ width: '100%', height: '100%' }}>
+                                    <WebView
+                                      source={{
+                                        html: `
+                                          <!DOCTYPE html>
+                                          <html>
+                                            <head>
+                                              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                              <style>
+                                                * { margin: 0; padding: 0; box-sizing: border-box; }
+                                                body, html { width: 100%; height: 100%; overflow: hidden; }
+                                                img { width: 100%; height: 100%; object-fit: cover; filter: ${filterCSS}; }
+                                                ${textOverlays.map((overlay, idx) => `
+                                                  .text-overlay-${idx} {
+                                                    position: absolute;
+                                                    left: ${overlay.x}%;
+                                                    top: ${overlay.y}%;
+                                                    transform: translate(-50%, -50%) rotate(${overlay.rotation || 0}deg);
+                                                    font-size: ${overlay.fontSize || 16}px;
+                                                    color: ${overlay.color || '#000'};
+                                                    font-weight: ${overlay.bold ? 'bold' : 'normal'};
+                                                    font-style: ${overlay.italic ? 'italic' : 'normal'};
+                                                    text-decoration: ${overlay.underline ? 'underline' : 'none'};
+                                                    pointer-events: none;
+                                                  }
+                                                `).join('\n')}
+                                                ${imageOverlays.map((overlay, idx) => `
+                                                  .image-overlay-${idx} {
+                                                    position: absolute;
+                                                    left: ${overlay.x}%;
+                                                    top: ${overlay.y}%;
+                                                    transform: translate(-50%, -50%) rotate(${overlay.rotation || 0}deg);
+                                                    width: ${overlay.width || 50}px;
+                                                    height: ${overlay.height || 50}px;
+                                                    object-fit: contain;
+                                                    pointer-events: none;
+                                                  }
+                                                `).join('\n')}
+                                              </style>
+                                            </head>
+                                            <body>
+                                              <img src="${post.photo || 'https://via.placeholder.com/300x300'}" alt="Photo with overlays" />
+                                              ${textOverlays.map((overlay, idx) => 
+                                                `<div class="text-overlay-${idx}"><span>${overlay.text}</span></div>`
+                                              ).join('')}
+                                              ${imageOverlays.map((overlay, idx) => 
+                                                `<img src="${overlay.uri}" class="image-overlay-${idx}" alt="Overlay ${idx}" />`
+                                              ).join('')}
+                                            </body>
+                                          </html>
+                                        `
+                                      }}
+                                      style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                                      scrollEnabled={false}
+                                      showsVerticalScrollIndicator={false}
+                                      showsHorizontalScrollIndicator={false}
+                                    />
+                                  </View>
+                                );
+                              }
+                              
+                              // No filter or overlays, use regular Image
+                              return (
+                                <Image
+                                  source={{ uri: post.photo || 'https://via.placeholder.com/300x300' }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                />
+                              );
+                            })()
+                          ) : (
+                            <>
+                              {post.video ? (
+                                <Video
+                                  source={{ uri: post.video }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                  shouldPlay={false}
+                                  isMuted={true}
+                                  useNativeControls={false}
+                                  posterSource={post.thumbnail && !post.thumbnail.includes('placeholder') ? { uri: post.thumbnail } : undefined}
+                                />
+                              ) : (
+                                <Image
+                                  source={{ uri: post.thumbnail || 'https://via.placeholder.com/300x300' }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  resizeMode="cover"
+                                />
+                              )}
+                            </>
                           )}
-                          {/* Bookmark Icon */}
-                          <View
-                            style={{
-                              position: 'absolute',
-                              top: 8,
-                              right: 8,
-                              backgroundColor: themedColor('rgba(0,0,0,0.5)', 'rgba(255,255,255,0.65)'),
-                              borderRadius: 12,
-                              paddingHorizontal: 6,
-                              paddingVertical: 4,
-                            }}
-                          >
-                            <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 12 }}>🔖</Text>
-                          </View>
                         </View>
                       </TouchableOpacity>
-                    );
-                  })}
-               </View>
-             ) : (
-               <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-                 <Text style={{ color: theme.textSecondary, textAlign: 'center' }}>{t('profile.sections.noBookmarksTitle')}</Text>
-                 <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>{t('profile.sections.noBookmarksSubtitle')}</Text>
-               </View>
-             )}
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                  <Text style={{ color: theme.textSecondary, textAlign: 'center', fontSize: 16 }}>
+                    No bookmarks yet
+                  </Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: 'center', marginTop: 8 }}>
+                    Bookmark videos and photos from the home screen to see them here
+                  </Text>
+                </View>
+              )}
             </View>
           )}
+
         </View>
 
         {/* Pending Requests Section */}
