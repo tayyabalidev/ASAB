@@ -218,6 +218,8 @@ const Create = () => {
   const [editingPhotoUri, setEditingPhotoUri] = useState(null);
   const [showTextModal, setShowTextModal] = useState(false);
   const [textOverlays, setTextOverlays] = useState([]);
+  const [editingTextId, setEditingTextId] = useState(null); // Track which text overlay is being edited
+  const [originalEditingOverlay, setOriginalEditingOverlay] = useState(null); // Store original overlay when editing starts
   const [currentText, setCurrentText] = useState("");
   const [currentTextStyle, setCurrentTextStyle] = useState({
     fontSize: 24,
@@ -3470,6 +3472,8 @@ const Create = () => {
                                         return;
                                       }
                                       setCurrentText("");
+                                      setEditingTextId(null);
+                                      setOriginalEditingOverlay(null);
                                       setCurrentTextStyle({
                                         fontSize: 24,
                                         fontFamily: "Poppins-Bold",
@@ -6512,6 +6516,10 @@ const Create = () => {
                                       // Store current position to use in handleEnd
                                       let currentX = null;
                                       let currentY = null;
+                                      let touchStartTime = null;
+                                      let touchStartX = null;
+                                      let touchStartY = null;
+                                      let hasMoved = false;
                                       
                                       function handleStart(e) {
                                         e.preventDefault();
@@ -6521,6 +6529,10 @@ const Create = () => {
                                         const touch = e.touches[0];
                                         dragOffset.x = touch.clientX - rect.left - rect.width / 2;
                                         dragOffset.y = touch.clientY - rect.top - rect.height / 2;
+                                        touchStartTime = Date.now();
+                                        touchStartX = touch.clientX;
+                                        touchStartY = touch.clientY;
+                                        hasMoved = false;
                                         element.style.opacity = '0.7';
                                         // Reset position tracking
                                         currentX = null;
@@ -6532,6 +6544,16 @@ const Create = () => {
                                           e.preventDefault();
                                           e.stopPropagation();
                                           const touch = e.touches[0];
+                                          
+                                          // Check if user has moved significantly (more than 10px)
+                                          const moveDistance = Math.sqrt(
+                                            Math.pow(touch.clientX - touchStartX, 2) + 
+                                            Math.pow(touch.clientY - touchStartY, 2)
+                                          );
+                                          if (moveDistance > 10) {
+                                            hasMoved = true;
+                                          }
+                                          
                                           const bodyRect = document.body.getBoundingClientRect();
                                           const x = Math.max(0, Math.min(100, ((touch.clientX - dragOffset.x) / bodyRect.width) * 100));
                                           const y = Math.max(0, Math.min(100, ((touch.clientY - dragOffset.y) / bodyRect.height) * 100));
@@ -6570,6 +6592,27 @@ const Create = () => {
                                           e.preventDefault();
                                           e.stopPropagation();
                                           element.style.opacity = '1';
+                                          
+                                          const touchDuration = Date.now() - touchStartTime;
+                                          
+                                          // If it was a quick tap (less than 300ms) and didn't move much, treat as edit tap
+                                          // Only for overlay texts, not current text
+                                          if (!isCurrentText && touchDuration < 300 && !hasMoved) {
+                                            const overlayId = element.getAttribute('data-overlay-id');
+                                            const overlayIndex = parseInt(element.getAttribute('data-overlay-index'));
+                                            
+                                            if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                                              window.ReactNativeWebView.postMessage(JSON.stringify({
+                                                type: 'editText',
+                                                id: overlayId,
+                                                index: overlayIndex
+                                              }));
+                                            }
+                                            draggedElement = null;
+                                            currentX = null;
+                                            currentY = null;
+                                            return;
+                                          }
                                           
                                           if (isCurrentText) {
                                             // Send final position when drag ends (only then update React state to avoid WebView reload)
@@ -6663,6 +6706,35 @@ const Create = () => {
                                 x: message.x,
                                 y: message.y,
                               });
+                            } else if (message.type === "editText") {
+                              // Find the overlay to edit
+                              const overlayToEdit = textOverlays.find(
+                                (overlay, index) =>
+                                  overlay.id === message.id ||
+                                  index === message.index
+                              );
+                              if (overlayToEdit) {
+                                // Store original overlay for cancel
+                                setOriginalEditingOverlay({ ...overlayToEdit });
+                                // Load overlay data into current text state
+                                setEditingTextId(overlayToEdit.id);
+                                setCurrentText(overlayToEdit.text);
+                                setCurrentTextStyle({
+                                  ...overlayToEdit.style,
+                                });
+                                setCurrentTextPosition({
+                                  x: overlayToEdit.x || 50,
+                                  y: overlayToEdit.y || 50,
+                                });
+                                // Open text modal for editing
+                                setShowTextModal(true);
+                                // Remove the overlay from the list (will be re-added when Done is pressed)
+                                setTextOverlays((prev) =>
+                                  prev.filter(
+                                    (overlay) => overlay.id !== overlayToEdit.id
+                                  )
+                                );
+                              }
                             }
                           } catch (error) {
                             console.log(
@@ -6712,8 +6784,17 @@ const Create = () => {
                     >
                       <TouchableOpacity
                         onPress={() => {
+                          // If we were editing, restore the original overlay
+                          if (editingTextId && originalEditingOverlay) {
+                            setTextOverlays((prev) => [
+                              ...prev,
+                              originalEditingOverlay,
+                            ]);
+                            setOriginalEditingOverlay(null);
+                          }
                           setShowTextModal(false);
                           setCurrentText("");
+                          setEditingTextId(null);
                           setCurrentTextPosition({ x: 50, y: 50 });
                           setShowTextStyles(false);
                           setShowColorPicker(false);
@@ -6758,16 +6839,33 @@ const Create = () => {
                       <TouchableOpacity
                         onPress={() => {
                           if (currentText.trim()) {
-                            setTextOverlays([
-                              ...textOverlays,
-                              {
-                                text: currentText,
-                                style: { ...currentTextStyle },
-                                x: currentTextPosition.x,
-                                y: currentTextPosition.y,
-                                id: Date.now().toString(),
-                              },
-                            ]);
+                            if (editingTextId) {
+                              // Update existing overlay
+                              setTextOverlays((prev) => [
+                                ...prev,
+                                {
+                                  text: currentText,
+                                  style: { ...currentTextStyle },
+                                  x: currentTextPosition.x,
+                                  y: currentTextPosition.y,
+                                  id: editingTextId, // Keep the same ID
+                                },
+                              ]);
+                              setEditingTextId(null);
+                              setOriginalEditingOverlay(null);
+                            } else {
+                              // Create new overlay
+                              setTextOverlays([
+                                ...textOverlays,
+                                {
+                                  text: currentText,
+                                  style: { ...currentTextStyle },
+                                  x: currentTextPosition.x,
+                                  y: currentTextPosition.y,
+                                  id: Date.now().toString(),
+                                },
+                              ]);
+                            }
                             setCurrentText("");
                             setCurrentTextStyle({
                               fontSize: 24,
@@ -7403,20 +7501,50 @@ const Create = () => {
                       </View>
                     )}
 
-                    {/* Hidden Text Input - Text appears directly on photo/video */}
-                    <TextInput
-                      ref={hiddenTextInputRef}
-                      value={currentText}
-                      onChangeText={setCurrentText}
+                    {/* Visible Text Input - Users can see and edit their text */}
+                    <View
                       style={{
                         position: "absolute",
-                        opacity: 0,
-                        width: 1,
-                        height: 1,
+                        bottom: Platform.OS === "ios" ? 100 : 120,
+                        left: 16,
+                        right: 16,
+                        backgroundColor: "rgba(0, 0, 0, 0.7)",
+                        borderRadius: 12,
+                        padding: 12,
+                        zIndex: 100,
                       }}
-                      autoFocus={false}
-                      multiline
-                    />
+                    >
+                      <TextInput
+                        ref={hiddenTextInputRef}
+                        value={currentText}
+                        onChangeText={setCurrentText}
+                        placeholder="Type your text here..."
+                        placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                        style={{
+                          color: "#FFFFFF",
+                          fontSize: 16,
+                          fontFamily: "Poppins-Regular",
+                          minHeight: 40,
+                          maxHeight: 100,
+                          textAlign: "center",
+                        }}
+                        autoFocus={false}
+                        multiline
+                        textAlign="center"
+                        selectionColor="#0095F6"
+                      />
+                      <Text
+                        style={{
+                          color: "rgba(255, 255, 255, 0.6)",
+                          fontSize: 12,
+                          marginTop: 4,
+                          textAlign: "center",
+                          fontFamily: "Poppins-Regular",
+                        }}
+                      >
+                        Tap on existing text to edit it
+                      </Text>
+                    </View>
                   </View>
                 </View>
               </KeyboardAvoidingView>
