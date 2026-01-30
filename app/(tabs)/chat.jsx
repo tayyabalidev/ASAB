@@ -11,7 +11,7 @@ import { account, appwriteConfig, databases, getCurrentUser, storage, uploadFile
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import * as Location from 'expo-location';
 import { Video } from 'expo-av';
@@ -228,6 +228,14 @@ const Chat = () => {
     }
   }, [userId, users, currentUser]);
 
+  // Safeguard: Prevent selectedUser from being cleared unexpectedly during message sending
+  useEffect(() => {
+    // Only log if selectedUser is cleared while we're in a chat (has messages)
+    if (!selectedUser && messages.length > 0 && !sending) {
+      console.warn('selectedUser was cleared unexpectedly while in chat');
+    }
+  }, [selectedUser, messages.length, sending]);
+
   // 1. Robust polling for allMessages every 2 seconds
   useEffect(() => {
     if (!currentUser) return;
@@ -330,21 +338,32 @@ const Chat = () => {
 
   // Centralized sendMessage function
   const sendMessage = async ({ type, content = '', fileUrl = '', optimistic = true }) => {
-    if (sending || !selectedUser || !selectedUser.$id || !currentUser) return;
+    // Store selectedUser in a local variable to prevent it from being lost on errors
+    const currentSelectedUser = selectedUser;
+    
+    if (sending || !currentSelectedUser || !currentSelectedUser.$id || !currentUser) {
+      console.warn('Cannot send message: missing required data', { 
+        sending, 
+        hasSelectedUser: !!currentSelectedUser, 
+        hasCurrentUser: !!currentUser 
+      });
+      return;
+    }
+    
     setSending(true);
 
     // Prepare message fields
     const messageData = {
-      chatId: selectedUser.$id,
+      chatId: currentSelectedUser.$id,
       senderId: currentUser.$id,
-      receiverId: selectedUser.type === 'group'
-        ? selectedUser.$id
-        : selectedUser.$id === currentUser.$id
+      receiverId: currentSelectedUser.type === 'group'
+        ? currentSelectedUser.$id
+        : currentSelectedUser.$id === currentUser.$id
           ? null
-          : selectedUser.$id,
+          : currentSelectedUser.$id,
       type,
-      content: type === 'text' ? content : '',
-      fileUrl: type !== 'text' ? (fileUrl || content) : '',
+      content: type === 'text' || type === 'location' ? content : '',
+      fileUrl: type !== 'text' && type !== 'location' ? (fileUrl || content) : '',
     };
 
     // Optimistic UI update
@@ -359,7 +378,7 @@ const Chat = () => {
       };
       setMessages(prev => [...prev, optimisticMessage]);
       setAllMessages(prev => [...prev, optimisticMessage]);
-      setRecentlyMessagedUserId(selectedUser.$id);
+      setRecentlyMessagedUserId(currentSelectedUser.$id);
       if (type === 'text') setMessageText("");
     }
 
@@ -371,8 +390,8 @@ const Chat = () => {
         {
           ...messageData,
           // For backward compatibility, store fileUrl in content if fileUrl is not present
-          content: type === 'text' ? content : (fileUrl || content),
-          fileUrl: type !== 'text' ? (fileUrl || content) : '',
+          content: type === 'text' || type === 'location' ? content : (fileUrl || content),
+          fileUrl: type !== 'text' && type !== 'location' ? (fileUrl || content) : '',
         }
       );
       
@@ -393,7 +412,7 @@ const Chat = () => {
       // Create notification for new message (only for private chats, not groups)
       // Note: In a real-time system, you'd check if the receiver is viewing the chat
       // For now, we'll create notifications for all messages
-      if (messageData.receiverId && messageData.receiverId !== currentUser.$id && selectedUser.type !== 'group') {
+      if (messageData.receiverId && messageData.receiverId !== currentUser.$id && currentSelectedUser.type !== 'group') {
         try {
           await createNotification('message', currentUser.$id, messageData.receiverId, null);
         } catch (notifError) {
@@ -402,13 +421,25 @@ const Chat = () => {
         }
       }
       
+      // Ensure selectedUser is still set after successful send
+      if (!selectedUser || selectedUser.$id !== currentSelectedUser.$id) {
+        setSelectedUser(currentSelectedUser);
+      }
+      
       // Trigger a refresh to ensure both users see the message
       // The polling will handle this, but we can also trigger manually if needed
     } catch (e) {
+      console.error('Error sending message:', e);
       Alert.alert(t('error'), e.message || t('chat.generalError'));
       // Remove optimistic message if sending fails
       setMessages(prev => prev.filter(m => !m.optimistic || m.$id !== tempId));
       setAllMessages(prev => prev.filter(m => !m.optimistic || m.$id !== tempId));
+      
+      // CRITICAL: Ensure selectedUser is preserved even on error
+      // This prevents navigation away from the chat screen
+      if (!selectedUser || selectedUser.$id !== currentSelectedUser.$id) {
+        setSelectedUser(currentSelectedUser);
+      }
     } finally {
       setSending(false);
     }
@@ -430,28 +461,40 @@ const Chat = () => {
       }
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
-        allowsEditing: true,
         quality: 0.7,
       });
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        const fileName = asset.fileName || asset.name || asset.uri.split('/').pop() || `file_${Date.now()}`;
-        const fileType = asset.type === 'image' ? 'image/jpeg' : asset.type === 'video' ? 'video/mp4' : asset.type;
-        const fileSize = asset.fileSize || asset.size;
-        const file = {
-          uri: asset.uri,
-          name: fileName,
-          type: fileType,
-          size: fileSize,
-        };
-        const fileUrl = await uploadFile(file, asset.type === 'video' ? 'video' : 'image');
-        await sendMessage({
-          type: asset.type === 'video' ? 'video' : 'image',
-          fileUrl: fileUrl.href || fileUrl,
-          content: '',
-        });
-        setShowAttachmentOptions(false);
+      
+      if (!result || result.canceled) {
+        return;
       }
+
+      if (!result.assets || !Array.isArray(result.assets) || result.assets.length === 0) {
+        console.warn('No assets captured from camera');
+        return;
+      }
+
+      const asset = result.assets[0];
+      if (!asset || !asset.uri) {
+        Alert.alert(t('error'), 'Invalid file captured');
+        return;
+      }
+
+      const fileName = asset.fileName || asset.name || asset.uri.split('/').pop() || `file_${Date.now()}`;
+      const fileType = asset.type === 'image' ? 'image/jpeg' : asset.type === 'video' ? 'video/mp4' : asset.type;
+      const fileSize = asset.fileSize || asset.size || 0;
+      const file = {
+        uri: asset.uri,
+        name: fileName,
+        type: fileType,
+        size: fileSize,
+      };
+      const fileUrl = await uploadFile(file, asset.type === 'video' ? 'video' : 'image');
+      await sendMessage({
+        type: asset.type === 'video' ? 'video' : 'image',
+        fileUrl: fileUrl?.href || fileUrl || '',
+        content: '',
+      });
+      setShowAttachmentOptions(false);
     } catch (e) {
       Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
@@ -467,36 +510,53 @@ const Chat = () => {
       }
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        allowsEditing: true,
         quality: 0.7,
       });
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        let fileName = asset.fileName || asset.name || asset.uri.split('/').pop() || `video_${Date.now()}`;
-        
-        // Ensure .mp4 extension for Appwrite compatibility
-        const baseName = fileName.split('.')[0];
-        fileName = `${baseName}.mp4`;
-        
-        const fileType = 'video/mp4';
-        const fileSize = asset.fileSize || asset.size;
-        const file = {
-          uri: asset.uri,
-          name: fileName,
-          type: fileType,
-          mimeType: fileType, // Add mimeType for iOS compatibility
-          size: fileSize,
-        };
-        const fileUrl = await uploadFile(file, 'video');
-        await sendMessage({
-          type: 'video',
-          fileUrl: fileUrl.href || fileUrl,
-          content: '',
-        });
-        setShowAttachmentOptions(false);
+      
+      if (!result || result.canceled) {
+        return;
       }
+
+      if (!result.assets || !Array.isArray(result.assets) || result.assets.length === 0) {
+        console.warn('No video captured');
+        return;
+      }
+
+      const asset = result.assets[0];
+      if (!asset || !asset.uri) {
+        Alert.alert(t('error'), 'Invalid video captured');
+        return;
+      }
+
+      let fileName = asset.fileName || asset.name || asset.uri.split('/').pop() || `video_${Date.now()}`;
+      
+      // Ensure .mp4 extension for Appwrite compatibility
+      const baseName = fileName.split('.')[0];
+      fileName = `${baseName}.mp4`;
+      
+      const fileType = 'video/mp4';
+      const fileSize = asset.fileSize || asset.size || 0;
+      const file = {
+        uri: asset.uri,
+        name: fileName,
+        type: fileType,
+        mimeType: fileType, // Add mimeType for iOS compatibility
+        size: fileSize,
+      };
+      const fileUrl = await uploadFile(file, 'video');
+      await sendMessage({
+        type: 'video',
+        fileUrl: fileUrl?.href || fileUrl || '',
+        content: '',
+      });
+      setShowAttachmentOptions(false);
     } catch (e) {
+      console.error('Video error:', e);
       Alert.alert(t('error'), e.message || t('chat.generalError'));
+      // Ensure selectedUser is preserved on error
+      if (selectedUser) {
+        setSelectedUser(selectedUser);
+      }
     }
   };
 
@@ -544,13 +604,26 @@ const Chat = () => {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
-        allowsEditing: true,
         quality: 0.7,
         allowsMultipleSelection: true,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        for (const asset of result.assets) {
+      if (!result || result.canceled) {
+        return;
+      }
+
+      if (!result.assets || !Array.isArray(result.assets) || result.assets.length === 0) {
+        console.warn('No assets selected from gallery');
+        return;
+      }
+
+      for (const asset of result.assets) {
+        if (!asset || !asset.uri) {
+          console.warn('Invalid asset, skipping:', asset);
+          continue;
+        }
+
+        try {
           let fileName = asset.fileName || asset.name || asset.uri.split('/').pop() || `file_${Date.now()}`;
           
           // Ensure proper file extension for Appwrite compatibility
@@ -562,7 +635,7 @@ const Chat = () => {
           }
           
           const fileType = asset.type === 'image' ? 'image/jpeg' : asset.type === 'video' ? 'video/mp4' : asset.type;
-          const fileSize = asset.fileSize || asset.size;
+          const fileSize = asset.fileSize || asset.size || 0;
           const file = {
             uri: asset.uri,
             name: fileName,
@@ -575,14 +648,22 @@ const Chat = () => {
           const fileUrl = await uploadFile(file, isVideo ? 'video' : 'image');
           await sendMessage({
             type: isVideo ? 'video' : 'image',
-            fileUrl: fileUrl.href || fileUrl,
+            fileUrl: fileUrl?.href || fileUrl || '',
             content: '',
           });
+        } catch (assetError) {
+          console.error('Error processing asset:', assetError);
+          Alert.alert(t('error'), `Failed to process ${asset.type || 'file'}: ${assetError.message || t('chat.generalError')}`);
         }
-        setShowAttachmentOptions(false);
       }
+      setShowAttachmentOptions(false);
     } catch (e) {
+      console.error('Gallery error:', e);
       Alert.alert(t('error'), e.message || t('chat.generalError'));
+      // Ensure selectedUser is preserved on error
+      if (selectedUser) {
+        setSelectedUser(selectedUser);
+      }
     }
   };
 
@@ -613,7 +694,12 @@ const Chat = () => {
       });
       setShowAttachmentOptions(false);
     } catch (e) {
+      console.error('Location error:', e);
       Alert.alert(t('error'), e.message || t('chat.generalError'));
+      // Ensure selectedUser is preserved on error
+      if (selectedUser) {
+        setSelectedUser(selectedUser);
+      }
     }
   };
 
@@ -625,25 +711,38 @@ const Chat = () => {
         copyToCacheDirectory: true,
         multiple: false,
       });
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        const fileName = asset.name || asset.fileName || asset.uri.split('/').pop() || `file_${Date.now()}`;
-        const fileType = asset.mimeType || 'application/octet-stream';
-        const fileSize = asset.size;
-        const file = {
-          uri: asset.uri,
-          name: fileName,
-          type: fileType,
-          size: fileSize,
-        };
-        const fileUrl = await uploadFile(file, 'document');
-        await sendMessage({
-          type: 'document',
-          fileUrl: fileUrl.href || fileUrl,
-          content: fileName,
-        });
-        setShowAttachmentOptions(false);
+      
+      if (!result || result.canceled) {
+        return;
       }
+
+      if (!result.assets || !Array.isArray(result.assets) || result.assets.length === 0) {
+        console.warn('No document selected');
+        return;
+      }
+
+      const asset = result.assets[0];
+      if (!asset || !asset.uri) {
+        Alert.alert(t('error'), 'Invalid document selected');
+        return;
+      }
+
+      const fileName = asset.name || asset.fileName || asset.uri.split('/').pop() || `file_${Date.now()}`;
+      const fileType = asset.mimeType || 'application/octet-stream';
+      const fileSize = asset.size || 0;
+      const file = {
+        uri: asset.uri,
+        name: fileName,
+        type: fileType,
+        size: fileSize,
+      };
+      const fileUrl = await uploadFile(file, 'document');
+      await sendMessage({
+        type: 'document',
+        fileUrl: fileUrl?.href || fileUrl || '',
+        content: fileName,
+      });
+      setShowAttachmentOptions(false);
     } catch (e) {
       Alert.alert(t('error'), e.message || t('chat.generalError'));
     }
@@ -952,19 +1051,91 @@ const Chat = () => {
         setSoundObj(null);
         setPlayingAudioId(null);
       }
-      const { sound } = await Audio.Sound.createAsync({ uri: audioUrl }, {}, (status) => setAudioPlaybackStatus(status));
+
+      if (!audioUrl) {
+        throw new Error('Audio URL is missing');
+      }
+
+      // Convert view URL to download URL for better iOS compatibility
+      let processedUrl = audioUrl;
+      if (audioUrl.includes('/view?')) {
+        processedUrl = audioUrl.replace('/view?', '/download?');
+      }
+
+      // For iOS compatibility, download remote audio files first
+      let finalAudioUri = processedUrl;
+      
+      // Check if it's a remote URL (starts with http)
+      if (processedUrl && processedUrl.startsWith('http')) {
+        try {
+          // Download the audio file to cache for iOS AVPlayer compatibility
+          const fileName = `audio_${Date.now()}.m4a`;
+          const cacheUri = FileSystem.cacheDirectory + fileName;
+          
+          // Download the file
+          const downloadResult = await FileSystem.downloadAsync(processedUrl, cacheUri);
+          
+          if (downloadResult.uri) {
+            finalAudioUri = downloadResult.uri;
+            console.log('Audio file downloaded to cache:', finalAudioUri);
+          } else {
+            console.warn('Download completed but no URI returned, using original URL');
+          }
+        } catch (downloadError) {
+          console.warn('Failed to download audio file, using original URL:', downloadError);
+          // Continue with original URL if download fails
+        }
+      }
+
+      // Set audio mode for playback
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: finalAudioUri },
+        { 
+          shouldPlay: false,
+          isMuted: false,
+          volume: 1.0,
+          rate: 1.0,
+          shouldCorrectPitch: true,
+        },
+        (status) => {
+          setAudioPlaybackStatus(status);
+        }
+      );
+      
       setSoundObj(sound);
       setPlayingAudioId(messageId);
-      await sound.playAsync();
+      
+      // Set up playback status updates
       sound.setOnPlaybackStatusUpdate((status) => {
         setAudioPlaybackStatus(status);
         if (status.didJustFinish) {
           setPlayingAudioId(null);
           sound.unloadAsync();
+          setSoundObj(null);
         }
       });
+      
+      await sound.playAsync();
     } catch (err) {
-      Alert.alert(t('error'), t('chat.audioPlaybackError', { message: err.message || '' }));
+      console.error('Audio playback error:', err);
+      Alert.alert(
+        t('error'), 
+        t('chat.audioPlaybackError', { message: err.message || 'Failed to play audio. Please try again.' })
+      );
+      setPlayingAudioId(null);
+      if (soundObj) {
+        try {
+          await soundObj.unloadAsync();
+        } catch {}
+        setSoundObj(null);
+      }
     }
   };
 
@@ -1647,20 +1818,22 @@ const Chat = () => {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
           >
             {/* Background Image */}
-            <Image
-              source={isDarkMode ? images.messageDarkmood : images.messageLightmood}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                width: '100%',
-                height: '100%',
-                opacity: 0.4,
-              }}
-              resizeMode="cover"
-            />
+            {images && (images.messageDarkmood || images.messageLightmood) && (
+              <Image
+                source={isDarkMode ? (images.messageDarkmood || images.messageLightmood) : (images.messageLightmood || images.messageDarkmood)}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: '100%',
+                  height: '100%',
+                  opacity: 0.4,
+                }}
+                resizeMode="cover"
+              />
+            )}
             {/* Semi-transparent overlay to make background more subtle */}
             <View
               style={{
@@ -1675,7 +1848,7 @@ const Chat = () => {
             {/* Messages */}
             <FlatList
               style={{ flex: 1, backgroundColor: 'transparent' }}
-              data={messages?.filter(m => m?.content) || []}
+              data={messages?.filter(m => m?.content || m?.fileUrl || m?.type === 'location') || []}
               keyExtractor={item => item.$id}
               renderItem={({ item, index }) => {
                 if (!item || !item.senderId || !currentUser) return null;
@@ -1719,6 +1892,10 @@ const Chat = () => {
                           ]
                         );
                       }
+                    }}
+                    onPress={() => {
+                      // Prevent accidental navigation - only handle specific message types
+                      // Regular text messages don't need onPress
                     }}
                     style={{
                       flexDirection: isMe ? 'row-reverse' : 'row',
@@ -1804,12 +1981,77 @@ const Chat = () => {
                         </View>
                       ) : item.type === 'location' ? (() => {
                         let loc = null;
-                        try { loc = JSON.parse(item.content); } catch {}
+                        try { 
+                          loc = JSON.parse(item.content || item.fileUrl || '{}'); 
+                        } catch (e) {
+                          console.warn('Failed to parse location:', e);
+                        }
                         const coords = loc ? `${loc.latitude?.toFixed(5)}, ${loc.longitude?.toFixed(5)}` : '';
-                        const mapsUrl = loc ? `https://maps.google.com/?q=${loc.latitude},${loc.longitude}` : '';
+                        
+                        // Generate platform-specific map URLs
+                        const getMapsUrl = () => {
+                          if (!loc || !loc.latitude || !loc.longitude) return null;
+                          
+                          const lat = loc.latitude;
+                          const lng = loc.longitude;
+                          
+                          if (Platform.OS === 'ios') {
+                            // Try Apple Maps first, then Google Maps
+                            return `maps://maps.apple.com/?q=${lat},${lng}`;
+                          } else if (Platform.OS === 'android') {
+                            // Use geo: scheme for Android (works with Google Maps and other map apps)
+                            return `geo:${lat},${lng}?q=${lat},${lng}`;
+                          } else {
+                            // Web fallback
+                            return `https://www.google.com/maps?q=${lat},${lng}`;
+                          }
+                        };
+                        
+                        const mapsUrl = getMapsUrl();
+                        const fallbackUrl = loc ? `https://www.google.com/maps?q=${loc.latitude},${loc.longitude}` : null;
+                        
                         return (
                           <TouchableOpacity
-                            onPress={() => mapsUrl && Linking.openURL(mapsUrl)}
+                            onPress={async () => {
+                              if (!mapsUrl && !fallbackUrl) {
+                                Alert.alert(t('error'), 'Invalid location data');
+                                return;
+                              }
+                              
+                              try {
+                                // Try primary URL first
+                                if (mapsUrl) {
+                                  const canOpen = await Linking.canOpenURL(mapsUrl);
+                                  if (canOpen) {
+                                    await Linking.openURL(mapsUrl);
+                                    return;
+                                  }
+                                }
+                                
+                                // Fallback to web URL
+                                if (fallbackUrl) {
+                                  const canOpenFallback = await Linking.canOpenURL(fallbackUrl);
+                                  if (canOpenFallback) {
+                                    await Linking.openURL(fallbackUrl);
+                                    return;
+                                  }
+                                }
+                                
+                                Alert.alert(t('error'), 'Unable to open maps. Please install a maps application.');
+                              } catch (e) {
+                                console.error('Error opening location:', e);
+                                // Try fallback URL if primary fails
+                                if (fallbackUrl) {
+                                  try {
+                                    await Linking.openURL(fallbackUrl);
+                                  } catch (fallbackError) {
+                                    Alert.alert(t('error'), 'Failed to open location. Please try again.');
+                                  }
+                                } else {
+                                  Alert.alert(t('error'), 'Failed to open location. Please try again.');
+                                }
+                              }
+                            }}
                             style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isMe ? '#1e3a2f' : '#f5f5f5', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, maxWidth: 220, marginBottom: 6 }}
                             activeOpacity={0.7}
                           >
@@ -1885,7 +2127,7 @@ const Chat = () => {
                         <MaterialCommunityIcons name="microphone" size={32} color="#a259f7" />
                       </TouchableOpacity>
                       <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>
-                        {t('chat.attachment.audio')}
+                        {t('Audio')}
                       </Text>
                     </View>
                     <View style={{ alignItems: 'center', width: 80, marginRight: 16 }}>
@@ -1901,7 +2143,7 @@ const Chat = () => {
                         <MaterialCommunityIcons name="image" size={32} color="#a259f7" />
                       </TouchableOpacity>
                       <Text style={{ color: '#fff', marginTop: 6, fontSize: 13, textAlign: 'center' }}>
-                        {t('chat.attachment.gallery')}
+                        {t('Gallery')}
                       </Text>
                     </View>
                     <View style={{ alignItems: 'center', width: 80, marginRight: 16 }}>

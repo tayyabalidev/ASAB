@@ -192,6 +192,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   // Fetch creator data if creator is a string ID
   // Use a ref to track the creator ID we've already processed to prevent infinite loops
   const processedCreatorIdRef = useRef(null);
+  // Track recent like actions to avoid overriding optimistic updates
+  const recentLikeActionRef = useRef(false);
   
   // Get stable creator ID for dependency - extract just the ID string
   const creatorIdString = typeof item?.creator === 'object' && item?.creator !== null 
@@ -289,6 +291,37 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     fetchShareCount();
   }, [item.$id]);
 
+  // Sync liked state and likes count with item data when item changes
+  // This ensures the state persists when scrolling away and coming back
+  useEffect(() => {
+    // Don't sync if we just made a like action (optimistic update)
+    if (recentLikeActionRef.current) {
+      recentLikeActionRef.current = false;
+      return;
+    }
+    
+    if (item.likes) {
+      setLiked(item.likes.includes(user?.$id));
+      setLikesCount(item.likes.length);
+    } else {
+      setLiked(false);
+      setLikesCount(0);
+    }
+  }, [item.$id, user?.$id]);
+
+  // Also sync when item becomes visible again (handles case where same item is shown with updated data)
+  useEffect(() => {
+    if (isVisible && !recentLikeActionRef.current) {
+      if (item.likes) {
+        setLiked(item.likes.includes(user?.$id));
+        setLikesCount(item.likes.length);
+      } else {
+        setLiked(false);
+        setLikesCount(0);
+      }
+    }
+  }, [isVisible, item.$id, user?.$id]);
+
   // Check if current user is following the video/photo creator
   useEffect(() => {
     async function checkFollowStatus() {
@@ -368,11 +401,20 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
 
   const handleLike = async () => {
     if (!user?.$id) return;
+    // Mark that we just made a like action to prevent sync from overriding optimistic update
+    recentLikeActionRef.current = true;
     setLiked((prev) => !prev);
     setLikesCount((prev) => (liked ? prev - 1 : prev + 1));
     try {
       await toggleLikePost(item.$id, user.$id);
-    } catch {}
+      // Reset the flag after a short delay to allow future syncs
+      setTimeout(() => {
+        recentLikeActionRef.current = false;
+      }, 1000);
+    } catch {
+      // On error, reset the flag immediately so state can sync
+      recentLikeActionRef.current = false;
+    }
   };
 
   const handleBookmark = async () => {
