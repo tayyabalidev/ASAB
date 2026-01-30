@@ -2429,85 +2429,108 @@ const Create = () => {
                       </Text>
 
                       <View style={{ position: "relative" }}>
-                        <TouchableOpacity onPress={() => openPicker("video")}>
-                          {form.video ? (
-                            <View
+                        {form.video ? (
+                          <View
+                            style={{
+                              width: "100%",
+                              height: 256,
+                              borderRadius: 16,
+                              overflow: "hidden",
+                            }}
+                          >
+                            {/* Change Video Button */}
+                            <TouchableOpacity
+                              onPress={() => openPicker("video")}
                               style={{
-                                width: "100%",
-                                height: 256,
-                                borderRadius: 16,
-                                overflow: "hidden",
+                                position: "absolute",
+                                top: 10,
+                                right: 10,
+                                backgroundColor: "rgba(0,0,0,0.7)",
+                                paddingHorizontal: 12,
+                                paddingVertical: 8,
+                                borderRadius: 8,
+                                zIndex: 10,
                               }}
                             >
-                              {/* Use processed video if available, otherwise use original */}
-                              <Video
-                                key={processedVideoUri || form.video.uri}
-                                ref={videoRef}
-                                source={{ uri: processedVideoUri || form.video.uri }}
-                                  style={{ width: "100%", height: "100%" }}
-                                useNativeControls
-                                resizeMode={ResizeMode.COVER}
-                                isLooping
-                                rate={videoSpeed}
-                                volume={videoVolume}
-                                onLoad={(status) => {
-                                  if (status.isLoaded) {
-                                    const duration =
-                                      status.durationMillis / 1000;
-                                    setVideoDuration(duration);
-                                    if (videoTrimEnd === 0) {
-                                      setVideoTrimEnd(duration);
-                                    }
-                                  }
+                              <Text
+                                style={{
+                                  color: "#fff",
+                                  fontSize: 12,
+                                  fontWeight: "600",
                                 }}
-                                onError={(error) => {
-                                  // Ignore seeking interrupted errors - they're harmless
-                                  if (
-                                    error?.error?.includes?.(
-                                      "Seeking interrupted"
-                                    )
-                                  ) {
-                                    return;
+                              >
+                                Change
+                              </Text>
+                            </TouchableOpacity>
+                            {/* Use processed video if available, otherwise use original */}
+                            <Video
+                              key={processedVideoUri || form.video.uri}
+                              ref={videoRef}
+                              source={{ uri: processedVideoUri || form.video.uri }}
+                                style={{ width: "100%", height: "100%" }}
+                              useNativeControls
+                              resizeMode={ResizeMode.COVER}
+                              isLooping
+                              rate={videoSpeed}
+                              volume={videoVolume}
+                              onLoad={(status) => {
+                                if (status.isLoaded) {
+                                  const duration =
+                                    status.durationMillis / 1000;
+                                  setVideoDuration(duration);
+                                  if (videoTrimEnd === 0) {
+                                    setVideoTrimEnd(duration);
                                   }
-                                  // Log other errors for debugging
-                                }}
-                              />
-                              {/* Filter indicator */}
-                              {form.filter !== "none" && (
-                                <View
-                                  style={{
-                                    position: "absolute",
-                                    bottom: 10,
-                                    left: 10,
-                                    backgroundColor: "rgba(0,0,0,0.7)",
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 6,
-                                    borderRadius: 8,
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      color: "#fff",
-                                      fontSize: 12,
-                                      fontWeight: "600",
-                                    }}
-                                  >
-                                    Filter: {FILTERS.find((f) => f.id === form.filter)?.name || form.filter}
-                                  </Text>
-                                </View>
-                              )}
-                              {/* Indicators Row */}
+                                }
+                              }}
+                              onError={(error) => {
+                                // Ignore seeking interrupted errors - they're harmless
+                                if (
+                                  error?.error?.includes?.(
+                                    "Seeking interrupted"
+                                  )
+                                ) {
+                                  return;
+                                }
+                                // Log other errors for debugging
+                              }}
+                            />
+                            {/* Filter indicator */}
+                            {form.filter !== "none" && (
                               <View
                                 style={{
                                   position: "absolute",
-                                  top: 10,
+                                  bottom: 10,
                                   left: 10,
-                                  flexDirection: "row",
-                                  flexWrap: "wrap",
-                                  gap: 6,
-                                  maxWidth: "80%",
+                                  backgroundColor: "rgba(0,0,0,0.7)",
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  borderRadius: 8,
                                 }}
                               >
+                                <Text
+                                  style={{
+                                    color: "#fff",
+                                    fontSize: 12,
+                                    fontWeight: "600",
+                                  }}
+                                >
+                                  Filter: {FILTERS.find((f) => f.id === form.filter)?.name || form.filter}
+                                </Text>
+                              </View>
+                            )}
+                            {/* Indicators Row */}
+                            <View
+                              style={{
+                                position: "absolute",
+                                top: 10,
+                                left: 10,
+                                flexDirection: "row",
+                                flexWrap: "wrap",
+                                gap: 6,
+                                maxWidth: "80%",
+                              }}
+                            >
                                 {form.filter !== "none" && (
                                   <View
                                     style={{
@@ -2659,26 +2682,27 @@ const Create = () => {
                               )}
                             </View>
                           ) : (
-                            <View
-                              style={{
-                                width: "100%",
-                                height: 180,
-                                paddingHorizontal: 16,
-                                borderRadius: 16,
-                                borderWidth: 1,
-                                borderColor: theme.border,
-                                backgroundColor: themedColor(
-                                  "rgba(15,23,42,0.6)",
-                                  theme.surface
-                                ),
-                                justifyContent: "center",
-                                alignItems: "center",
-                              }}
-                            >
+                            <TouchableOpacity onPress={() => openPicker("video")}>
                               <View
                                 style={{
-                                  width: 64,
-                                  height: 64,
+                                  width: "100%",
+                                  height: 180,
+                                  paddingHorizontal: 16,
+                                  borderRadius: 16,
+                                  borderWidth: 1,
+                                  borderColor: theme.border,
+                                  backgroundColor: themedColor(
+                                    "rgba(15,23,42,0.6)",
+                                    theme.surface
+                                  ),
+                                  justifyContent: "center",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <View
+                                  style={{
+                                    width: 64,
+                                    height: 64,
                                   borderRadius: 12,
                                   borderWidth: 1,
                                   borderStyle: "dashed",
@@ -2697,9 +2721,17 @@ const Create = () => {
                                   }}
                                 />
                               </View>
+                              <Text
+                                style={{
+                                  color: theme.textSecondary,
+                                  marginTop: 12,
+                                }}
+                              >
+                                Tap to select video
+                              </Text>
                             </View>
-                          )}
-                        </TouchableOpacity>
+                          </TouchableOpacity>
+                        )}
                         {form.video && (
                           <TouchableOpacity
                             onPress={() => setForm({ ...form, video: null })}
@@ -3152,236 +3184,259 @@ const Create = () => {
                         Select Photo
                       </Text>
 
-                      <TouchableOpacity onPress={() => openPicker("image")}>
-                        {editedImage ? (
-                          <View
+                      {editedImage ? (
+                        <View
+                          style={{
+                            position: "relative",
+                            width: "100%",
+                            height: 400,
+                            borderRadius: 16,
+                            overflow: "hidden",
+                          }}
+                        >
+                          {/* Change Photo Button */}
+                          <TouchableOpacity
+                            onPress={() => openPicker("image")}
                             style={{
-                              position: "relative",
-                              width: "100%",
-                              height: 400,
-                              borderRadius: 16,
-                              overflow: "hidden",
+                              position: "absolute",
+                              top: 10,
+                              right: 50,
+                              backgroundColor: "rgba(0,0,0,0.7)",
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 8,
+                              zIndex: 10,
                             }}
                           >
-                            {imageBase64 && webViewHTML ? (
-                              <WebView
-                                key={`photo-${
-                                  editedImage?.uri ||
-                                  originalImage?.uri ||
-                                  "none"
-                                }-${imageUpdateKey}-${imageBase64.length}-${
-                                  photoForm.filter
-                                }-${textOverlays.length}-${
-                                  imageOverlays.length
-                                }`}
-                                source={{ html: webViewHTML }}
-                                style={{
-                                  width: "100%",
-                                  height: 600,
-                                  backgroundColor: "transparent",
-                                }}
-                                scrollEnabled={false}
-                                showsVerticalScrollIndicator={false}
-                                showsHorizontalScrollIndicator={false}
-                                javaScriptEnabled={true}
-                                ref={photoWebViewRef}
-                                onMessage={(event) => {
-                                  try {
-                                    const message = JSON.parse(
-                                      event.nativeEvent.data
+                            <Text
+                              style={{
+                                color: "#fff",
+                                fontSize: 12,
+                                fontWeight: "600",
+                              }}
+                            >
+                              Change
+                            </Text>
+                          </TouchableOpacity>
+                          {imageBase64 && webViewHTML ? (
+                            <WebView
+                              key={`photo-${
+                                editedImage?.uri ||
+                                originalImage?.uri ||
+                                "none"
+                              }-${imageUpdateKey}-${imageBase64.length}-${
+                                photoForm.filter
+                              }-${textOverlays.length}-${
+                                imageOverlays.length
+                              }`}
+                              source={{ html: webViewHTML }}
+                              style={{
+                                width: "100%",
+                                height: 600,
+                                backgroundColor: "transparent",
+                              }}
+                              scrollEnabled={false}
+                              showsVerticalScrollIndicator={false}
+                              showsHorizontalScrollIndicator={false}
+                              javaScriptEnabled={true}
+                              ref={photoWebViewRef}
+                              onMessage={(event) => {
+                                try {
+                                  const message = JSON.parse(
+                                    event.nativeEvent.data
+                                  );
+                                  if (message.type === "textDrag") {
+                                    setTextOverlays((prev) =>
+                                      prev.map((overlay, index) =>
+                                        overlay.id === message.id ||
+                                        index === message.index
+                                          ? {
+                                              ...overlay,
+                                              x: message.x,
+                                              y: message.y,
+                                            }
+                                          : overlay
+                                      )
                                     );
-                                    if (message.type === "textDrag") {
-                                      setTextOverlays((prev) =>
-                                        prev.map((overlay, index) =>
-                                          overlay.id === message.id ||
-                                          index === message.index
-                                            ? {
-                                                ...overlay,
-                                                x: message.x,
-                                                y: message.y,
-                                              }
-                                            : overlay
-                                        )
-                                      );
-                                    } else if (
-                                      message.type === "captureSuccess" &&
-                                      captureResolveRef.current
-                                    ) {
-                                      // Handle WebView capture success
-                                      const resolve = captureResolveRef.current;
-                                      captureResolveRef.current = null;
-                                      captureRejectRef.current = null;
-                                      resolve(message.data);
-                                    } else if (
-                                      message.type === "captureError" &&
-                                      captureRejectRef.current
-                                    ) {
-                                      // Handle WebView capture error
-                                      const reject = captureRejectRef.current;
-                                      captureResolveRef.current = null;
-                                      captureRejectRef.current = null;
-                                      reject(
-                                        new Error(
-                                          message.message || "Capture failed"
-                                        )
-                                      );
-                                    }
-                                  } catch (error) {
-                                    console.log(
-                                      "Error parsing WebView message:",
-                                      error
+                                  } else if (
+                                    message.type === "captureSuccess" &&
+                                    captureResolveRef.current
+                                  ) {
+                                    // Handle WebView capture success
+                                    const resolve = captureResolveRef.current;
+                                    captureResolveRef.current = null;
+                                    captureRejectRef.current = null;
+                                    resolve(message.data);
+                                  } else if (
+                                    message.type === "captureError" &&
+                                    captureRejectRef.current
+                                  ) {
+                                    // Handle WebView capture error
+                                    const reject = captureRejectRef.current;
+                                    captureResolveRef.current = null;
+                                    captureRejectRef.current = null;
+                                    reject(
+                                      new Error(
+                                        message.message || "Capture failed"
+                                      )
                                     );
                                   }
-                                }}
+                                } catch (error) {
+                                  console.log(
+                                    "Error parsing WebView message:",
+                                    error
+                                  );
+                                }
+                              }}
+                            />
+                          ) : (
+                            <View
+                              style={{
+                                width: "100%",
+                                height: 400,
+                                justifyContent: "center",
+                                alignItems: "center",
+                                backgroundColor: theme.surface,
+                              }}
+                            >
+                              <ActivityIndicator
+                                size="large"
+                                color={theme.accent}
                               />
-                            ) : (
+                            </View>
+                          )}
+                          {/* Filter Indicator */}
+                          {photoForm.filter &&
+                            photoForm.filter !== "none" && (
                               <View
                                 style={{
-                                  width: "100%",
-                                  height: 400,
-                                  justifyContent: "center",
+                                  position: "absolute",
+                                  top: 10,
+                                  left: 10,
+                                  backgroundColor: "rgba(0,0,0,0.7)",
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  borderRadius: 8,
+                                  flexDirection: "row",
                                   alignItems: "center",
-                                  backgroundColor: theme.surface,
+                                  gap: 8,
                                 }}
                               >
-                                <ActivityIndicator
-                                  size="large"
-                                  color={theme.accent}
-                                />
-                              </View>
-                            )}
-                            {/* Filter Indicator */}
-                            {photoForm.filter &&
-                              photoForm.filter !== "none" && (
-                                <View
+                                <Text
                                   style={{
-                                    position: "absolute",
-                                    top: 10,
-                                    left: 10,
-                                    backgroundColor: "rgba(0,0,0,0.7)",
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 6,
-                                    borderRadius: 8,
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    gap: 8,
+                                    color: "#fff",
+                                    fontSize: 12,
+                                    fontWeight: "600",
+                                  }}
+                                >
+                                  Filter:{" "}
+                                  {FILTERS.find(
+                                    (f) => f.id === photoForm.filter
+                                  )?.name || photoForm.filter}
+                                </Text>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    applyFilter("none");
                                   }}
                                 >
                                   <Text
                                     style={{
                                       color: "#fff",
-                                      fontSize: 12,
-                                      fontWeight: "600",
+                                      fontSize: 16,
+                                      fontWeight: "bold",
                                     }}
                                   >
-                                    Filter:{" "}
-                                    {FILTERS.find(
-                                      (f) => f.id === photoForm.filter
-                                    )?.name || photoForm.filter}
+                                    ×
                                   </Text>
-                                  <TouchableOpacity
-                                    onPress={() => {
-                                      applyFilter("none");
-                                    }}
-                                  >
-                                    <Text
-                                      style={{
-                                        color: "#fff",
-                                        fontSize: 16,
-                                        fontWeight: "bold",
-                                      }}
-                                    >
-                                      ×
-                                    </Text>
-                                  </TouchableOpacity>
-                                </View>
-                              )}
-
-                            {/* Text Overlays Count Indicator */}
-                            {textOverlays.length > 0 && (
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  top: 10,
-                                  right: imageOverlays.length > 0 ? 120 : 50,
-                                  backgroundColor: "rgba(0,0,0,0.7)",
-                                  paddingHorizontal: 12,
-                                  paddingVertical: 6,
-                                  borderRadius: 8,
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    color: "#fff",
-                                    fontSize: 12,
-                                    fontWeight: "600",
-                                  }}
-                                >
-                                  {textOverlays.length} Text
-                                  {textOverlays.length > 1 ? "s" : ""}
-                                </Text>
+                                </TouchableOpacity>
                               </View>
                             )}
 
-                            {/* Image Overlays Count Indicator */}
-                            {imageOverlays.length > 0 && (
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  top: 10,
-                                  right: 50,
-                                  backgroundColor: "rgba(0,0,0,0.7)",
-                                  paddingHorizontal: 12,
-                                  paddingVertical: 6,
-                                  borderRadius: 8,
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    color: "#fff",
-                                    fontSize: 12,
-                                    fontWeight: "600",
-                                  }}
-                                >
-                                  {imageOverlays.length} Overlay
-                                  {imageOverlays.length > 1 ? "s" : ""}
-                                </Text>
-                              </View>
-                            )}
-                            {/* Delete/Remove Button */}
-                            <TouchableOpacity
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                setEditedImage(null);
-                                setOriginalImage(null);
-                                setPhotoForm({ ...photoForm, photo: null });
-                                setEdits({});
-                                setTextOverlays([]);
-                                setImageOverlays([]);
-                              }}
+                          {/* Text Overlays Count Indicator */}
+                          {textOverlays.length > 0 && (
+                            <View
                               style={{
                                 position: "absolute",
                                 top: 10,
-                                right: 10,
-                                backgroundColor: "rgba(255, 59, 48, 0.9)",
-                                borderRadius: 20,
-                                width: 36,
-                                height: 36,
-                                justifyContent: "center",
-                                alignItems: "center",
-                                zIndex: 10,
+                                right: imageOverlays.length > 0 ? 120 : 50,
+                                backgroundColor: "rgba(0,0,0,0.7)",
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                borderRadius: 8,
                               }}
                             >
                               <Text
                                 style={{
                                   color: "#fff",
-                                  fontSize: 20,
-                                  fontWeight: "bold",
+                                  fontSize: 12,
+                                  fontWeight: "600",
                                 }}
                               >
-                                ×
+                                {textOverlays.length} Text
+                                {textOverlays.length > 1 ? "s" : ""}
                               </Text>
-                            </TouchableOpacity>
+                            </View>
+                          )}
+
+                          {/* Image Overlays Count Indicator */}
+                          {imageOverlays.length > 0 && (
+                            <View
+                              style={{
+                                position: "absolute",
+                                top: 10,
+                                right: 50,
+                                backgroundColor: "rgba(0,0,0,0.7)",
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                borderRadius: 8,
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: "#fff",
+                                  fontSize: 12,
+                                  fontWeight: "600",
+                                }}
+                              >
+                                {imageOverlays.length} Overlay
+                                {imageOverlays.length > 1 ? "s" : ""}
+                              </Text>
+                            </View>
+                          )}
+                          {/* Delete/Remove Button */}
+                          <TouchableOpacity
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              setEditedImage(null);
+                              setOriginalImage(null);
+                              setPhotoForm({ ...photoForm, photo: null });
+                              setEdits({});
+                              setTextOverlays([]);
+                              setImageOverlays([]);
+                            }}
+                            style={{
+                              position: "absolute",
+                              top: 10,
+                              right: 10,
+                              backgroundColor: "rgba(255, 59, 48, 0.9)",
+                              borderRadius: 20,
+                              width: 36,
+                              height: 36,
+                              justifyContent: "center",
+                              alignItems: "center",
+                              zIndex: 10,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: "#fff",
+                                fontSize: 20,
+                                fontWeight: "bold",
+                              }}
+                            >
+                              ×
+                            </Text>
+                          </TouchableOpacity>
                             {/* Instagram-style action buttons */}
                             <View
                               style={{
@@ -3741,55 +3796,56 @@ const Create = () => {
                             </View>
                           </View>
                         ) : (
-                          <View
-                            style={{
-                              width: "100%",
-                              height: 300,
-                              paddingHorizontal: 16,
-                              borderRadius: 16,
-                              borderWidth: 1,
-                              borderColor: theme.border,
-                              backgroundColor: themedColor(
-                                "rgba(15,23,42,0.6)",
-                                theme.surface
-                              ),
-                              justifyContent: "center",
-                              alignItems: "center",
-                            }}
-                          >
+                          <TouchableOpacity onPress={() => openPicker("image")}>
                             <View
                               style={{
-                                width: 64,
-                                height: 64,
-                                borderRadius: 12,
+                                width: "100%",
+                                height: 300,
+                                paddingHorizontal: 16,
+                                borderRadius: 16,
                                 borderWidth: 1,
-                                borderStyle: "dashed",
-                                borderColor: theme.accent,
+                                borderColor: theme.border,
+                                backgroundColor: themedColor(
+                                  "rgba(15,23,42,0.6)",
+                                  theme.surface
+                                ),
                                 justifyContent: "center",
                                 alignItems: "center",
                               }}
                             >
-                              <Image
-                                source={icons.upload}
-                                resizeMode="contain"
+                              <View
                                 style={{
-                                  width: 28,
-                                  height: 28,
-                                  tintColor: theme.accent,
+                                  width: 64,
+                                  height: 64,
+                                  borderRadius: 12,
+                                  borderWidth: 1,
+                                  borderStyle: "dashed",
+                                  borderColor: theme.accent,
+                                  justifyContent: "center",
+                                  alignItems: "center",
                                 }}
-                              />
+                              >
+                                <Image
+                                  source={icons.upload}
+                                  resizeMode="contain"
+                                  style={{
+                                    width: 28,
+                                    height: 28,
+                                    tintColor: theme.accent,
+                                  }}
+                                />
+                              </View>
+                              <Text
+                                style={{
+                                  color: theme.textSecondary,
+                                  marginTop: 12,
+                                }}
+                              >
+                                Tap to select photo
+                              </Text>
                             </View>
-                            <Text
-                              style={{
-                                color: theme.textSecondary,
-                                marginTop: 12,
-                              }}
-                            >
-                              Tap to select photo
-                            </Text>
-                          </View>
+                          </TouchableOpacity>
                         )}
-                      </TouchableOpacity>
                     </View>
 
                     <FormField

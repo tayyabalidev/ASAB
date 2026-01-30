@@ -374,93 +374,108 @@ const CreatePhoto = () => {
                   Select Photo
                 </Text>
 
-                <TouchableOpacity onPress={openPicker}>
-                  {editedImage ? (
-                    <View style={{ position: 'relative' }}>
-                      <Image
-                        source={{ uri: editedImage.uri }}
-                        style={{ width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}
-                        resizeMode="cover"
-                      />
-                      {editing && (
-                        <View style={{
-                          position: 'absolute',
-                          bottom: 10,
-                          right: 10,
-                          flexDirection: 'row',
-                          gap: 8,
-                        }}>
-                          <TouchableOpacity
-                            onPress={() => setShowFilterModal(true)}
-                            style={{
-                              backgroundColor: 'rgba(0,0,0,0.7)',
-                              padding: 12,
-                              borderRadius: 8,
-                            }}
-                          >
-                            <Text style={{ color: '#fff', fontSize: 12 }}>Filters</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={() => setShowAdjustModal(true)}
-                            style={{
-                              backgroundColor: 'rgba(0,0,0,0.7)',
-                              padding: 12,
-                              borderRadius: 8,
-                            }}
-                          >
-                            <Text style={{ color: '#fff', fontSize: 12 }}>Adjust</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={resetEdits}
-                            style={{
-                              backgroundColor: 'rgba(0,0,0,0.7)',
-                              padding: 12,
-                              borderRadius: 8,
-                            }}
-                          >
-                            <Text style={{ color: '#fff', fontSize: 12 }}>Reset</Text>
-                          </TouchableOpacity>
-                        </View>
-                      )}
-                    </View>
-                  ) : (
-                    <View
+                {editedImage ? (
+                  <View style={{ position: 'relative' }}>
+                    <Image
+                      source={{ uri: editedImage.uri }}
+                      style={{ width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}
+                      resizeMode="cover"
+                    />
+                    {/* Change Photo Button */}
+                    <TouchableOpacity
+                      onPress={openPicker}
                       style={{
-                        width: "100%",
-                        height: 300,
-                        paddingHorizontal: 16,
-                        borderRadius: 16,
-                        borderWidth: 1,
-                        borderColor: theme.border,
-                        backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
-                        justifyContent: "center",
-                        alignItems: "center",
+                        position: 'absolute',
+                        top: 10,
+                        right: 10,
+                        backgroundColor: 'rgba(0,0,0,0.7)',
+                        padding: 10,
+                        borderRadius: 8,
+                        zIndex: 10,
                       }}
                     >
+                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Change</Text>
+                    </TouchableOpacity>
+                    {editing && (
+                      <View style={{
+                        position: 'absolute',
+                        bottom: 10,
+                        right: 10,
+                        flexDirection: 'row',
+                        gap: 8,
+                      }}>
+                        <TouchableOpacity
+                          onPress={() => setShowFilterModal(true)}
+                          style={{
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            padding: 12,
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 12 }}>Filters</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setShowAdjustModal(true)}
+                          style={{
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            padding: 12,
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 12 }}>Adjust</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={resetEdits}
+                          style={{
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            padding: 12,
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 12 }}>Reset</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    </View>
+                  ) : (
+                    <TouchableOpacity onPress={openPicker}>
                       <View
                         style={{
-                          width: 64,
-                          height: 64,
-                          borderRadius: 12,
+                          width: "100%",
+                          height: 300,
+                          paddingHorizontal: 16,
+                          borderRadius: 16,
                           borderWidth: 1,
-                          borderStyle: "dashed",
-                          borderColor: theme.accent,
+                          borderColor: theme.border,
+                          backgroundColor: themedColor("rgba(15,23,42,0.6)", theme.surface),
                           justifyContent: "center",
                           alignItems: "center",
                         }}
                       >
-                        <Image
-                          source={icons.upload}
-                          resizeMode="contain"
-                          style={{ width: 28, height: 28, tintColor: theme.accent }}
-                        />
+                        <View
+                          style={{
+                            width: 64,
+                            height: 64,
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderStyle: "dashed",
+                            borderColor: theme.accent,
+                            justifyContent: "center",
+                            alignItems: "center",
+                          }}
+                        >
+                          <Image
+                            source={icons.upload}
+                            resizeMode="contain"
+                            style={{ width: 28, height: 28, tintColor: theme.accent }}
+                          />
+                        </View>
+                        <Text style={{ color: theme.textSecondary, marginTop: 12 }}>
+                          Tap to select photo
+                        </Text>
                       </View>
-                      <Text style={{ color: theme.textSecondary, marginTop: 12 }}>
-                        Tap to select photo
-                      </Text>
-                    </View>
+                    </TouchableOpacity>
                   )}
-                </TouchableOpacity>
               </View>
 
               <FormField
