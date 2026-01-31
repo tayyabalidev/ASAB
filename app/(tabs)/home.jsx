@@ -11,7 +11,7 @@ import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getLatestPosts, toggleLikePost, getComments, addComment, getPostLikes, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements } from "../../lib/appwrite";
+import { getAllPosts, getLatestPosts, toggleLikePost, getComments, addComment, getPostLikes, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes } from "../../lib/appwrite";
 import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
@@ -181,6 +181,13 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [loadingComments, setLoadingComments] = useState(false);
   const [newComment, setNewComment] = useState("");
   const [posting, setPosting] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [replyText, setReplyText] = useState("");
+  const [postingReply, setPostingReply] = useState(false);
+  const [commentLikesModalVisible, setCommentLikesModalVisible] = useState(false);
+  const [selectedCommentId, setSelectedCommentId] = useState(null);
+  const [commentLikesList, setCommentLikesList] = useState([]);
+  const [loadingCommentLikes, setLoadingCommentLikes] = useState(false);
   const [likesModalVisible, setLikesModalVisible] = useState(false);
   const [likesList, setLikesList] = useState([]);
   const [loadingLikes, setLoadingLikes] = useState(false);
@@ -356,8 +363,14 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     if (commentsModalVisible) {
       setLoadingComments(true);
       getComments(item.$id)
-        .then((res) => setComments(res))
-        .catch(() => setComments([]))
+        .then((res) => {
+          // getComments now returns structured comments with replies and likes
+          setComments(res);
+        })
+        .catch((err) => {
+          console.error("Error fetching comments:", err);
+          setComments([]);
+        })
         .finally(() => setLoadingComments(false));
     }
   }, [commentsModalVisible, item.$id]);
@@ -525,16 +538,115 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   };
 
   const handleAddComment = async () => {
-    
     if (!newComment.trim() || !user?.$id) return;
     setPosting(true);
     try {
-      const comment = await addComment(item.$id, user.$id, newComment.trim());
-      setComments([comment, ...comments]);
+      await addComment(item.$id, user.$id, newComment.trim());
+      // Refresh comments to get structured data with likes
+      const updatedComments = await getComments(item.$id);
+      setComments(updatedComments);
       setNewComment("");
       setCommentsCount((prev) => prev + 1);
-    } catch {}
+    } catch (error) {
+      console.error("Error adding comment:", error);
+    } finally {
       setPosting(false);
+    }
+  };
+
+  const handleAddReply = async (parentCommentId) => {
+    if (!replyText.trim() || !user?.$id) return;
+    setPostingReply(true);
+    try {
+      await addComment(item.$id, user.$id, replyText.trim(), parentCommentId);
+      // Refresh comments to get structured data
+      const updatedComments = await getComments(item.$id);
+      setComments(updatedComments);
+      setReplyText("");
+      setReplyingTo(null);
+    } catch (error) {
+      console.error("Error adding reply:", error);
+    } finally {
+      setPostingReply(false);
+    }
+  };
+
+  const handleLikeComment = async (commentId, currentLikes) => {
+    if (!user?.$id) return;
+    const isLiked = Array.isArray(currentLikes) ? currentLikes.includes(user.$id) : false;
+    const newLikedState = !isLiked;
+    
+    // Optimistic update
+    setComments((prev) =>
+      prev.map((comment) => {
+        if (comment.$id === commentId) {
+          const currentLikesArray = Array.isArray(comment.likes) ? comment.likes : [];
+          const updatedLikes = newLikedState
+            ? [...currentLikesArray, user.$id]
+            : currentLikesArray.filter((id) => id !== user.$id);
+          return { ...comment, likes: updatedLikes };
+        }
+        // Also update in replies
+        if (comment.replies && Array.isArray(comment.replies)) {
+          const updatedReplies = comment.replies.map((reply) => {
+            if (reply.$id === commentId) {
+              const replyLikesArray = Array.isArray(reply.likes) ? reply.likes : [];
+              const updatedLikes = newLikedState
+                ? [...replyLikesArray, user.$id]
+                : replyLikesArray.filter((id) => id !== user.$id);
+              return { ...reply, likes: updatedLikes };
+            }
+            return reply;
+          });
+          return { ...comment, replies: updatedReplies };
+        }
+        return comment;
+      })
+    );
+    
+    try {
+      await toggleLikeComment(commentId, user.$id);
+    } catch (error) {
+      console.error("Error liking comment:", error);
+      // Revert on error
+      const updatedComments = await getComments(item.$id);
+      setComments(updatedComments);
+    }
+  };
+
+  const handleShowCommentLikes = async (commentId, commentAuthorId) => {
+    // Only show likes modal if current user is the comment author
+    if (user?.$id !== commentAuthorId) {
+      return;
+    }
+    
+    setSelectedCommentId(commentId);
+    setCommentLikesModalVisible(true);
+    setLoadingCommentLikes(true);
+    
+    try {
+      const userIds = await getCommentLikes(commentId);
+      // Fetch user info for each userId
+      const users = await Promise.all(
+        userIds.map(async (uid) => {
+          try {
+            const u = await databases.getDocument(
+              appwriteConfig.databaseId,
+              appwriteConfig.userCollectionId,
+              uid
+            );
+            return { $id: u.$id, username: u.username, avatar: u.avatar };
+          } catch {
+            return { $id: uid, username: "Unknown", avatar: images.profile };
+          }
+        })
+      );
+      setCommentLikesList(users);
+    } catch (error) {
+      setCommentLikesList([]);
+    } finally {
+      setLoadingCommentLikes(false);
+    }
   };
 
   const handleOpenLikesModal = () => {
@@ -1207,30 +1319,172 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               <FlatList
                 data={[...comments].reverse()} // Newest at bottom
                 keyExtractor={c => c.$id}
-                renderItem={({ item: c }) => (
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'flex-start',
-                      marginBottom: 14,
-                      paddingHorizontal: 16,
-                    }}
-                  >
-                    <Image
-                      source={c.avatar && typeof c.avatar === 'string' ? { uri: c.avatar } : images.profile}
-                      style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: themedColor('#a77df8', theme.accent), fontWeight: 'bold', fontSize: 15 }}>
-                        {c.username || c.userId}
-                      </Text>
-                      <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16 }}>{c.content}</Text>
-                      <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11, marginTop: 2 }}>
-                        {new Date(c.createdAt).toLocaleString()}
-                      </Text>
+                renderItem={({ item: c }) => {
+                  const commentLikes = Array.isArray(c.likes) ? c.likes : [];
+                  const isLiked = commentLikes.includes(user?.$id);
+                  const isCommentAuthor = c.userId === user?.$id;
+                  
+                  return (
+                    <View style={{ marginBottom: 16, paddingHorizontal: 16 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                        <Image
+                          source={c.avatar && typeof c.avatar === 'string' ? { uri: c.avatar } : images.profile}
+                          style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: themedColor('#a77df8', theme.accent), fontWeight: 'bold', fontSize: 15 }}>
+                            {c.username || c.userId}
+                          </Text>
+                          <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16 }}>{c.content}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                            <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11, marginRight: 12 }}>
+                              {new Date(c.createdAt).toLocaleString()}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => handleLikeComment(c.$id, commentLikes)}
+                              style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}
+                            >
+                              <Image
+                                source={isLiked ? icons.heartCheck : icons.heartUncheck}
+                                style={{ width: 16, height: 16, marginRight: 4 }}
+                                resizeMode="contain"
+                              />
+                              <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 12 }}>
+                                {commentLikes.length}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => {
+                                setReplyingTo(c.$id);
+                                setReplyText("");
+                              }}
+                              style={{ marginRight: 16 }}
+                            >
+                              <Text style={{ color: theme.accent, fontSize: 12 }}>
+                                Reply
+                              </Text>
+                            </TouchableOpacity>
+                            {isCommentAuthor && commentLikes.length > 0 && (
+                              <TouchableOpacity
+                                onPress={() => handleShowCommentLikes(c.$id, c.userId)}
+                              >
+                                <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 12 }}>
+                                  View {commentLikes.length} {commentLikes.length === 1 ? 'like' : 'likes'}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                          
+                          {/* Reply input */}
+                          {replyingTo === c.$id && (
+                            <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center' }}>
+                              <Image
+                                source={{ uri: user?.avatar || images.profile }}
+                                style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }}
+                              />
+                              <TextInput
+                                value={replyText}
+                                onChangeText={setReplyText}
+                                placeholder="Write a reply..."
+                                placeholderTextColor={themedColor('#aaa', theme.textMuted)}
+                                style={{
+                                  flex: 1,
+                                  backgroundColor: themedColor('#333', theme.inputBackground),
+                                  color: themedColor('#fff', theme.textPrimary),
+                                  borderRadius: 16,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  fontSize: 13,
+                                }}
+                              />
+                              <TouchableOpacity
+                                onPress={() => handleAddReply(c.$id)}
+                                disabled={postingReply || !replyText.trim()}
+                                style={{
+                                  marginLeft: 8,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  backgroundColor: postingReply ? themedColor('#888', theme.border) : theme.accent,
+                                  borderRadius: 16,
+                                }}
+                              >
+                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                  {postingReply ? '...' : 'Send'}
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setReplyingTo(null);
+                                  setReplyText("");
+                                }}
+                                style={{ marginLeft: 8 }}
+                              >
+                                <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 12 }}>Cancel</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
+                          
+                          {/* Nested replies */}
+                          {c.replies && c.replies.length > 0 && (
+                            <View style={{ marginTop: 12, marginLeft: 20, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: theme.border }}>
+                              {c.replies.map((reply) => {
+                                const replyLikes = Array.isArray(reply.likes) ? reply.likes : [];
+                                const isReplyLiked = replyLikes.includes(user?.$id);
+                                const isReplyAuthor = reply.userId === user?.$id;
+                                
+                                return (
+                                  <View key={reply.$id} style={{ marginBottom: 12 }}>
+                                    <View style={{ flexDirection: 'row' }}>
+                                      <Image
+                                        source={{ uri: reply.avatar || images.profile }}
+                                        style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }}
+                                      />
+                                      <View style={{ flex: 1 }}>
+                                        <Text style={{ color: themedColor('#a77df8', theme.accent), fontWeight: '600', fontSize: 13 }}>
+                                          {reply.username || reply.userId}
+                                        </Text>
+                                        <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 13, marginVertical: 2 }}>
+                                          {reply.content}
+                                        </Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                                          <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 10, marginRight: 12 }}>
+                                            {new Date(reply.createdAt).toLocaleString()}
+                                          </Text>
+                                          <TouchableOpacity
+                                            onPress={() => handleLikeComment(reply.$id, replyLikes)}
+                                            style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}
+                                          >
+                                            <Image
+                                              source={isReplyLiked ? icons.heartCheck : icons.heartUncheck}
+                                              style={{ width: 14, height: 14, marginRight: 4 }}
+                                              resizeMode="contain"
+                                            />
+                                            <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11 }}>
+                                              {replyLikes.length}
+                                            </Text>
+                                          </TouchableOpacity>
+                                          {isReplyAuthor && replyLikes.length > 0 && (
+                                            <TouchableOpacity
+                                              onPress={() => handleShowCommentLikes(reply.$id, reply.userId)}
+                                            >
+                                              <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 10 }}>
+                                                View {replyLikes.length} {replyLikes.length === 1 ? 'like' : 'likes'}
+                                              </Text>
+                                            </TouchableOpacity>
+                                          )}
+                                        </View>
+                                      </View>
+                                    </View>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          )}
+                        </View>
+                      </View>
                     </View>
-                  </View>
-                )}
+                  );
+                }}
                 style={{ maxHeight: 320, marginBottom: 8 }}
                 showsVerticalScrollIndicator={false}
                 inverted // So newest is at the bottom
@@ -1300,6 +1554,106 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Comment Likes Modal */}
+      <Modal
+        visible={commentLikesModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setCommentLikesModalVisible(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            justifyContent: "flex-end",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: themedColor("#1c1c2e", theme.surface),
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              maxHeight: "80%",
+              paddingTop: 20,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingHorizontal: 20,
+                paddingBottom: 16,
+                borderBottomWidth: 0.5,
+                borderBottomColor: theme.border,
+              }}
+            >
+              <Text
+                style={{
+                  color: theme.textPrimary,
+                  fontSize: 18,
+                  fontWeight: "600",
+                }}
+              >
+                People who liked this comment
+              </Text>
+              <TouchableOpacity onPress={() => setCommentLikesModalVisible(false)}>
+                <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "600" }}>
+                  Close
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {loadingCommentLikes ? (
+              <View style={{ padding: 40, alignItems: "center" }}>
+                <ActivityIndicator color={theme.accent} size="large" />
+              </View>
+            ) : commentLikesList.length === 0 ? (
+              <View style={{ padding: 40, alignItems: "center" }}>
+                <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+                  No likes yet
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={commentLikesList}
+                keyExtractor={(item) => item.$id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingHorizontal: 20,
+                      paddingVertical: 12,
+                      borderBottomWidth: 0.5,
+                      borderBottomColor: theme.border,
+                    }}
+                    onPress={() => {
+                      setCommentLikesModalVisible(false);
+                      router.push(`/profile/${item.$id}`);
+                    }}
+                  >
+                    <Image
+                      source={{ uri: item.avatar || images.profile }}
+                      style={{ width: 48, height: 48, borderRadius: 24, marginRight: 12 }}
+                    />
+                    <Text
+                      style={{
+                        color: theme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: "500",
+                      }}
+                    >
+                      {item.username || "Unknown"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
       </Modal>
 
       {/* Likes List Modal */}

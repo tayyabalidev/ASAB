@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Image, FlatList, TouchableOpacity, Modal, Text, TextInput, Alert, Platform, ScrollView, ActivityIndicator, KeyboardAvoidingView, Share } from "react-native";
+import { View, Image, FlatList, TouchableOpacity, Modal, Text, TextInput, Alert, Platform, ScrollView, ActivityIndicator, KeyboardAvoidingView, Share, Linking } from "react-native";
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as ImagePicker from "expo-image-picker";
@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
 import { images } from "../../constants";
@@ -227,6 +227,72 @@ const Profile = () => {
   const { data: following } = useAppwrite(() => getFollowing(user?.$id), [user?.$id]);
   
 
+  // Handle Stripe Connect deep link callback
+  useEffect(() => {
+    const handleStripeConnectCallback = async (url) => {
+      if (url && url.includes('earnings') && url.includes('connected=true')) {
+        console.log('✅ Stripe Connect callback received:', url);
+        
+        // Extract account ID from URL if present
+        const urlParams = new URLSearchParams(url.split('?')[1] || '');
+        const accountIdFromUrl = urlParams.get('accountId');
+        
+        // Refresh Stripe account status
+        const accountIdToCheck = accountIdFromUrl || stripeAccountId || user?.stripeAccountId;
+        if (accountIdToCheck) {
+          try {
+            const status = await getStripeAccountStatus(accountIdToCheck);
+            setStripeAccountStatus(status);
+            setStripeAccountId(accountIdToCheck);
+            
+            // Show success message
+            if (status.transfersEnabled) {
+              Alert.alert(
+                'Account Connected!',
+                'Your Stripe account has been successfully connected and verified. You can now receive automatic payouts!',
+                [{ text: 'OK' }]
+              );
+            } else if (status.detailsSubmitted) {
+              Alert.alert(
+                'Account Setup In Progress',
+                'Your account details have been submitted. Stripe is reviewing your information. You will be notified when verification is complete.',
+                [{ text: 'OK' }]
+              );
+            }
+            
+            // Refresh earnings data
+            if (user?.$id) {
+              const [total, pending] = await Promise.all([
+                getCreatorTotalDonations(user.$id),
+                getPendingPayoutAmount(user.$id)
+              ]);
+              setTotalEarnings(total || 0);
+              setPendingPayout(pending || 0);
+            }
+          } catch (error) {
+            console.error("Error refreshing Stripe status after callback:", error);
+          }
+        }
+      }
+    };
+
+    // Listen for deep links
+    const subscription = Linking.addEventListener('url', (event) => {
+      handleStripeConnectCallback(event.url);
+    });
+
+    // Check initial URL (when app opens from deep link)
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        handleStripeConnectCallback(url);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [stripeAccountId, user?.$id, user?.stripeAccountId]);
+
   // Refresh data when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
@@ -238,7 +304,17 @@ const Profile = () => {
         refetchPhotos();
       }
       // Bookmarks will be refreshed automatically by useEffect when activeSection is 'bookmarks'
-    }, [refetchPosts, refetchPhotos])
+      
+      // Check if user returned from Stripe onboarding
+      // Refresh Stripe status when screen comes into focus
+      if (user?.stripeAccountId && showEarningsDashboard) {
+        getStripeAccountStatus(user.stripeAccountId)
+          .then(status => {
+            setStripeAccountStatus(status);
+          })
+          .catch(err => console.error("Error refreshing Stripe status:", err));
+      }
+    }, [refetchPosts, refetchPhotos, user?.stripeAccountId, showEarningsDashboard])
   );
 
   // Stop videos when profile loses focus
@@ -297,6 +373,18 @@ const Profile = () => {
   const [followModalVisible, setFollowModalVisible] = useState(false);
   const [followModalType, setFollowModalType] = useState(''); // 'following' or 'followers'
   const [followModalData, setFollowModalData] = useState([]);
+
+  // Earnings Dashboard state
+  const [showEarningsDashboard, setShowEarningsDashboard] = useState(false);
+  const [totalEarnings, setTotalEarnings] = useState(0);
+  const [pendingPayout, setPendingPayout] = useState(0);
+  const [donations, setDonations] = useState([]);
+  const [donationsWithDonors, setDonationsWithDonors] = useState([]);
+  const [payouts, setPayouts] = useState([]);
+  const [loadingEarnings, setLoadingEarnings] = useState(false);
+  const [stripeAccountId, setStripeAccountId] = useState(user?.stripeAccountId || null);
+  const [stripeAccountStatus, setStripeAccountStatus] = useState(null);
+  const [linkingStripe, setLinkingStripe] = useState(false);
 
   // Profile section state
   const [activeSection, setActiveSection] = useState('videos'); // 'videos', 'pics', or 'bookmarks'
@@ -459,8 +547,256 @@ const Profile = () => {
     fetchBookmarks();
   }, [activeSection, user?.$id]);
 
+  // Fetch earnings data
+  useEffect(() => {
+    const fetchEarningsData = async () => {
+      if (!user?.$id) return;
+      
+      try {
+        setLoadingEarnings(true);
+        const [total, pending, donationsList, payoutsList] = await Promise.all([
+          getCreatorTotalDonations(user.$id),
+          getPendingPayoutAmount(user.$id),
+          getCreatorDonations(user.$id),
+          getCreatorPayouts(user.$id)
+        ]);
+        
+        setTotalEarnings(total || 0);
+        setPendingPayout(pending || 0);
+        setDonations(donationsList || []);
+        setPayouts(payoutsList || []);
+        
+        // Fetch donor details for donations
+        const donationsWithDonorInfo = await Promise.all(
+          (donationsList || []).map(async (donation) => {
+            try {
+              const donor = await databases.getDocument(
+                appwriteConfig.databaseId,
+                appwriteConfig.userCollectionId,
+                donation.donorId
+              );
+              return {
+                ...donation,
+                donorName: donor.username || 'Anonymous',
+                donorAvatar: donor.avatar || ''
+              };
+            } catch (error) {
+              return {
+                ...donation,
+                donorName: 'Anonymous',
+                donorAvatar: ''
+              };
+            }
+          })
+        );
+        
+        setDonationsWithDonors(donationsWithDonorInfo);
+        
+        // Check Stripe account status if account ID exists
+        if (user?.stripeAccountId) {
+          try {
+            const status = await getStripeAccountStatus(user.stripeAccountId);
+            setStripeAccountStatus(status);
+            setStripeAccountId(user.stripeAccountId);
+          } catch (error) {
+            console.error("Error checking Stripe account status:", error);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching earnings data:", error);
+      } finally {
+        setLoadingEarnings(false);
+      }
+    };
+
+    fetchEarningsData();
+  }, [user?.$id, user?.stripeAccountId]);
+
   // Calculate total likes from all posts
   const totalLikes = posts?.reduce((total, post) => total + (post.likes?.length || 0), 0) || 0;
+
+  // Helper functions for earnings
+  const formatCurrency = (amount) => {
+    return `$${parseFloat(amount || 0).toFixed(2)}`;
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+  };
+
+  const handleLinkStripeAccount = async () => {
+    try {
+      setLinkingStripe(true);
+      
+      let accountId = stripeAccountId;
+      
+      // If no account exists, create one
+      if (!accountId) {
+        try {
+          const accountResult = await createStripeAccount(
+            user.$id,
+            user.email,
+            'US' // Default country, can be made configurable
+          );
+          accountId = accountResult.accountId;
+          
+          // Save account ID to user profile
+          await updateUserStripeAccount(user.$id, accountId);
+          setStripeAccountId(accountId);
+          
+          // Update user object
+          const updatedUser = { ...user, stripeAccountId: accountId };
+          setUser(updatedUser);
+        } catch (accountError) {
+          // Check if Stripe Connect is not enabled
+          if (accountError.message?.includes('Connect') || accountError.message?.includes('requiresConnect')) {
+            Alert.alert(
+              'Stripe Connect Required',
+              'Stripe Connect is not enabled on your account.\n\n' +
+              'To enable automatic payouts:\n' +
+              '1. Go to Stripe Dashboard\n' +
+              '2. Settings → Connect\n' +
+              '3. Enable Stripe Connect\n\n' +
+              'For now, payouts will be processed manually by the admin.',
+              [
+                { text: 'OK' },
+                {
+                  text: 'Open Stripe Dashboard',
+                  onPress: () => Linking.openURL('https://dashboard.stripe.com/settings/connect')
+                }
+              ]
+            );
+            return;
+          }
+          throw accountError;
+        }
+      }
+      
+      // Create account link for onboarding
+      // Use the app scheme from app.json: com.jsm.asabcorp
+      const returnUrl = `com.jsm.asabcorp://earnings?connected=true&accountId=${accountId}`;
+      const refreshUrl = `com.jsm.asabcorp://earnings`;
+      
+      const linkResult = await createAccountLink(accountId, returnUrl, refreshUrl);
+      
+      // Open Stripe onboarding in browser
+      const canOpen = await Linking.canOpenURL(linkResult.url);
+      if (canOpen) {
+        await Linking.openURL(linkResult.url);
+        Alert.alert(
+          'Stripe Onboarding',
+          'You will be redirected to Stripe to complete your account setup. Return to the app when finished.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Error', 'Cannot open Stripe onboarding link');
+      }
+    } catch (error) {
+      console.error("Error linking Stripe account:", error);
+      Alert.alert('Error', error.message || 'Failed to link Stripe account. Please try again.');
+    } finally {
+      setLinkingStripe(false);
+    }
+  };
+
+  const handleRequestWithdrawal = async () => {
+    if (pendingPayout <= 0) {
+      Alert.alert('No Funds', 'You have no pending funds available for withdrawal.');
+      return;
+    }
+
+    if (pendingPayout < 10) {
+      Alert.alert('Minimum Amount', 'Minimum withdrawal amount is $10.00');
+      return;
+    }
+
+    Alert.alert(
+      'Request Withdrawal',
+      `Request withdrawal of ${formatCurrency(pendingPayout)}?\n\nThis will create a payout request that will be processed by the admin.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Request',
+          onPress: async () => {
+            try {
+              // Get all unpaid donations
+              const unpaidDonations = donations.filter(donation => {
+                // Check if this donation is in any completed payout
+                const isPaid = payouts.some(payout => 
+                  payout.status === 'completed' && 
+                  payout.donationIds?.includes(donation.$id)
+                );
+                return !isPaid;
+              });
+
+              const donationIds = unpaidDonations.map(d => d.$id);
+
+              await createPayout({
+                creatorId: user.$id,
+                amount: pendingPayout,
+                donationIds: donationIds,
+                status: 'pending',
+                payoutMethod: 'stripe'
+              });
+
+              Alert.alert('Success', 'Withdrawal request submitted successfully! It will be processed by the admin.');
+              
+              // Refresh earnings data
+              const [total, pending, donationsList, payoutsList] = await Promise.all([
+                getCreatorTotalDonations(user.$id),
+                getPendingPayoutAmount(user.$id),
+                getCreatorDonations(user.$id),
+                getCreatorPayouts(user.$id)
+              ]);
+              
+              setTotalEarnings(total || 0);
+              setPendingPayout(pending || 0);
+              setDonations(donationsList || []);
+              setPayouts(payoutsList || []);
+              
+              // Refresh donor details
+              const donationsWithDonorInfo = await Promise.all(
+                (donationsList || []).map(async (donation) => {
+                  try {
+                    const donor = await databases.getDocument(
+                      appwriteConfig.databaseId,
+                      appwriteConfig.userCollectionId,
+                      donation.donorId
+                    );
+                    return {
+                      ...donation,
+                      donorName: donor.username || 'Anonymous',
+                      donorAvatar: donor.avatar || ''
+                    };
+                  } catch (error) {
+                    return {
+                      ...donation,
+                      donorName: 'Anonymous',
+                      donorAvatar: ''
+                    };
+                  }
+                })
+              );
+              
+              setDonationsWithDonors(donationsWithDonorInfo);
+            } catch (error) {
+              console.error("Error requesting withdrawal:", error);
+              Alert.alert('Error', error.message || 'Failed to request withdrawal. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const logout = async () => {
     await signOut();
@@ -1199,8 +1535,8 @@ const Profile = () => {
             </TouchableOpacity>
           </View>
 
-          {/* Advertisement Button - Second Row */}
-          <View style={{ flexDirection: 'row', marginBottom: 16, paddingHorizontal: 16 }}>
+          {/* Advertisement and Earnings Dashboard Buttons - Second Row */}
+          <View style={{ flexDirection: 'row', marginBottom: 16, paddingHorizontal: 16, gap: 12 }}>
             <TouchableOpacity
               onPress={() => router.push('/advertisements')}
               style={{
@@ -1226,12 +1562,41 @@ const Profile = () => {
               </View>
             </TouchableOpacity>
 
+            {/* Earnings Dashboard Button */}
+            <TouchableOpacity
+              onPress={() => setShowEarningsDashboard(!showEarningsDashboard)}
+              style={{
+                flex: 1,
+                borderRadius: 8,
+                shadowColor: "rgba(50, 205, 50, 0.35)",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.3,
+                shadowRadius: 4,
+                elevation: 3,
+                backgroundColor: "rgba(50, 205, 50, 0.15)",
+                borderWidth: 1,
+                borderColor: "rgba(50, 205, 50, 0.3)",
+              }}
+            >
+              <View style={{
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                borderRadius: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}>
+                <Text style={{ fontSize: 16 }}>💰</Text>
+                <Text style={{ color: '#32CD32', fontWeight: 'bold', fontSize: 14 }}>Earnings</Text>
+              </View>
+            </TouchableOpacity>
+
             {isAdminUser(user) && (
               <TouchableOpacity
                 onPress={() => router.push('/admin')}
                 style={{
                   flex: 1,
-                  marginLeft: 12,
                   borderRadius: 8,
                   shadowColor: themedColor("rgba(99,102,241,0.35)", "rgba(99,102,241,0.35)"),
                   shadowOffset: { width: 0, height: 2 },
@@ -1256,6 +1621,293 @@ const Profile = () => {
               </TouchableOpacity>
             )}
           </View>
+
+          {/* Earnings Dashboard Expanded View */}
+          {showEarningsDashboard && (
+            <View style={{
+              marginHorizontal: 16,
+              marginBottom: 16,
+              backgroundColor: themedColor('rgba(0, 0, 0, 0.4)', theme.surface),
+              borderRadius: 16,
+              padding: 16,
+              borderWidth: 1,
+              borderColor: 'rgba(50, 205, 50, 0.2)',
+            }}>
+              {loadingEarnings ? (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#32CD32" />
+                  <Text style={{ color: theme.textSecondary, marginTop: 8 }}>Loading earnings...</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Stripe Account Connection Status */}
+                  <View style={{
+                    backgroundColor: stripeAccountStatus?.transfersEnabled 
+                      ? 'rgba(50, 205, 50, 0.1)' 
+                      : 'rgba(255, 165, 0, 0.1)',
+                    borderRadius: 12,
+                    padding: 14,
+                    marginBottom: 16,
+                    borderWidth: 1,
+                    borderColor: stripeAccountStatus?.transfersEnabled 
+                      ? 'rgba(50, 205, 50, 0.3)' 
+                      : 'rgba(255, 165, 0, 0.3)'
+                  }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 14, marginBottom: 4 }}>
+                          Payment Account
+                        </Text>
+                        {stripeAccountStatus?.transfersEnabled ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={{ color: '#32CD32', fontSize: 12 }}>✓</Text>
+                            <Text style={{ color: '#32CD32', fontSize: 12, fontWeight: '600' }}>
+                              Bank Account Verified • Automatic payouts enabled
+                            </Text>
+                          </View>
+                        ) : stripeAccountStatus?.detailsSubmitted ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={{ color: '#FFA500', fontSize: 12 }}>⏳</Text>
+                            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                              Verification in progress • Stripe is reviewing your account
+                            </Text>
+                          </View>
+                        ) : stripeAccountId ? (
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                            Account created • Complete bank account verification to enable automatic payouts
+                          </Text>
+                        ) : (
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                            Not connected • Link and verify your bank account for automatic payouts
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    {!stripeAccountStatus?.transfersEnabled && (
+                      <TouchableOpacity
+                        onPress={handleLinkStripeAccount}
+                        disabled={linkingStripe}
+                        style={{
+                          backgroundColor: linkingStripe ? '#999' : '#635BFF',
+                          borderRadius: 8,
+                          padding: 12,
+                          alignItems: 'center',
+                          marginTop: 8,
+                          opacity: linkingStripe ? 0.6 : 1
+                        }}
+                      >
+                        {linkingStripe ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <ActivityIndicator size="small" color="#fff" />
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
+                              Opening Stripe...
+                            </Text>
+                          </View>
+                        ) : (
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
+                            {stripeAccountId ? 'Complete Bank Verification' : 'Connect & Verify Bank Account'}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    
+                    {stripeAccountStatus?.transfersEnabled && (
+                      <View style={{ marginTop: 8, padding: 10, backgroundColor: 'rgba(50, 205, 50, 0.1)', borderRadius: 8 }}>
+                        <Text style={{ color: '#32CD32', fontSize: 11, textAlign: 'center' }}>
+                          ✓ Your bank account is verified. You'll receive automatic payouts when admin approves withdrawals.
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Earnings Stats Cards */}
+                  <View style={{ flexDirection: 'row', marginBottom: 16, gap: 12 }}>
+                    <View style={{
+                      flex: 1,
+                      backgroundColor: 'rgba(50, 205, 50, 0.15)',
+                      borderRadius: 12,
+                      padding: 14,
+                      borderWidth: 1,
+                      borderColor: 'rgba(50, 205, 50, 0.3)'
+                    }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 12, marginBottom: 4 }}>Total Earnings</Text>
+                      <Text style={{ color: '#32CD32', fontWeight: 'bold', fontSize: 20 }}>
+                        {formatCurrency(totalEarnings)}
+                      </Text>
+                    </View>
+                    <View style={{
+                      flex: 1,
+                      backgroundColor: 'rgba(255, 165, 0, 0.15)',
+                      borderRadius: 12,
+                      padding: 14,
+                      borderWidth: 1,
+                      borderColor: 'rgba(255, 165, 0, 0.3)'
+                    }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 12, marginBottom: 4 }}>Pending</Text>
+                      <Text style={{ color: '#FFA500', fontWeight: 'bold', fontSize: 20 }}>
+                        {formatCurrency(pendingPayout)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Withdrawal Button */}
+                  {pendingPayout >= 10 && (
+                    <TouchableOpacity
+                      onPress={handleRequestWithdrawal}
+                      style={{
+                        backgroundColor: '#32CD32',
+                        borderRadius: 12,
+                        padding: 14,
+                        alignItems: 'center',
+                        marginBottom: 16,
+                        shadowColor: '#32CD32',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.3,
+                        shadowRadius: 4,
+                        elevation: 3
+                      }}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
+                        Request Withdrawal ({formatCurrency(pendingPayout)})
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Recent Donations */}
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16, marginBottom: 12 }}>
+                      Recent Donations ({donationsWithDonors.length})
+                    </Text>
+                    {donationsWithDonors.length === 0 ? (
+                      <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', padding: 20 }}>
+                        No donations received yet
+                      </Text>
+                    ) : (
+                      <View>
+                        {donationsWithDonors.slice(0, 5).map((item) => (
+                          <View
+                            key={item.$id}
+                            style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              paddingVertical: 10,
+                              paddingHorizontal: 12,
+                              backgroundColor: themedColor('rgba(255, 255, 255, 0.05)', theme.cardSoft),
+                              borderRadius: 8,
+                              marginBottom: 6
+                            }}
+                          >
+                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                              {item.donorAvatar ? (
+                                <Image
+                                  source={{ uri: item.donorAvatar }}
+                                  style={{ width: 32, height: 32, borderRadius: 16, marginRight: 10 }}
+                                />
+                              ) : (
+                                <View style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 16,
+                                  backgroundColor: '#32CD32',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  marginRight: 10
+                                }}>
+                                  <Text style={{ color: '#000', fontWeight: 'bold', fontSize: 12 }}>
+                                    {item.donorName?.charAt(0) || 'A'}
+                                  </Text>
+                                </View>
+                              )}
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: theme.textPrimary, fontWeight: '600', fontSize: 14 }}>
+                                  {item.donorName || 'Anonymous'}
+                                </Text>
+                                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                                  {formatDate(item.donationDate || item.$createdAt)}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={{ color: '#32CD32', fontWeight: 'bold', fontSize: 16 }}>
+                              {formatCurrency(item.creatorReceives)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Payout History */}
+                  <View>
+                    <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 16, marginBottom: 12 }}>
+                      Payout History ({payouts.length})
+                    </Text>
+                    {payouts.length === 0 ? (
+                      <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', padding: 20 }}>
+                        No payouts yet
+                      </Text>
+                    ) : (
+                      <View>
+                        {payouts.slice(0, 3).map((item) => {
+                          const getStatusColor = (status) => {
+                            switch (status) {
+                              case 'completed': return '#32CD32';
+                              case 'processing': return '#FFA500';
+                              case 'pending': return '#FFD700';
+                              case 'failed': return '#FF4444';
+                              default: return '#aaa';
+                            }
+                          };
+                          
+                          return (
+                            <View
+                              key={item.$id}
+                              style={{
+                                flexDirection: 'row',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingVertical: 10,
+                                paddingHorizontal: 12,
+                                backgroundColor: themedColor('rgba(255, 255, 255, 0.05)', theme.cardSoft),
+                                borderRadius: 8,
+                                marginBottom: 6
+                              }}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: theme.textPrimary, fontWeight: '600', fontSize: 14 }}>
+                                  {formatCurrency(item.amount)}
+                                </Text>
+                                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                                  {formatDate(item.createdAt)}
+                                </Text>
+                              </View>
+                              <View style={{
+                                backgroundColor: getStatusColor(item.status) + '20',
+                                paddingHorizontal: 10,
+                                paddingVertical: 4,
+                                borderRadius: 6,
+                                borderWidth: 1,
+                                borderColor: getStatusColor(item.status) + '40'
+                              }}>
+                                <Text style={{ 
+                                  color: getStatusColor(item.status), 
+                                  fontWeight: '600', 
+                                  fontSize: 12,
+                                  textTransform: 'capitalize'
+                                }}>
+                                  {item.status}
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
+                </>
+              )}
+            </View>
+          )}
         </View>
 
           {/* Section Tabs */}

@@ -14,7 +14,7 @@ import useAppwrite from "../../../lib/useAppwrite";
 import { getUserPosts, getCurrentUser, databases, appwriteConfig } from "../../../lib/appwrite";
 import { useGlobalContext } from "../../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard } from "../../../components";
-import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount } from "../../../lib/appwrite";
+import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout } from "../../../lib/appwrite";
 import { images } from "../../../constants";
 
 const UserProfile = () => {
@@ -49,6 +49,15 @@ const UserProfile = () => {
   const [modalIndex, setModalIndex] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
   const modalVideoRef = useRef(null);
+  
+  // Earnings Dashboard States
+  const [totalEarnings, setTotalEarnings] = useState(0);
+  const [pendingPayout, setPendingPayout] = useState(0);
+  const [donations, setDonations] = useState([]);
+  const [donationsWithDonors, setDonationsWithDonors] = useState([]);
+  const [payouts, setPayouts] = useState([]);
+  const [loadingEarnings, setLoadingEarnings] = useState(false);
+  const [showEarningsDashboard, setShowEarningsDashboard] = useState(false);
 
   const profileBackgroundImage = useMemo(
     () => (isDarkMode ? images.textBackgroundDark : images.usersPage),
@@ -128,6 +137,62 @@ const UserProfile = () => {
 
     if (id && currentUser) {
       fetchProfileUser();
+    }
+  }, [id, currentUser]);
+
+  // Fetch earnings data when viewing own profile
+  useEffect(() => {
+    const fetchEarningsData = async () => {
+      if (currentUser?.$id !== id) return; // Only fetch for own profile
+      
+      try {
+        setLoadingEarnings(true);
+        const [total, pending, donationsList, payoutsList] = await Promise.all([
+          getCreatorTotalDonations(id),
+          getPendingPayoutAmount(id),
+          getCreatorDonations(id),
+          getCreatorPayouts(id)
+        ]);
+        
+        setTotalEarnings(total || 0);
+        setPendingPayout(pending || 0);
+        setDonations(donationsList || []);
+        setPayouts(payoutsList || []);
+        
+        // Fetch donor details for donations
+        const donationsWithDonorInfo = await Promise.all(
+          (donationsList || []).map(async (donation) => {
+            try {
+              const donor = await databases.getDocument(
+                appwriteConfig.databaseId,
+                appwriteConfig.userCollectionId,
+                donation.donorId
+              );
+              return {
+                ...donation,
+                donorName: donor.username || 'Anonymous',
+                donorAvatar: donor.avatar || ''
+              };
+            } catch (error) {
+              return {
+                ...donation,
+                donorName: 'Anonymous',
+                donorAvatar: ''
+              };
+            }
+          })
+        );
+        
+        setDonationsWithDonors(donationsWithDonorInfo);
+      } catch (error) {
+        console.error("Error fetching earnings data:", error);
+      } finally {
+        setLoadingEarnings(false);
+      }
+    };
+
+    if (id && currentUser?.$id === id) {
+      fetchEarningsData();
     }
   }, [id, currentUser]);
 
@@ -322,6 +387,113 @@ const UserProfile = () => {
       return (count / 1000).toFixed(1) + 'K';
     }
     return count.toString();
+  };
+
+  const formatCurrency = (amount) => {
+    return `$${parseFloat(amount || 0).toFixed(2)}`;
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+  };
+
+  const handleRequestWithdrawal = async () => {
+    if (pendingPayout <= 0) {
+      Alert.alert('No Funds', 'You have no pending funds available for withdrawal.');
+      return;
+    }
+
+    if (pendingPayout < 10) {
+      Alert.alert('Minimum Amount', 'Minimum withdrawal amount is $10.00');
+      return;
+    }
+
+    Alert.alert(
+      'Request Withdrawal',
+      `Request withdrawal of ${formatCurrency(pendingPayout)}?\n\nThis will create a payout request that will be processed by the admin.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Request',
+          onPress: async () => {
+            try {
+              // Get all unpaid donations
+              const unpaidDonations = donations.filter(donation => {
+                // Check if this donation is in any completed payout
+                const isPaid = payouts.some(payout => 
+                  payout.status === 'completed' && 
+                  payout.donationIds?.includes(donation.$id)
+                );
+                return !isPaid;
+              });
+
+              const donationIds = unpaidDonations.map(d => d.$id);
+
+              await createPayout({
+                creatorId: id,
+                amount: pendingPayout,
+                donationIds: donationIds,
+                status: 'pending',
+                payoutMethod: 'stripe'
+              });
+
+              Alert.alert('Success', 'Withdrawal request submitted successfully! It will be processed by the admin.');
+              
+              // Refresh earnings data
+              const [total, pending, donationsList, payoutsList] = await Promise.all([
+                getCreatorTotalDonations(id),
+                getPendingPayoutAmount(id),
+                getCreatorDonations(id),
+                getCreatorPayouts(id)
+              ]);
+              
+              setTotalEarnings(total || 0);
+              setPendingPayout(pending || 0);
+              setDonations(donationsList || []);
+              setPayouts(payoutsList || []);
+              
+              // Refresh donor details
+              const donationsWithDonorInfo = await Promise.all(
+                (donationsList || []).map(async (donation) => {
+                  try {
+                    const donor = await databases.getDocument(
+                      appwriteConfig.databaseId,
+                      appwriteConfig.userCollectionId,
+                      donation.donorId
+                    );
+                    return {
+                      ...donation,
+                      donorName: donor.username || 'Anonymous',
+                      donorAvatar: donor.avatar || ''
+                    };
+                  } catch (error) {
+                    return {
+                      ...donation,
+                      donorName: 'Anonymous',
+                      donorAvatar: ''
+                    };
+                  }
+                })
+              );
+              
+              setDonationsWithDonors(donationsWithDonorInfo);
+            } catch (error) {
+              console.error("Error requesting withdrawal:", error);
+              Alert.alert('Error', error.message || 'Failed to request withdrawal. Please try again.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const openVideoModal = (item, index) => {
@@ -625,6 +797,239 @@ const UserProfile = () => {
                     <Text style={{ color: '#aaa', fontSize: 13 }}>{t('profile.stats.likes')}</Text>
                   </View>
                 </View>
+                
+                {/* Earnings Dashboard - Only show for own profile */}
+                {currentUser.$id === id && (
+                  <View style={{ marginTop: 8, marginBottom: 12 }}>
+                    <TouchableOpacity
+                      onPress={() => setShowEarningsDashboard(!showEarningsDashboard)}
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        backgroundColor: 'rgba(50, 205, 50, 0.15)',
+                        padding: 12,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: 'rgba(50, 205, 50, 0.3)',
+                        marginBottom: 8
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 20, marginRight: 8 }}>💰</Text>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
+                          Earnings Dashboard
+                        </Text>
+                      </View>
+                      <Text style={{ color: '#32CD32', fontSize: 18 }}>
+                        {showEarningsDashboard ? '▼' : '▶'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {showEarningsDashboard && (
+                      <View style={{
+                        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                        borderRadius: 16,
+                        padding: 16,
+                        marginTop: 8
+                      }}>
+                        {loadingEarnings ? (
+                          <View style={{ padding: 20, alignItems: 'center' }}>
+                            <ActivityIndicator size="small" color="#32CD32" />
+                            <Text style={{ color: '#aaa', marginTop: 8 }}>Loading earnings...</Text>
+                          </View>
+                        ) : (
+                          <>
+                            {/* Earnings Stats Cards */}
+                            <View style={{ flexDirection: 'row', marginBottom: 16, gap: 12 }}>
+                              <View style={{
+                                flex: 1,
+                                backgroundColor: 'rgba(50, 205, 50, 0.15)',
+                                borderRadius: 12,
+                                padding: 14,
+                                borderWidth: 1,
+                                borderColor: 'rgba(50, 205, 50, 0.3)'
+                              }}>
+                                <Text style={{ color: '#aaa', fontSize: 12, marginBottom: 4 }}>Total Earnings</Text>
+                                <Text style={{ color: '#32CD32', fontWeight: 'bold', fontSize: 20 }}>
+                                  {formatCurrency(totalEarnings)}
+                                </Text>
+                              </View>
+                              <View style={{
+                                flex: 1,
+                                backgroundColor: 'rgba(255, 165, 0, 0.15)',
+                                borderRadius: 12,
+                                padding: 14,
+                                borderWidth: 1,
+                                borderColor: 'rgba(255, 165, 0, 0.3)'
+                              }}>
+                                <Text style={{ color: '#aaa', fontSize: 12, marginBottom: 4 }}>Pending</Text>
+                                <Text style={{ color: '#FFA500', fontWeight: 'bold', fontSize: 20 }}>
+                                  {formatCurrency(pendingPayout)}
+                                </Text>
+                              </View>
+                            </View>
+
+                            {/* Withdrawal Button */}
+                            {pendingPayout >= 10 && (
+                              <TouchableOpacity
+                                onPress={handleRequestWithdrawal}
+                                style={{
+                                  backgroundColor: '#32CD32',
+                                  borderRadius: 12,
+                                  padding: 14,
+                                  alignItems: 'center',
+                                  marginBottom: 16,
+                                  shadowColor: '#32CD32',
+                                  shadowOffset: { width: 0, height: 2 },
+                                  shadowOpacity: 0.3,
+                                  shadowRadius: 4,
+                                  elevation: 3
+                                }}
+                              >
+                                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
+                                  Request Withdrawal ({formatCurrency(pendingPayout)})
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+
+                            {/* Recent Donations */}
+                            <View style={{ marginBottom: 16 }}>
+                              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 12 }}>
+                                Recent Donations ({donationsWithDonors.length})
+                              </Text>
+                              {donationsWithDonors.length === 0 ? (
+                                <Text style={{ color: '#aaa', fontSize: 14, textAlign: 'center', padding: 20 }}>
+                                  No donations received yet
+                                </Text>
+                              ) : (
+                                <View>
+                                  {donationsWithDonors.slice(0, 5).map((item) => (
+                                    <View
+                                      key={item.$id}
+                                      style={{
+                                        flexDirection: 'row',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        paddingVertical: 10,
+                                        paddingHorizontal: 12,
+                                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                        borderRadius: 8,
+                                        marginBottom: 6
+                                      }}
+                                    >
+                                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                                        {item.donorAvatar ? (
+                                          <Image
+                                            source={{ uri: item.donorAvatar }}
+                                            style={{ width: 32, height: 32, borderRadius: 16, marginRight: 10 }}
+                                          />
+                                        ) : (
+                                          <View style={{
+                                            width: 32,
+                                            height: 32,
+                                            borderRadius: 16,
+                                            backgroundColor: '#32CD32',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            marginRight: 10
+                                          }}>
+                                            <Text style={{ color: '#000', fontWeight: 'bold', fontSize: 12 }}>
+                                              {item.donorName?.charAt(0) || 'A'}
+                                            </Text>
+                                          </View>
+                                        )}
+                                        <View style={{ flex: 1 }}>
+                                          <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
+                                            {item.donorName || 'Anonymous'}
+                                          </Text>
+                                          <Text style={{ color: '#aaa', fontSize: 12 }}>
+                                            {formatDate(item.donationDate || item.$createdAt)}
+                                          </Text>
+                                        </View>
+                                      </View>
+                                      <Text style={{ color: '#32CD32', fontWeight: 'bold', fontSize: 16 }}>
+                                        {formatCurrency(item.creatorReceives)}
+                                      </Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+                            </View>
+
+                            {/* Payout History */}
+                            <View>
+                              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginBottom: 12 }}>
+                                Payout History ({payouts.length})
+                              </Text>
+                              {payouts.length === 0 ? (
+                                <Text style={{ color: '#aaa', fontSize: 14, textAlign: 'center', padding: 20 }}>
+                                  No payouts yet
+                                </Text>
+                              ) : (
+                                <View>
+                                  {payouts.slice(0, 3).map((item) => {
+                                    const getStatusColor = (status) => {
+                                      switch (status) {
+                                        case 'completed': return '#32CD32';
+                                        case 'processing': return '#FFA500';
+                                        case 'pending': return '#FFD700';
+                                        case 'failed': return '#FF4444';
+                                        default: return '#aaa';
+                                      }
+                                    };
+                                    
+                                    return (
+                                      <View
+                                        key={item.$id}
+                                        style={{
+                                          flexDirection: 'row',
+                                          justifyContent: 'space-between',
+                                          alignItems: 'center',
+                                          paddingVertical: 10,
+                                          paddingHorizontal: 12,
+                                          backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                          borderRadius: 8,
+                                          marginBottom: 6
+                                        }}
+                                      >
+                                        <View style={{ flex: 1 }}>
+                                          <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
+                                            {formatCurrency(item.amount)}
+                                          </Text>
+                                          <Text style={{ color: '#aaa', fontSize: 12 }}>
+                                            {formatDate(item.createdAt)}
+                                          </Text>
+                                        </View>
+                                        <View style={{
+                                          backgroundColor: getStatusColor(item.status) + '20',
+                                          paddingHorizontal: 10,
+                                          paddingVertical: 4,
+                                          borderRadius: 6,
+                                          borderWidth: 1,
+                                          borderColor: getStatusColor(item.status) + '40'
+                                        }}>
+                                          <Text style={{ 
+                                            color: getStatusColor(item.status), 
+                                            fontWeight: '600', 
+                                            fontSize: 12,
+                                            textTransform: 'capitalize'
+                                          }}>
+                                            {item.status}
+                                          </Text>
+                                        </View>
+                                      </View>
+                                    );
+                                  })}
+                                </View>
+                              )}
+                            </View>
+                          </>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
                 {/* Buttons Row */}
                 {currentUser.$id !== id && (
                   <View style={{ marginBottom: 10 }}>

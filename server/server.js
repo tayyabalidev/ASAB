@@ -972,6 +972,248 @@ app.post('/api/confirm-payment', async (req, res) => {
   }
 });
 
+// Create Payment Intent for Advertising Subscription
+app.post('/api/create-advertising-payment-intent', async (req, res) => {
+  try {
+    const { amount, currency = 'usd', advertiserId, subscriptionPlan } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+
+    if (!stripe || !process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ 
+        error: 'Stripe not configured. Please set STRIPE_SECRET_KEY in environment variables.' 
+      });
+    }
+
+    // Convert amount to cents (Stripe uses smallest currency unit)
+    const amountInCents = Math.round(parseFloat(amount) * 100);
+
+    // Create payment intent for advertising
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amountInCents,
+      currency: currency.toLowerCase(),
+      metadata: {
+        advertiserId: advertiserId || '',
+        subscriptionPlan: subscriptionPlan || '',
+        type: 'advertising'
+      },
+      automatic_payment_methods: {
+        enabled: true,
+      },
+    });
+
+    res.json({
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id
+    });
+  } catch (error) {
+    console.error('Error creating advertising payment intent:', error);
+    res.status(500).json({ error: error.message || 'Failed to create advertising payment intent' });
+  }
+});
+
+// Create Stripe Connect Account for Creator
+app.post('/api/create-stripe-account', async (req, res) => {
+  try {
+    const { creatorId, email, country = 'US' } = req.body;
+
+    if (!creatorId || !email) {
+      return res.status(400).json({ error: 'Missing required fields: creatorId, email' });
+    }
+
+    if (!stripe || !process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ 
+        error: 'Stripe not configured. Please set STRIPE_SECRET_KEY in environment variables.' 
+      });
+    }
+
+    // Create Stripe Express account for the creator
+    try {
+      const account = await stripe.accounts.create({
+        type: 'express',
+        country: country,
+        email: email,
+        capabilities: {
+          transfers: { requested: true },
+        },
+        metadata: {
+          creatorId: creatorId,
+          platform: 'ASAB'
+        }
+      });
+
+      res.json({
+        success: true,
+        accountId: account.id,
+        creatorId: creatorId
+      });
+    } catch (stripeError) {
+      // Check if Stripe Connect is not enabled
+      if (stripeError.message && stripeError.message.includes('Connect')) {
+        return res.status(400).json({ 
+          error: 'Stripe Connect is not enabled on your account.',
+          message: 'Please enable Stripe Connect in your Stripe Dashboard: https://dashboard.stripe.com/settings/connect',
+          details: stripeError.message,
+          requiresConnect: true,
+          alternative: 'You can still use manual payment processing. Admin will process payouts manually via Stripe Dashboard.'
+        });
+      }
+      throw stripeError;
+    }
+  } catch (error) {
+    console.error('Error creating Stripe account:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to create Stripe account',
+      details: error.type || 'Unknown error'
+    });
+  }
+});
+
+// Create Account Link for Stripe Connect Onboarding
+app.post('/api/create-account-link', async (req, res) => {
+  try {
+    const { accountId, returnUrl, refreshUrl } = req.body;
+
+    if (!accountId) {
+      return res.status(400).json({ error: 'Missing required field: accountId' });
+    }
+
+    if (!stripe || !process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ 
+        error: 'Stripe not configured' 
+      });
+    }
+
+    // Create account link for onboarding
+    const accountLink = await stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: refreshUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/earnings`,
+      return_url: returnUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/earnings?connected=true`,
+      type: 'account_onboarding',
+    });
+
+    res.json({
+      success: true,
+      url: accountLink.url,
+      expiresAt: accountLink.expires_at
+    });
+  } catch (error) {
+    console.error('Error creating account link:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to create account link'
+    });
+  }
+});
+
+// Get Stripe Account Status
+app.get('/api/stripe-account-status/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+
+    if (!stripe || !process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ error: 'Stripe not configured' });
+    }
+
+    const account = await stripe.accounts.retrieve(accountId);
+    
+    // Check if account is ready to receive transfers
+    const canReceiveTransfers = account.capabilities?.transfers === 'active' || 
+                                account.capabilities?.transfers === 'pending';
+
+    res.json({
+      success: true,
+      accountId: account.id,
+      chargesEnabled: account.charges_enabled,
+      payoutsEnabled: account.payouts_enabled,
+      transfersEnabled: canReceiveTransfers,
+      detailsSubmitted: account.details_submitted,
+      email: account.email,
+      country: account.country
+    });
+  } catch (error) {
+    console.error('Error retrieving account status:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to retrieve account status'
+    });
+  }
+});
+
+// Process Stripe Payout to Creator
+app.post('/api/process-payout', async (req, res) => {
+  try {
+    const { payoutId, creatorId, amount, currency = 'usd', destinationAccountId } = req.body;
+
+    if (!payoutId || !creatorId || !amount) {
+      return res.status(400).json({ error: 'Missing required fields: payoutId, creatorId, amount' });
+    }
+
+    if (!stripe || !process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ 
+        error: 'Stripe not configured. Please set STRIPE_SECRET_KEY in environment variables.' 
+      });
+    }
+
+    const amountInCents = Math.round(parseFloat(amount) * 100);
+
+    if (amountInCents < 100) {
+      return res.status(400).json({ error: 'Minimum payout amount is $1.00' });
+    }
+
+    let transfer = null;
+    let transactionId = null;
+
+    // If destination account is provided (Stripe Connect), use Transfer
+    if (destinationAccountId) {
+      try {
+        transfer = await stripe.transfers.create({
+          amount: amountInCents,
+          currency: currency.toLowerCase(),
+          destination: destinationAccountId,
+          metadata: {
+            payoutId: payoutId,
+            creatorId: creatorId,
+            type: 'creator_payout'
+          }
+        });
+        transactionId = transfer.id;
+        console.log('Stripe transfer created:', transfer.id);
+      } catch (transferError) {
+        console.error('Error creating Stripe transfer:', transferError);
+        return res.status(500).json({ 
+          error: `Failed to create Stripe transfer: ${transferError.message}`,
+          details: 'Creator may need to connect their Stripe account'
+        });
+      }
+    } else {
+      // Alternative: Use Stripe Payouts API (requires platform to have balance)
+      // This sends money from platform's Stripe balance to creator's bank account
+      // Note: This requires the creator's bank account to be stored
+      // For now, return error suggesting manual processing
+      return res.status(400).json({ 
+        error: 'Creator bank account not linked',
+        message: 'Creator needs to connect their payment method. Processing manually for now.',
+        requiresManualProcessing: true
+      });
+    }
+
+    res.json({
+      success: true,
+      transferId: transactionId,
+      payoutId: payoutId,
+      amount: amount,
+      status: 'completed'
+    });
+  } catch (error) {
+    console.error('Error processing payout:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to process payout',
+      details: error.type || 'Unknown error'
+    });
+  }
+});
+
 // Webhook endpoint for Stripe events (for production)
 app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -996,10 +1238,40 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
       const paymentIntent = event.data.object;
       console.log('PaymentIntent succeeded:', paymentIntent.id);
       // Here you can update your database, send notifications, etc.
+      // Check if it's an advertising payment or donation
+      if (paymentIntent.metadata?.type === 'advertising') {
+        console.log('Advertising payment succeeded:', paymentIntent.id);
+      } else if (paymentIntent.metadata?.type === 'donation') {
+        console.log('Donation payment succeeded:', paymentIntent.id);
+      }
       break;
     case 'payment_intent.payment_failed':
       const failedPayment = event.data.object;
       console.log('PaymentIntent failed:', failedPayment.id);
+      break;
+    case 'transfer.created':
+      const transferCreated = event.data.object;
+      console.log('Transfer created:', transferCreated.id);
+      if (transferCreated.metadata?.payoutId) {
+        console.log('Payout transfer created:', transferCreated.metadata.payoutId);
+      }
+      break;
+    case 'transfer.paid':
+      const transferPaid = event.data.object;
+      console.log('Transfer paid:', transferPaid.id);
+      if (transferPaid.metadata?.payoutId) {
+        console.log('Payout transfer completed:', transferPaid.metadata.payoutId);
+        // Here you could update the payout status to confirmed
+        // Note: You'll need to import your Appwrite functions or make an API call
+      }
+      break;
+    case 'transfer.failed':
+      const transferFailed = event.data.object;
+      console.log('Transfer failed:', transferFailed.id);
+      if (transferFailed.metadata?.payoutId) {
+        console.log('Payout transfer failed:', transferFailed.metadata.payoutId);
+        // Here you could update the payout status to failed
+      }
       break;
     default:
       console.log(`Unhandled event type ${event.type}`);

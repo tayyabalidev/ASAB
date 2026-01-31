@@ -11,6 +11,8 @@ import {
   getAllPayouts,
   getTotalPlatformFees,
   getPendingPayoutAmount,
+  updatePayoutStatus,
+  processPayout,
   databases,
   appwriteConfig,
 } from "../../lib/appwrite";
@@ -246,28 +248,250 @@ const AdminDashboard = () => {
             )}
           </View>
 
+          <View style={{ backgroundColor: theme.surface, borderRadius: 14, padding: 16, marginBottom: 14 }}>
+            <Text style={{ color: theme.textPrimary, fontSize: 16, fontFamily: "Poppins-SemiBold", marginBottom: 10 }}>
+              Pending Payout Requests
+            </Text>
+            {payouts.filter(p => p.status === 'Pending' || p.status === 'pending').length === 0 ? (
+              <Text style={{ color: theme.textSecondary }}>{loading ? "Loading..." : "No pending payouts."}</Text>
+            ) : (
+              payouts
+                .filter(p => p.status === 'Pending' || p.status === 'pending')
+                .slice(0, 10)
+                .map((p) => (
+                  <View key={p.$id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-SemiBold", fontSize: 16 }}>
+                          {money(p.amount)}
+                        </Text>
+                        <Text style={{ color: theme.textSecondary, marginTop: 4, fontSize: 13 }}>
+                          Creator: {userMap[p.creatorId]?.name || p.creatorId}
+                        </Text>
+                        <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+                          Method: {p.payoutMethod || 'bankTransfer'}
+                        </Text>
+                        {p.createdAt && (
+                          <Text style={{ color: theme.textSecondary, marginTop: 2, fontSize: 12 }}>
+                            Requested: {fmtDate(p.createdAt)}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            Alert.alert(
+                              "Approve & Process Payout",
+                              `Approve and process payout of ${money(p.amount)} to ${userMap[p.creatorId]?.name || p.creatorId}?\n\nThis will automatically send the payment via Stripe.`,
+                              [
+                                { text: "Cancel", style: "cancel" },
+                                {
+                                  text: "Approve & Pay",
+                                  onPress: async () => {
+                                    try {
+                                      // First, try to process the payout via Stripe
+                                      let transactionId = null;
+                                      let requiresManualProcessing = false;
+                                      
+                                      try {
+                                        // Get creator's Stripe account ID if available
+                                        let creatorStripeAccountId = null;
+                                        try {
+                                          const creatorDoc = await databases.getDocument(
+                                            appwriteConfig.databaseId,
+                                            appwriteConfig.userCollectionId,
+                                            p.creatorId
+                                          );
+                                          creatorStripeAccountId = creatorDoc.stripeAccountId || null;
+                                          
+                                          // If account exists, verify it's ready for transfers
+                                          if (creatorStripeAccountId) {
+                                            try {
+                                              const { getStripeAccountStatus } = await import("../../lib/appwrite");
+                                              const status = await getStripeAccountStatus(creatorStripeAccountId);
+                                              if (!status.transfersEnabled) {
+                                                creatorStripeAccountId = null; // Account not ready
+                                              }
+                                            } catch (statusError) {
+                                              console.log("Could not verify account status:", statusError);
+                                            }
+                                          }
+                                        } catch (e) {
+                                          console.log("Could not fetch creator Stripe account:", e);
+                                        }
+
+                                        // Process payout via Stripe
+                                        const payoutResult = await processPayout(
+                                          p.$id,
+                                          p.creatorId,
+                                          p.amount,
+                                          p.currency || 'USD',
+                                          creatorStripeAccountId
+                                        );
+                                        
+                                        if (payoutResult.success && payoutResult.transferId) {
+                                          transactionId = payoutResult.transferId;
+                                        }
+                                      } catch (payoutError) {
+                                        console.error("Stripe payout error:", payoutError);
+                                        // Check if it requires manual processing
+                                        if (payoutError.message?.includes('bank account not linked') || 
+                                            payoutError.message?.includes('requiresManualProcessing')) {
+                                          requiresManualProcessing = true;
+                                        } else {
+                                          // Other error - ask admin what to do
+                                          Alert.alert(
+                                            "Stripe Processing Failed",
+                                            `Automatic payment failed: ${payoutError.message}\n\nWould you like to approve manually?`,
+                                            [
+                                              { text: "Cancel", style: "cancel" },
+                                              {
+                                                text: "Approve Manually",
+                                                onPress: async () => {
+                                                  try {
+                                                    await updatePayoutStatus(p.$id, "Completed");
+                                                    Alert.alert("Success", "Payout approved. Please process payment manually.");
+                                                    await load();
+                                                  } catch (error) {
+                                                    Alert.alert("Error", error.message || "Failed to approve payout");
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          );
+                                          return;
+                                        }
+                                      }
+
+                                      // Update status to Completed with transaction ID
+                                      await updatePayoutStatus(p.$id, "Completed", transactionId);
+                                      
+                                      if (requiresManualProcessing) {
+                                        Alert.alert(
+                                          "Approved - Manual Processing Required",
+                                          "Payout approved but requires manual processing.\n\nCreator needs to link their payment method. Please process payment manually via Stripe Dashboard."
+                                        );
+                                      } else {
+                                        Alert.alert(
+                                          "Success", 
+                                          `Payout processed successfully!\n\nTransaction ID: ${transactionId || 'N/A'}\nAmount: ${money(p.amount)}`
+                                        );
+                                      }
+                                      
+                                      // Refresh data
+                                      await load();
+                                    } catch (error) {
+                                      console.error("Error approving payout:", error);
+                                      Alert.alert("Error", error.message || "Failed to approve payout");
+                                    }
+                                  }
+                                }
+                              ]
+                            );
+                          }}
+                          style={{
+                            backgroundColor: '#32CD32',
+                            paddingHorizontal: 16,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Approve & Pay</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            Alert.alert(
+                              "Reject Payout",
+                              `Reject payout of ${money(p.amount)}?`,
+                              [
+                                { text: "Cancel", style: "cancel" },
+                                {
+                                  text: "Reject",
+                                  style: "destructive",
+                                  onPress: async () => {
+                                    try {
+                                      // Update status to Failed
+                                      await updatePayoutStatus(p.$id, "Failed");
+                                      Alert.alert("Success", "Payout rejected.");
+                                      // Refresh data
+                                      await load();
+                                    } catch (error) {
+                                      Alert.alert("Error", error.message || "Failed to reject payout");
+                                    }
+                                  }
+                                }
+                              ]
+                            );
+                          }}
+                          style={{
+                            backgroundColor: '#FF4444',
+                            paddingHorizontal: 16,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Reject</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                ))
+            )}
+          </View>
+
           <View style={{ backgroundColor: theme.surface, borderRadius: 14, padding: 16 }}>
             <Text style={{ color: theme.textPrimary, fontSize: 16, fontFamily: "Poppins-SemiBold", marginBottom: 10 }}>
-              Recent payouts
+              All Payouts History
             </Text>
             {payouts.length === 0 ? (
               <Text style={{ color: theme.textSecondary }}>{loading ? "Loading..." : "No payouts found."}</Text>
             ) : (
-              payouts.slice(0, 15).map((p) => (
-                <View key={p.$id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.border }}>
-                  <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-Medium" }}>
-                    {money(p.amount)} • {p.status} • {p.payoutMethod}
-                  </Text>
-                  <Text style={{ color: theme.textSecondary, marginTop: 4 }} numberOfLines={2}>
-                    creator: {userMap[p.creatorId]?.name || p.creatorId} • donations: {(p.donationIds || []).length}
-                  </Text>
-                  {p.createdAt && (
-                    <Text style={{ color: theme.textSecondary, marginTop: 2 }} numberOfLines={1}>
-                      {fmtDate(p.createdAt)}
-                    </Text>
-                  )}
-                </View>
-              ))
+              payouts.slice(0, 15).map((p) => {
+                const getStatusColor = (status) => {
+                  const statusLower = (status || '').toLowerCase();
+                  if (statusLower === 'completed') return '#32CD32';
+                  if (statusLower === 'pending') return '#FFD700';
+                  if (statusLower === 'failed') return '#FF4444';
+                  return theme.textSecondary;
+                };
+                
+                return (
+                  <View key={p.$id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-Medium" }}>
+                          {money(p.amount)} • {p.payoutMethod || 'bankTransfer'}
+                        </Text>
+                        <Text style={{ color: theme.textSecondary, marginTop: 4 }} numberOfLines={2}>
+                          creator: {userMap[p.creatorId]?.name || p.creatorId}
+                        </Text>
+                        {p.createdAt && (
+                          <Text style={{ color: theme.textSecondary, marginTop: 2 }} numberOfLines={1}>
+                            {fmtDate(p.createdAt)}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={{
+                        backgroundColor: getStatusColor(p.status) + '20',
+                        paddingHorizontal: 10,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        borderWidth: 1,
+                        borderColor: getStatusColor(p.status) + '40'
+                      }}>
+                        <Text style={{ 
+                          color: getStatusColor(p.status), 
+                          fontWeight: '600', 
+                          fontSize: 12,
+                          textTransform: 'capitalize'
+                        }}>
+                          {p.status}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })
             )}
           </View>
         </ScrollView>

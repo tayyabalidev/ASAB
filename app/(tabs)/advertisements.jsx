@@ -23,20 +23,25 @@ import {
   getAdvertiserAds, 
   updateAdvertisement, 
   deleteAdvertisement,
-  uploadFile 
+  uploadFile,
+  createAdvertisingPayment,
+  updateAdvertisementPaymentStatus
 } from "../../lib/appwrite";
 import { CustomButton, FormField } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
+import { useStripe } from "@stripe/stripe-react-native";
+import { processAdvertisingPayment } from "../../lib/paymentService";
 
 const SUBSCRIPTION_PLANS = [
-  { id: 'daily', name: 'Daily', price: '$10', duration: '1 day' },
-  { id: 'weekly', name: 'Weekly', price: '$50', duration: '7 days' },
-  { id: 'monthly', name: 'Monthly', price: '$150', duration: '30 days' },
+  { id: 'daily', name: 'Daily', price: 10, priceDisplay: '$10', duration: '1 day' },
+  { id: 'weekly', name: 'Weekly', price: 50, priceDisplay: '$50', duration: '7 days' },
+  { id: 'monthly', name: 'Monthly', price: 150, priceDisplay: '$150', duration: '30 days' },
 ];
 
 const Advertisements = () => {
   const { user, isRTL, theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
+  const stripe = useStripe();
   const [loading, setLoading] = useState(false);
   const [ads, setAds] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -160,15 +165,55 @@ const Advertisements = () => {
       return Alert.alert(t("common.error"), "Please login to create advertisements");
     }
 
+    // Get plan price
+    const selectedPlan = SUBSCRIPTION_PLANS.find(p => p.id === form.subscriptionPlan);
+    if (!selectedPlan) {
+      return Alert.alert(t("common.error"), "Invalid subscription plan selected");
+    }
+
     setLoading(true);
     try {
-      await createAdvertisement({
+      // Step 1: Process payment first
+      if (!stripe) {
+        throw new Error("Stripe is not initialized. Please check your Stripe publishable key configuration.");
+      }
+
+      if (!stripe.initPaymentSheet || !stripe.presentPaymentSheet) {
+        throw new Error("Stripe SDK methods not available. Make sure StripeProvider is properly configured.");
+      }
+
+      const paymentResult = await processAdvertisingPayment(
+        stripe,
+        selectedPlan.price,
+        user.$id,
+        form.subscriptionPlan
+      );
+
+      if (!paymentResult.success) {
+        throw new Error("Payment failed. Please try again.");
+      }
+
+      // Step 2: Create advertisement with payment info
+      const newAd = await createAdvertisement({
         ...form,
         advertiserId: user.$id,
         advertiserName: user.username || user.email || "Advertiser",
+        paymentIntentId: paymentResult.paymentIntentId,
+        paymentStatus: "completed",
+        amount: selectedPlan.price,
       });
 
-      Alert.alert(t("common.success"), "Advertisement created successfully!");
+      // Step 3: Create payment record
+      await createAdvertisingPayment({
+        advertiserId: user.$id,
+        advertisementId: newAd.$id,
+        amount: selectedPlan.price,
+        subscriptionPlan: form.subscriptionPlan,
+        paymentIntentId: paymentResult.paymentIntentId,
+        status: "completed",
+      });
+
+      Alert.alert(t("common.success"), "Advertisement created and payment processed successfully!");
       setForm({
         title: "",
         description: "",
@@ -179,7 +224,11 @@ const Advertisements = () => {
       setShowCreateModal(false);
       loadAds();
     } catch (error) {
-      Alert.alert(t("common.error"), error.message || "Failed to create advertisement");
+      console.error("Error creating advertisement:", error);
+      Alert.alert(
+        t("common.error"), 
+        error.message || "Failed to create advertisement. Payment may have been processed but advertisement creation failed."
+      );
     } finally {
       setLoading(false);
     }
@@ -592,11 +641,34 @@ const Advertisements = () => {
                           fontSize: 12,
                           marginTop: 4,
                         }}>
-                          {plan.price}
+                          {plan.priceDisplay}
                         </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
+                </View>
+
+                <View style={{
+                  backgroundColor: theme.accentSoft,
+                  padding: 12,
+                  borderRadius: 8,
+                  marginBottom: 8,
+                }}>
+                  <Text style={{
+                    color: theme.textPrimary,
+                    fontSize: 14,
+                    fontFamily: 'Poppins-Medium',
+                    marginBottom: 4,
+                  }}>
+                    Payment Information
+                  </Text>
+                  <Text style={{
+                    color: theme.textSecondary,
+                    fontSize: 12,
+                    fontFamily: 'Poppins-Regular',
+                  }}>
+                    You will be charged {SUBSCRIPTION_PLANS.find(p => p.id === form.subscriptionPlan)?.priceDisplay || '$0'} for the {SUBSCRIPTION_PLANS.find(p => p.id === form.subscriptionPlan)?.name.toLowerCase() || ''} plan. Payment will be processed securely via Stripe.
+                  </Text>
                 </View>
 
                 <View>
@@ -760,7 +832,7 @@ const Advertisements = () => {
                           fontSize: 12,
                           marginTop: 4,
                         }}>
-                          {plan.price}
+                          {plan.priceDisplay}
                         </Text>
                       </TouchableOpacity>
                     ))}
