@@ -528,7 +528,7 @@ const PostDetails = () => {
                             >
                               <Image
                                 source={isLiked ? icons.heartCheck : icons.heartUncheck}
-                                style={{ width: 16, height: 16, marginRight: 4 }}
+                                style={{ width: 20, height: 20, marginRight: 4 }}
                                 resizeMode="contain"
                               />
                               <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
@@ -650,7 +650,7 @@ const PostDetails = () => {
                                           >
                                             <Image
                                               source={isReplyLiked ? icons.heartCheck : icons.heartUncheck}
-                                              style={{ width: 14, height: 14, marginRight: 4 }}
+                                              style={{ width: 18, height: 18, marginRight: 4 }}
                                               resizeMode="contain"
                                             />
                                             <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
