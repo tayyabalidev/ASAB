@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { ResizeMode, Video } from "expo-av";
 import { View, Text, TouchableOpacity, Image, Alert, Share } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
 import { icons } from "../constants";
@@ -9,6 +10,9 @@ import { useGlobalContext } from "../context/GlobalProvider";
 
 const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, creatorId }) => {
   const [play, setPlay] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [playCount, setPlayCount] = useState(0);
+  const videoRef = useRef(null);
   const { user } = useGlobalContext();
 
   const shareVideo = async () => {
@@ -155,22 +159,58 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
       </View>
 
       {play ? (
-        <Video
-          source={{ uri: video }}
-          className="w-full h-60 rounded-xl mt-3"
-          resizeMode={ResizeMode.CONTAIN}
-          useNativeControls
-          shouldPlay
-          onPlaybackStatusUpdate={(status) => {
-            if (status.didJustFinish) {
-              setPlay(false);
-            }
-          }}
-        />
+        <View className="w-full h-60 rounded-xl mt-3 relative">
+          <Video
+            ref={videoRef}
+            source={{ uri: video }}
+            className="w-full h-full rounded-xl"
+            resizeMode={ResizeMode.CONTAIN}
+            useNativeControls
+            shouldPlay
+            isMuted={isMuted}
+            onPlaybackStatusUpdate={async (status) => {
+              if (status.didJustFinish) {
+                const newPlayCount = playCount + 1;
+                if (newPlayCount < 3) {
+                  // Loop the video by replaying it
+                  setPlayCount(newPlayCount);
+                  try {
+                    await videoRef.current?.setPositionAsync(0);
+                    await videoRef.current?.playAsync();
+                  } catch (error) {
+                    // If replay fails, just stop
+                    setPlay(false);
+                    setPlayCount(0);
+                  }
+                } else {
+                  // After 3 plays, stop the video
+                  setPlay(false);
+                  setPlayCount(0);
+                }
+              }
+            }}
+          />
+          {/* Mute Button */}
+          <TouchableOpacity
+            onPress={() => setIsMuted(!isMuted)}
+            className="absolute top-3 right-3 w-10 h-10 rounded-full bg-black/50 flex justify-center items-center z-10"
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons
+              name={isMuted ? "volume-off" : "volume-high"}
+              size={20}
+              color="#fff"
+            />
+          </TouchableOpacity>
+        </View>
       ) : (
         <TouchableOpacity
           activeOpacity={0.7}
-          onPress={() => setPlay(true)}
+          onPress={() => {
+            setPlay(true);
+            setPlayCount(0);
+            setIsMuted(false);
+          }}
           className="w-full h-60 rounded-xl mt-3 relative flex justify-center items-center"
         >
           <Image
