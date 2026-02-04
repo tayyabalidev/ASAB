@@ -3,6 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Platform } from "react-native";
 import { FlatList, Image, RefreshControl, Text, View, TouchableOpacity, Dimensions, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Share, Alert, ScrollView, Linking } from "react-native";
 import { ResizeMode, Video } from "expo-av";
+import Slider from "@react-native-community/slider";
 import { router, useFocusEffect } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { GestureHandlerRootView, PanGestureHandler, State, Gesture } from "react-native-gesture-handler";
@@ -195,6 +196,14 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [isFollowing, setIsFollowing] = useState(false);
   const [showProfileHint, setShowProfileHint] = useState(false);
   const [creatorData, setCreatorData] = useState(null);
+  const videoRef = useRef(null);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [showProgressBar, setShowProgressBar] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [seekPosition, setSeekPosition] = useState(0);
+  const [isVideoReady, setIsVideoReady] = useState(false);
+  const progressBarTimeoutRef = useRef(null);
   
   // Fetch creator data if creator is a string ID
   // Use a ref to track the creator ID we've already processed to prevent infinite loops
@@ -234,7 +243,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           );
           setCreatorData(userDoc);
         } catch (error) {
-          console.log('Failed to fetch creator:', error);
+          
           setCreatorData({ username: 'Unknown', avatar: images.profile, $id: item.creator });
         }
       }
@@ -368,7 +377,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           setComments(res);
         })
         .catch((err) => {
-          console.error("Error fetching comments:", err);
+          
           setComments([]);
         })
         .finally(() => setLoadingComments(false));
@@ -399,17 +408,136 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     }
   }, [likesModalVisible, item.$id]);
 
+  // Reset video ready state when item changes
+  useEffect(() => {
+    setIsVideoReady(false);
+    setPlaybackPosition(0);
+    setPlaybackDuration(0);
+    setSeekPosition(0);
+  }, [item.$id]);
+
   // Handle visibility changes and home focus
   useEffect(() => {
     if (isVisible && isHomeFocused) {
       setPlay(true);
+      // Show progress bar briefly when video starts
+      if (item.video && item.postType !== 'photo') {
+        setShowProgressBar(true);
+        if (progressBarTimeoutRef.current) {
+          clearTimeout(progressBarTimeoutRef.current);
+        }
+        progressBarTimeoutRef.current = setTimeout(() => {
+          setShowProgressBar(false);
+        }, 3000);
+      }
     } else {
       setPlay(false);
+      setShowProgressBar(false);
     }
   }, [isVisible, isHomeFocused]);
 
+  // Cleanup progress bar timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (progressBarTimeoutRef.current) {
+        clearTimeout(progressBarTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleVideoPress = () => {
     setPlay((prev) => !prev);
+    // Show progress bar when video is tapped
+    if (item.video && item.postType !== 'photo') {
+      setShowProgressBar(true);
+      // Hide progress bar after 3 seconds
+      if (progressBarTimeoutRef.current) {
+        clearTimeout(progressBarTimeoutRef.current);
+      }
+      progressBarTimeoutRef.current = setTimeout(() => {
+        setShowProgressBar(false);
+      }, 3000);
+    }
+  };
+
+  const handleSeekStart = () => {
+    setIsSeeking(true);
+  };
+
+  const handleSeekChange = (position) => {
+    if (playbackDuration > 0) {
+      const newPosition = Math.floor((position / 100) * playbackDuration);
+      setSeekPosition(newPosition);
+    }
+  };
+
+  const handleSeekComplete = async (position) => {
+    
+   
+    
+    if (!videoRef.current) {
+      
+      setIsSeeking(false);
+      return;
+    }
+    
+    if (!isVideoReady) {
+      
+      setIsSeeking(false);
+      return;
+    }
+    
+    if (playbackDuration <= 0) {
+    
+      setIsSeeking(false);
+      return;
+    }
+
+    try {
+      const seekPositionMillis = Math.max(0, Math.floor((position / 100) * playbackDuration));
+      
+      
+      // Perform the seek
+      await videoRef.current.setPositionAsync(seekPositionMillis);
+      
+      // Update position state immediately for visual feedback
+      setPlaybackPosition(seekPositionMillis);
+      setSeekPosition(seekPositionMillis);
+      
+      // Ensure video continues playing after seek if it should be playing
+      if (play) {
+        try {
+          await videoRef.current.playAsync();
+        } catch (playError) {
+          // Video might already be playing, ignore error
+          
+        }
+      }
+    } catch (error) {
+      
+      // On error, try to get current position and update state
+      try {
+        const status = await videoRef.current.getStatusAsync();
+        if (status.isLoaded) {
+          setPlaybackPosition(status.positionMillis || 0);
+        }
+      } catch (e) {
+       
+      }
+    } finally {
+      // Reset seeking state after a short delay to allow position update
+      setTimeout(() => {
+        setIsSeeking(false);
+      }, 200);
+    }
+  };
+
+  const formatTime = (milliseconds) => {
+    if (!milliseconds || isNaN(milliseconds)) return '0:00';
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
   const handleLike = async () => {
@@ -548,7 +676,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       setNewComment("");
       setCommentsCount((prev) => prev + 1);
     } catch (error) {
-      console.error("Error adding comment:", error);
+      
     } finally {
       setPosting(false);
     }
@@ -565,7 +693,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       setReplyText("");
       setReplyingTo(null);
     } catch (error) {
-      console.error("Error adding reply:", error);
     } finally {
       setPostingReply(false);
     }
@@ -607,7 +734,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     try {
       await toggleLikeComment(commentId, user.$id);
     } catch (error) {
-      console.error("Error liking comment:", error);
       // Revert on error
       const updatedComments = await getComments(item.$id);
       setComments(updatedComments);
@@ -937,7 +1063,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                     domStorageEnabled={false}
                     onError={(syntheticEvent) => {
                       const { nativeEvent } = syntheticEvent;
-                      console.log('WebView error: ', nativeEvent);
                     }}
                   />
                 </View>
@@ -951,7 +1076,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 style={{ width: '100%', height: '100%' }}
                 resizeMode="contain"
                 onError={(error) => {
-                  console.log('Photo error:', error);
                 }}
               />
             );
@@ -1035,7 +1159,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                     allowsInlineMediaPlayback={true}
                     onError={(syntheticEvent) => {
                       const { nativeEvent } = syntheticEvent;
-                      console.log('Video WebView error: ', nativeEvent);
                     }}
                   />
                 </View>
@@ -1045,22 +1168,30 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             // No filters/adjustments, use regular Video component
             return (
               <Video
+                ref={videoRef}
                 source={{ 
                   uri: videoUrl
                 }}
                 style={{ width: '100%', height: '100%' }}
                 resizeMode={ResizeMode.contain}
                 shouldPlay={play}
-                isLooping
+                isLooping={true}
                 isMuted={false}
                 useNativeControls={false}
                 onError={(error) => {
                 }}
-                onLoad={() => {
+                onLoad={(status) => {
+                  if (status.isLoaded) {
+                    setPlaybackDuration(status.durationMillis || 0);
+                    setIsVideoReady(true);
+                  }
                 }}
                 onPlaybackStatusUpdate={(status) => {
-                  if (status.didJustFinish) {
-                    setPlay(false);
+                  if (status.isLoaded && !isSeeking) {
+                    setPlaybackPosition(status.positionMillis || 0);
+                    if (status.durationMillis) {
+                      setPlaybackDuration(status.durationMillis);
+                    }
                   }
                 }}
                 {...(Platform.OS === 'ios' && {
@@ -1090,6 +1221,48 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           </View>
         )}
       </TouchableOpacity>
+
+      {/* Progress Bar - Only show for native Video component (not WebView) - Outside TouchableOpacity to receive touches */}
+      {showProgressBar && item.video && item.postType !== 'photo' && playbackDuration > 0 && isVideoReady && (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 90,
+            left: 0,
+            right: 0,
+            paddingHorizontal: 15,
+            paddingBottom: 20,
+            paddingTop: 10,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 30,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
+            <Text style={{ color: '#fff', fontSize: 12, marginRight: 10, minWidth: 40 }}>
+              {formatTime(isSeeking ? seekPosition : playbackPosition)}
+            </Text>
+            <View style={{ flex: 1 }}>
+              <Slider
+                style={{ width: '100%', height: 40 }}
+                minimumValue={0}
+                maximumValue={100}
+                value={playbackDuration > 0 ? (isSeeking ? (seekPosition / playbackDuration) * 100 : (playbackPosition / playbackDuration) * 100) : 0}
+                onValueChange={handleSeekChange}
+                onSlidingStart={handleSeekStart}
+                onSlidingComplete={handleSeekComplete}
+                minimumTrackTintColor="#fff"
+                maximumTrackTintColor="rgba(255, 255, 255, 0.3)"
+                thumbTintColor="#fff"
+                step={0.1}
+                disabled={!isVideoReady || playbackDuration <= 0}
+              />
+            </View>
+            <Text style={{ color: '#fff', fontSize: 12, marginLeft: 10, minWidth: 40 }}>
+              {formatTime(playbackDuration)}
+            </Text>
+          </View>
+        </View>
+      )}
 
 
 
@@ -1889,7 +2062,6 @@ const Home = () => {
               }
               return { creatorId, data: null };
             } catch (error) {
-              console.log("Failed to fetch creator for trending post:", creatorId, error.message);
               // Remove from fetched set if fetch failed so we can retry later
               fetchedTrendingCreatorIds.current.delete(creatorId);
               return { creatorId, data: null };
@@ -1912,7 +2084,6 @@ const Home = () => {
           return updated;
         });
       } catch (error) {
-        console.log("Failed to fetch trending creators:", error);
         // Remove failed IDs from fetched set
         missingIds.forEach((id) => fetchedTrendingCreatorIds.current.delete(id));
       } finally {
@@ -2420,7 +2591,6 @@ const Home = () => {
                         domStorageEnabled={false}
                         onError={(syntheticEvent) => {
                           const { nativeEvent } = syntheticEvent;
-                          console.log('Trending WebView error: ', nativeEvent);
                         }}
                       />
                     </View>
@@ -2434,7 +2604,6 @@ const Home = () => {
                     style={{ width: '100%', height: '100%' }}
                     resizeMode="contain"
                     onError={(error) => {
-                      console.log('Trending photo error:', error);
                     }}
                   />
                 );
@@ -2611,7 +2780,6 @@ const Home = () => {
               resizeMode: 'contain'
             }}
             onError={(error) => {
-              console.log('Background image failed to load:', error);
             }}
             resizeMethod="resize"
           />
@@ -3163,7 +3331,6 @@ const Home = () => {
                             domStorageEnabled={false}
                             onError={(syntheticEvent) => {
                               const { nativeEvent } = syntheticEvent;
-                              console.log('Trending modal WebView error: ', nativeEvent);
                             }}
                           />
                         </View>
@@ -3177,7 +3344,7 @@ const Home = () => {
                         style={{ flex: 1, width: '100%', height: '100%' }}
                         resizeMode="contain"
                         onError={(error) => {
-                          console.log('Trending modal photo error:', error);
+                          
                         }}
                       />
                     );
@@ -3204,7 +3371,7 @@ const Home = () => {
                       onError={(error) => {
                       }}
                       onLoad={() => {
-                        console.log('Trending modal video loaded');
+                        
                       }}
                     />
                     
