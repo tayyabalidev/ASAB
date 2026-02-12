@@ -2999,7 +2999,7 @@ const Home = () => {
                     snapToAlignment="center"
                     pagingEnabled={false}
                   >
-                    {combinedLatestPosts.slice(0, 50).map((item, index) => renderTrendingItem({ item, index }))}
+                    {combinedLatestPosts.slice(0, 100).map((item, index) => renderTrendingItem({ item, index }))}
                   </ScrollView>
                   
                   {/* Carousel Indicators */}
