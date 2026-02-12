@@ -13,7 +13,7 @@ import { icons } from "../../../constants";
 import useAppwrite from "../../../lib/useAppwrite";
 import { getUserPosts, getCurrentUser, databases, appwriteConfig } from "../../../lib/appwrite";
 import { useGlobalContext } from "../../../context/GlobalProvider";
-import { EmptyState, InfoBox, VideoCard } from "../../../components";
+import { EmptyState, InfoBox, VideoCard, VideoProgressBar } from "../../../components";
 import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout } from "../../../lib/appwrite";
 import { images } from "../../../constants";
 
@@ -49,6 +49,10 @@ const UserProfile = () => {
   const [modalIndex, setModalIndex] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
   const modalVideoRef = useRef(null);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [showProgressBar, setShowProgressBar] = useState(false);
+  const [isVideoReady, setIsVideoReady] = useState(false);
   
   // Earnings Dashboard States
   const [totalEarnings, setTotalEarnings] = useState(0);
@@ -503,6 +507,10 @@ const UserProfile = () => {
     setModalIndex(index);
     setModalVisible(true);
     setIsVideoPlaying(true);
+    setShowProgressBar(true);
+    setPlaybackPosition(0);
+    setPlaybackDuration(0);
+    setIsVideoReady(false);
   };
 
   const navigateToNextVideo = () => {
@@ -1199,32 +1207,36 @@ const UserProfile = () => {
                     style={{ flex: 1, width: '100%', height: '100%' }}
                     resizeMode={ResizeMode.CONTAIN}
                     shouldPlay={isVideoPlaying}
+                    isLooping={true}
                     isMuted={false}
                     useNativeControls={false}
                     posterSource={modalVideo.thumbnail ? { uri: modalVideo.thumbnail } : undefined}
+                    onLoad={(status) => {
+                      if (status.isLoaded) {
+                        setPlaybackDuration(status.durationMillis || 0);
+                        setIsVideoReady(true);
+                      }
+                    }}
                     onPlaybackStatusUpdate={status => {
-                      if (status.didJustFinish) setModalVisible(false);
+                      if (status.isLoaded) {
+                        setPlaybackPosition(status.positionMillis || 0);
+                        if (status.durationMillis) {
+                          setPlaybackDuration(status.durationMillis);
+                        }
+                      }
                     }}
                     onError={(error) => {
                     }}
                     onLoadStart={() => {
                     }}
-                    onLoad={() => {
-                    }}
                     onReadyForDisplay={() => {
                     }}
                   />
                   
-                  {/* Video Control Overlay */}
+                  {/* Video Control Overlay - Only shows progress bar, doesn't pause/play */}
                   <TouchableOpacity
                     onPress={() => {
-                      if (isVideoPlaying) {
-                        modalVideoRef.current?.pauseAsync();
-                        setIsVideoPlaying(false);
-                      } else {
-                        modalVideoRef.current?.playAsync();
-                        setIsVideoPlaying(true);
-                      }
+                      setShowProgressBar(true);
                     }}
                     style={{
                       position: 'absolute',
@@ -1238,6 +1250,16 @@ const UserProfile = () => {
                       opacity: 0
                     }}
                     activeOpacity={1}
+                  />
+                  {/* Progress Bar */}
+                  <VideoProgressBar
+                    videoRef={modalVideoRef}
+                    playbackPosition={playbackPosition}
+                    playbackDuration={playbackDuration}
+                    isVideoReady={isVideoReady}
+                    showProgressBar={showProgressBar}
+                    onShowProgressBar={setShowProgressBar}
+                    bottomOffset={20}
                   />
                   
                   {/* Play/Pause Button */}
@@ -1421,7 +1443,7 @@ const UserProfile = () => {
                    style={{ flex: 1, justifyContent: 'flex-end' }}
                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                  >
-                   <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '80%', paddingBottom: 0 }}>
+                   <View style={{ backgroundColor: '#22223bd3', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '80%', paddingBottom: 0 }}>
                      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
                        <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
                        <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.commentsTitle')}</Text>
