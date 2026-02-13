@@ -1920,7 +1920,7 @@ const Chat = () => {
                       style={{ width: 0, height: 0, marginHorizontal: 0, display: 'none' }} // Hide avatar for now
                     />
                     <View style={{
-                      backgroundColor: isMe ? '#7f5af0' : isOther ? '#fff' : '#e5e5ea',
+                      backgroundColor: isMe ? '#7f5af033' : isOther ? '#faf9f998' : '#e5e5ea',
                       borderRadius: 18,
                       borderBottomRightRadius: isMe ? 4 : 18,
                       borderBottomLeftRadius: isMe ? 18 : 4,
@@ -1945,7 +1945,7 @@ const Chat = () => {
                           </View>
                         );
                       })() : item.type === 'audio' ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isMe ? '#1e3a2f' : '#f5f5f5', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, maxWidth: 240, marginBottom: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isMe ? '#1e3a2f' : '#444141', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, maxWidth: 240, marginBottom: 6 }}>
                           <TouchableOpacity
                             onPress={() => playingAudioId === item.$id ? pauseAudio() : playAudio(item.fileUrl || item.content, item.$id)}
                             style={{ marginRight: 10 }}

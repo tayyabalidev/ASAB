@@ -14,7 +14,7 @@ import useAppwrite from "../../../lib/useAppwrite";
 import { getUserPosts, getCurrentUser, databases, appwriteConfig } from "../../../lib/appwrite";
 import { useGlobalContext } from "../../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, VideoProgressBar } from "../../../components";
-import { toggleFollowUser, getFollowers, getUserLikesCount, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLikeComment } from "../../../lib/appwrite";
+import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout } from "../../../lib/appwrite";
 import { images } from "../../../constants";
 
 const UserProfile = () => {
@@ -1436,7 +1436,7 @@ const UserProfile = () => {
                    style={{ flex: 1, justifyContent: 'flex-end' }}
                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                  >
-                   <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '80%', paddingBottom: 0 }}>
+                   <View style={{ backgroundColor: '#22223bd3', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '80%', paddingBottom: 0 }}>
                      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
                        <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
                        <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.commentsTitle')}</Text>

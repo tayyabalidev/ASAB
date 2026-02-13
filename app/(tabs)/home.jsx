@@ -1552,7 +1552,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                           >
                                             <Image
                                               source={isReplyLiked ? icons.heartCheck : icons.heartUncheck}
-                                              style={{ width: 18, height: 18, marginRight: 4 }}
+                                              style={{ width: 48, height: 48, marginRight: 4 }}
                                               resizeMode="contain"
                                             />
                                             <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11 }}>
@@ -3073,7 +3073,7 @@ const Home = () => {
                     snapToAlignment="center"
                     pagingEnabled={false}
                   >
-                    {combinedLatestPosts.slice(0, 5).map((item, index) => renderTrendingItem({ item, index }))}
+                    {combinedLatestPosts.slice(0, 100).map((item, index) => renderTrendingItem({ item, index }))}
                   </ScrollView>
                   
                   {/* Carousel Indicators */}
