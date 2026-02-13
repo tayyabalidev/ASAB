@@ -1460,6 +1460,35 @@ const Chat = () => {
               ))}
             </ScrollView>
           </View>
+          
+          {/* Create Group Button at Top (only if in Groups tab) */}
+          {selectedTab === 'groups' && (
+            <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+              <TouchableOpacity
+                onPress={() => setShowCreateGroup(true)}
+                style={{
+                  backgroundColor: '#7f5af0',
+                  borderRadius: 12,
+                  padding: 14,
+                  alignItems: 'center',
+                  width: '100%',
+                  shadowColor: '#7f5af0',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 4,
+                  elevation: 3,
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                  <MaterialCommunityIcons name="account-plus" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
+                    {t('chat.createGroupButton')}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
+          
           {/* Chat List */}
           <FlatList
             data={filteredChats}
@@ -1681,7 +1710,7 @@ const Chat = () => {
               </View>
             )}
           />
-          {/* Floating New Chat Button (only if not in Groups tab) */}
+          {/* Floating New Chat Button */}
           {selectedTab !== 'groups' && (
             <TouchableOpacity
               onPress={() => setShowUserSearch(true)}
@@ -1697,25 +1726,6 @@ const Chat = () => {
             >
               <MaterialCommunityIcons name="account-plus" size={28} color="#fff" />
             </TouchableOpacity>
-          )}
-          {/* Floating Create Group Button (only if in Groups tab) */}
-          {selectedTab === 'groups' && (
-            <View style={{ position: 'absolute', bottom: 32, left: 24, right: 24 }}>
-              <TouchableOpacity
-                onPress={() => setShowCreateGroup(true)}
-                style={{
-                  backgroundColor: '#7f5af0',
-                  borderRadius: 8,
-                  padding: 16,
-                  alignItems: 'center',
-                  width: '100%',
-                }}
-              >
-                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
-                  {t('chat.createGroupButton')}
-                </Text>
-              </TouchableOpacity>
-            </View>
           )}
         </SafeAreaView>
       ) : selectedUser && !selectedUser.$id ? (
@@ -1917,6 +1927,7 @@ const Chat = () => {
                       paddingVertical: 8,
                       paddingHorizontal: 14,
                       maxWidth: '75%',
+                      flexShrink: 1,
                       alignSelf: isMe ? 'flex-end' : 'flex-start',
                       shadowColor: '#000',
                       shadowOpacity: 0.06,
@@ -2067,7 +2078,7 @@ const Chat = () => {
                           </TouchableOpacity>
                         );
                       })() : (
-                        <Text style={{ color: isMe ? '#fff' : '#222', fontSize: 16 }}>{item.content}</Text>
+                        <Text style={{ color: isMe ? '#fff' : '#222', fontSize: 16, flexWrap: 'wrap', flexShrink: 1 }}>{item.content}</Text>
                       )}
                       <Text style={{
                         color: '#aaa',
@@ -2086,7 +2097,7 @@ const Chat = () => {
               contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', padding: 8 }}
             />
             {/* Input */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', padding: 8, backgroundColor: '#232533' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', padding: 8, backgroundColor: '#232533' }}>
               <TouchableOpacity 
                 onPress={() => setShowAttachmentOptions(!showAttachmentOptions)}
                 style={{
@@ -2166,15 +2177,16 @@ const Chat = () => {
                 </View>
               )}
               <TextInput
-                style={{ flex: 1, backgroundColor: '#181A20', color: '#fff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16, marginRight: 8, textAlign: isRTL ? 'right' : 'left' }}
+                style={{ flex: 1, backgroundColor: '#181A20', color: '#fff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16, marginRight: 8, textAlign: isRTL ? 'right' : 'left', minHeight: 40, maxHeight: 120, textAlignVertical: 'top' }}
                 placeholder={t('chat.messageInputPlaceholder')}
                 placeholderTextColor="#aaa"
                 value={messageText}
                 onChangeText={setMessageText}
+                multiline={true}
                 editable={!sending}
               />
               <TouchableOpacity onPress={handleSendText} disabled={sending || !messageText.trim()} style={{
-                width: 36, height: 36, borderRadius: 18, backgroundColor: '#7f5af0', justifyContent: 'center', alignItems: 'center', opacity: sending || !messageText.trim() ? 0.5 : 1
+                width: 36, height: 36, borderRadius: 18, backgroundColor: '#7f5af0', justifyContent: 'center', alignItems: 'center', opacity: sending || !messageText.trim() ? 0.5 : 1, marginBottom: 2
               }}>
                 <MaterialCommunityIcons name="send" size={22} color="#fff" />
               </TouchableOpacity>
@@ -2184,22 +2196,24 @@ const Chat = () => {
       )}
       {/* User Search Modal is always rendered */}
       <Modal visible={showUserSearch} animationType="slide" transparent={true}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }}>
-          <View style={{ backgroundColor: '#232533', borderRadius: 16, padding: 24, width: '100%', height: '100%' }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)' }}>
+          <View style={{ flex: 1, backgroundColor: '#232533', width: '100%', height: '100%' }}>
             {/* Cancel button in top right */}
             <TouchableOpacity onPress={() => setShowUserSearch(false)} style={{ position: 'absolute', top: 24, right: 24, zIndex: 10 }}>
               <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('cancel')}</Text>
             </TouchableOpacity>
-            <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, marginTop: 24, textAlign: 'center' }}>
-              {t('chat.startNewChat')}
-            </Text>
-            <TextInput
-              style={{ backgroundColor: '#181A20', color: '#fff', borderRadius: 8, padding: 8, marginBottom: 12, textAlign: isRTL ? 'right' : 'left' }}
-              placeholder={t('chat.searchUsersPlaceholder')}
-              placeholderTextColor="#aaa"
-              value={search}
-              onChangeText={setSearch}
-            />
+            <View style={{ padding: 24, paddingTop: 60 }}>
+              <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, textAlign: 'center' }}>
+                {t('chat.startNewChat')}
+              </Text>
+              <TextInput
+                style={{ backgroundColor: '#181A20', color: '#fff', borderRadius: 8, padding: 8, marginBottom: 12, textAlign: isRTL ? 'right' : 'left' }}
+                placeholder={t('chat.searchUsersPlaceholder')}
+                placeholderTextColor="#aaa"
+                value={search}
+                onChangeText={setSearch}
+              />
+            </View>
             <FlatList
               data={users.filter(u => u.$id !== currentUser?.$id && (u.username?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase())))}
               keyExtractor={item => item.$id}
@@ -2208,12 +2222,13 @@ const Chat = () => {
                   setSelectedUser(item);
                   fetchMessagesForChat(item);
                   setShowUserSearch(false);
-                }} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
+                }} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 24 }}>
                   <Image source={{ uri: item.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(item.username || item.email || 'User') }} style={{ width: 32, height: 32, borderRadius: 16, marginRight: 12 }} />
                 <Text style={{ color: '#fff', fontSize: 16, textAlign: isRTL ? 'right' : 'left' }}>{item.username || item.email}</Text>
                 </TouchableOpacity>
               )}
-              style={{ maxHeight: 300 }}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 100 }}
             />
             {/* Create Group Button at Bottom */}
             <View style={{ position: 'absolute', bottom: 32, left: 24, right: 24 }}>
@@ -2234,85 +2249,195 @@ const Chat = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </SafeAreaView>
       </Modal>
       {/* Create Group Modal */}
       <Modal visible={showCreateGroup} animationType="slide" transparent={true}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' }}>
-          <View style={{ backgroundColor: '#232533', borderRadius: 16, padding: 24, width: '100%', height: '100%' }}>
-            <TouchableOpacity onPress={() => setShowCreateGroup(false)} style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
-              <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('cancel')}</Text>
-            </TouchableOpacity>
-            <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, marginTop: 8, textAlign: 'center' }}>
-              {t('chat.createGroupTitle')}
-            </Text>
-            <TextInput
-              style={{ backgroundColor: '#181A20', color: '#fff', borderRadius: 8, padding: 8, marginBottom: 12, textAlign: isRTL ? 'right' : 'left' }}
-              placeholder={t('chat.groupNamePlaceholder')}
-              placeholderTextColor="#aaa"
-              value={groupName}
-              onChangeText={setGroupName}
-            />
-            <Text style={{ color: '#fff', marginBottom: 8, textAlign: isRTL ? 'right' : 'left' }}>
-              {t('chat.addMembersLabel')}
-            </Text>
-            <ScrollView style={{ maxHeight: 200, marginBottom: 12 }}>
-              {users.filter(u => u.$id !== currentUser?.$id).map(u => (
-                <TouchableOpacity key={u.$id} onPress={() => {
-                  setGroupMembers(prev => prev.includes(u.$id) ? prev.filter(id => id !== u.$id) : [...prev, u.$id]);
-                }} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                  <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: groupMembers.includes(u.$id) ? '#7f5af0' : '#aaa', backgroundColor: groupMembers.includes(u.$id) ? '#7f5af0' : 'transparent', marginRight: 10, justifyContent: 'center', alignItems: 'center' }}>
-                    {groupMembers.includes(u.$id) && <MaterialCommunityIcons name="check" size={18} color="#fff" />}
-                  </View>
-                  <Image source={{ uri: u.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.username || u.email || 'User') }} style={{ width: 28, height: 28, borderRadius: 14, marginRight: 10 }} />
-                  <Text style={{ color: '#fff', fontSize: 16 }}>{u.username || u.email}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            {/* Create Group Button at Bottom of Create Group Modal */}
-            <View style={{ position: 'absolute', bottom: 32, left: 24, right: 24 }}>
-              <TouchableOpacity
-                onPress={async () => {
-                  if (!groupName.trim() || groupMembers.length === 0) {
-                    Alert.alert(t('error'), t('chat.groupNameRequired'));
-                    return;
-                  }
-                  setCreatingGroup(true);
-                  try {
-                    const newGroup = await databases.createDocument(
-                      appwriteConfig.databaseId,
-                      appwriteConfig.chatsCollectionId,
-                           "unique()",
-
-                      {
-                        name: groupName.trim(),
-                        type: 'group',
-                        members: [currentUser.$id, ...groupMembers],
-                        creatorId: currentUser.$id,
-                      }
-                    );
-                    setGroups(prev => [...prev, newGroup]);
-                    setShowCreateGroup(false);
-                    setGroupName("");
-                    setGroupMembers([]);
-                    setSelectedUser(newGroup);
-                    fetchMessagesForChat(newGroup);
-                  } catch (e) {
-                    Alert.alert(t('error'), e.message || t('chat.generalError'));
-                  } finally {
-                    setCreatingGroup(false);
-                  }
-                }}
-                style={{ backgroundColor: '#7f5af0', borderRadius: 8, padding: 16, alignItems: 'center', width: '100%', opacity: creatingGroup ? 0.5 : 1 }}
-                disabled={creatingGroup}
-              >
-                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
-                  {creatingGroup ? t('chat.creating') : t('chat.createGroupButton')}
+        <KeyboardAvoidingView 
+          style={{ flex: 1 }} 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+            <View style={{ 
+              backgroundColor: '#232533', 
+              borderTopLeftRadius: 20, 
+              borderTopRightRadius: 20, 
+              width: '100%', 
+              maxHeight: '90%',
+              flex: 1,
+            }}>
+              {/* Header */}
+              <View style={{ 
+                flexDirection: 'row', 
+                alignItems: 'center', 
+                justifyContent: 'space-between',
+                paddingHorizontal: 24,
+                paddingTop: 20,
+                paddingBottom: 16,
+                borderBottomWidth: 1,
+                borderBottomColor: 'rgba(255,255,255,0.1)'
+              }}>
+                <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>
+                  {t('chat.createGroupTitle')}
                 </Text>
-              </TouchableOpacity>
+                <TouchableOpacity 
+                  onPress={() => setShowCreateGroup(false)} 
+                  style={{ 
+                    width: 32, 
+                    height: 32, 
+                    borderRadius: 16, 
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }}
+                >
+                  <MaterialCommunityIcons name="close" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Content Area */}
+              <View style={{ flex: 1, paddingHorizontal: 24 }}>
+                {/* Group Name Input */}
+                <View style={{ marginTop: 16, marginBottom: 20 }}>
+                  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 8, fontWeight: '600' }}>
+                    {t('chat.groupNamePlaceholder')}
+                  </Text>
+                  <TextInput
+                    style={{ 
+                      backgroundColor: '#181A20', 
+                      color: '#fff', 
+                      borderRadius: 12, 
+                      padding: 14, 
+                      fontSize: 16,
+                      textAlign: isRTL ? 'right' : 'left',
+                      borderWidth: 1,
+                      borderColor: '#2a2d3a'
+                    }}
+                    placeholder={t('chat.groupNamePlaceholder')}
+                    placeholderTextColor="#666"
+                    value={groupName}
+                    onChangeText={setGroupName}
+                  />
+                </View>
+
+                {/* Members Label */}
+                <Text style={{ color: '#fff', fontSize: 14, marginBottom: 12, fontWeight: '600' }}>
+                  {t('chat.addMembersLabel')} ({groupMembers.length})
+                </Text>
+
+                {/* User List */}
+                <View style={{ flex: 1 }}>
+                  <FlatList
+                    data={users.filter(u => u.$id !== currentUser?.$id)}
+                    keyExtractor={item => item.$id}
+                    renderItem={({ item: u }) => (
+                      <TouchableOpacity 
+                        onPress={() => {
+                          setGroupMembers(prev => prev.includes(u.$id) 
+                            ? prev.filter(id => id !== u.$id) 
+                            : [...prev, u.$id]
+                          );
+                        }} 
+                        style={{ 
+                          flexDirection: 'row', 
+                          alignItems: 'center', 
+                          paddingVertical: 12,
+                          paddingHorizontal: 4,
+                          borderRadius: 8,
+                          marginBottom: 4,
+                          backgroundColor: groupMembers.includes(u.$id) ? 'rgba(127, 90, 240, 0.1)' : 'transparent'
+                        }}
+                      >
+                        <View style={{ 
+                          width: 24, 
+                          height: 24, 
+                          borderRadius: 12, 
+                          borderWidth: 2, 
+                          borderColor: groupMembers.includes(u.$id) ? '#7f5af0' : '#555', 
+                          backgroundColor: groupMembers.includes(u.$id) ? '#7f5af0' : 'transparent', 
+                          marginRight: 12, 
+                          justifyContent: 'center', 
+                          alignItems: 'center' 
+                        }}>
+                          {groupMembers.includes(u.$id) && (
+                            <MaterialCommunityIcons name="check" size={16} color="#fff" />
+                          )}
+                        </View>
+                        <Image 
+                          source={{ uri: u.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.username || u.email || 'User') }} 
+                          style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} 
+                        />
+                        <Text style={{ color: '#fff', fontSize: 16, flex: 1 }}>{u.username || u.email}</Text>
+                      </TouchableOpacity>
+                    )}
+                    showsVerticalScrollIndicator={true}
+                    contentContainerStyle={{ paddingBottom: 20 }}
+                  />
+                </View>
+              </View>
+
+              {/* Create Button at Bottom */}
+              <View style={{ 
+                paddingHorizontal: 24, 
+                paddingBottom: 24, 
+                paddingTop: 16,
+                borderTopWidth: 1,
+                borderTopColor: 'rgba(255,255,255,0.1)',
+                backgroundColor: '#232533'
+              }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (!groupName.trim() || groupMembers.length === 0) {
+                      Alert.alert(t('error'), t('chat.groupNameRequired'));
+                      return;
+                    }
+                    setCreatingGroup(true);
+                    try {
+                      const newGroup = await databases.createDocument(
+                        appwriteConfig.databaseId,
+                        appwriteConfig.chatsCollectionId,
+                        "unique()",
+                        {
+                          name: groupName.trim(),
+                          type: 'group',
+                          members: [currentUser.$id, ...groupMembers],
+                        }
+                      );
+                      setGroups(prev => [...prev, newGroup]);
+                      setShowCreateGroup(false);
+                      setGroupName("");
+                      setGroupMembers([]);
+                      setSelectedUser(newGroup);
+                      fetchMessagesForChat(newGroup);
+                    } catch (e) {
+                      Alert.alert(t('error'), e.message || t('chat.generalError'));
+                    } finally {
+                      setCreatingGroup(false);
+                    }
+                  }}
+                  style={{ 
+                    backgroundColor: '#7f5af0', 
+                    borderRadius: 12, 
+                    padding: 16, 
+                    alignItems: 'center', 
+                    width: '100%', 
+                    opacity: creatingGroup ? 0.5 : 1,
+                    shadowColor: '#7f5af0',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 8,
+                    elevation: 5,
+                  }}
+                  disabled={creatingGroup || !groupName.trim() || groupMembers.length === 0}
+                >
+                  <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
+                    {creatingGroup ? t('chat.creating') : t('chat.createGroupButton')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
       {/* Image Modal */}
       <RNModal

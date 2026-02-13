@@ -22,23 +22,26 @@ import {
   getVideoById,
   getComments,
   addComment,
-  toggleLikePost,
   toggleLikeComment,
   getCommentLikes,
 } from "../../lib/appwrite";
 import { databases, appwriteConfig } from "../../lib/appwrite";
 import { images, icons } from "../../constants";
+import VideoProgressBar from "../../components/VideoProgressBar";
 
 const PostDetails = () => {
   const { id } = useLocalSearchParams();
   const { theme, isDarkMode, user } = useGlobalContext();
   const videoRef = useRef(null);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [showProgressBar, setShowProgressBar] = useState(false);
+  const [isVideoReady, setIsVideoReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(true);
 
   const [loading, setLoading] = useState(true);
   const [post, setPost] = useState(null);
   const [error, setError] = useState(null);
-  const [liked, setLiked] = useState(false);
-  const [likesCount, setLikesCount] = useState(0);
   const [comments, setComments] = useState([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [newComment, setNewComment] = useState("");
@@ -61,8 +64,6 @@ const PostDetails = () => {
     try {
       const video = await getVideoById(id);
       setPost(video);
-      setLiked(video?.likes?.includes(user?.$id));
-      setLikesCount(video?.likes?.length || 0);
     } catch (err) {
       setError(err.message || "Failed to load post");
     } finally {
@@ -121,21 +122,6 @@ const PostDetails = () => {
     );
   }, [post]);
 
-  const handleLike = async () => {
-    if (!user?.$id || !post?.$id) return;
-    const newLikedState = !liked;
-    setLiked(newLikedState);
-    setLikesCount((prev) => (newLikedState ? prev + 1 : Math.max(prev - 1, 0)));
-    try {
-      await toggleLikePost(post.$id, user.$id);
-    } catch (error) {
-      setLiked(!newLikedState);
-      setLikesCount((prev) =>
-        newLikedState ? Math.max(prev - 1, 0) : prev + 1
-      );
-      Alert.alert("Error", error.message || "Failed to like the post.");
-    }
-  };
 
   const handleAddComment = async () => {
     if (!newComment.trim() || !user?.$id || !post?.$id) return;
@@ -350,16 +336,79 @@ const PostDetails = () => {
             style={{ flex: 1 }}
             contentContainerStyle={{ paddingBottom: 120 }}
           >
-            <View style={{ width: "100%", height: 400, backgroundColor: "#000" }}>
+            <View style={{ width: "100%", height: 400, backgroundColor: "#000", position: 'relative' }}>
               {post.video ? (
-                <Video
-                  ref={videoRef}
-                  source={{ uri: post.video }}
-                  style={{ width: "100%", height: "100%" }}
-                  resizeMode={ResizeMode.COVER}
-                  useNativeControls
-                  shouldPlay
-                />
+                <>
+                  <Video
+                    ref={videoRef}
+                    source={{ uri: post.video }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode={ResizeMode.COVER}
+                    useNativeControls={false}
+                    shouldPlay={isPlaying}
+                    isLooping={true}
+                    onLoad={(status) => {
+                      if (status.isLoaded) {
+                        setPlaybackDuration(status.durationMillis || 0);
+                        setIsVideoReady(true);
+                        setShowProgressBar(true);
+                      }
+                    }}
+                    onPlaybackStatusUpdate={(status) => {
+                      if (status.isLoaded) {
+                        setPlaybackPosition(status.positionMillis || 0);
+                        if (status.durationMillis) {
+                          setPlaybackDuration(status.durationMillis);
+                        }
+                      }
+                    }}
+                  />
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => setShowProgressBar(true)}
+                    style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+                  />
+                  <VideoProgressBar
+                    videoRef={videoRef}
+                    playbackPosition={playbackPosition}
+                    playbackDuration={playbackDuration}
+                    isVideoReady={isVideoReady}
+                    showProgressBar={showProgressBar}
+                    onShowProgressBar={setShowProgressBar}
+                    bottomOffset={10}
+                  />
+                  {/* Play/Pause Button */}
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (isPlaying) {
+                        await videoRef.current?.pauseAsync();
+                        setIsPlaying(false);
+                      } else {
+                        await videoRef.current?.playAsync();
+                        setIsPlaying(true);
+                      }
+                      setShowProgressBar(true);
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: [{ translateX: -25 }, { translateY: -25 }],
+                      width: 50,
+                      height: 50,
+                      borderRadius: 25,
+                      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      zIndex: 20
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 24 }}>
+                      {isPlaying ? '❚❚' : '▶'}
+                    </Text>
+                  </TouchableOpacity>
+                </>
               ) : (
                 <View
                   style={{
@@ -418,6 +467,7 @@ const PostDetails = () => {
                   color: theme.textPrimary,
                   fontSize: 15,
                   lineHeight: 22,
+                  flexWrap: 'wrap',
                 }}
               >
                 {post.description || "No description provided."}
@@ -430,21 +480,6 @@ const PostDetails = () => {
                   marginTop: 16,
                 }}
               >
-                <TouchableOpacity
-                  onPress={handleLike}
-                  style={{ flexDirection: "row", alignItems: "center", marginRight: 24 }}
-                >
-                  <Image
-                    source={liked ? icons.heartCheck : icons.heartUncheck}
-                    style={{ width: 32, height: 32, marginRight: 6 }}
-                    resizeMode="contain"
-                  />
-                  <Text
-                    style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}
-                  >
-                    {likesCount}
-                  </Text>
-                </TouchableOpacity>
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <Image
                     source={icons.messages}
@@ -499,7 +534,7 @@ const PostDetails = () => {
                           source={{ uri: comment.avatar || images.profile }}
                           style={{ width: 34, height: 34, borderRadius: 17, marginRight: 10 }}
                         />
-                        <View style={{ flex: 1 }}>
+                        <View style={{ flex: 1, flexShrink: 1 }}>
                           <Text
                             style={{
                               color: theme.textPrimary,
@@ -514,6 +549,7 @@ const PostDetails = () => {
                               color: theme.textSecondary,
                               fontSize: 14,
                               marginVertical: 2,
+                              flexWrap: 'wrap',
                             }}
                           >
                             {comment.content}
@@ -559,50 +595,55 @@ const PostDetails = () => {
                           
                           {/* Reply input */}
                           {replyingTo === comment.$id && (
-                            <View style={{ marginTop: 12, flexDirection: "row", alignItems: "center" }}>
+                            <View style={{ marginTop: 12, flexDirection: "row", alignItems: "flex-start" }}>
                               <Image
                                 source={{ uri: user?.avatar || images.profile }}
-                                style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }}
+                                style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8, marginTop: 4 }}
                               />
                               <TextInput
                                 value={replyText}
                                 onChangeText={setReplyText}
                                 placeholder="Write a reply..."
                                 placeholderTextColor={theme.textMuted}
+                                multiline={true}
                                 style={{
                                   flex: 1,
                                   backgroundColor: themedColor("#2a2a40", theme.cardSoft),
                                   color: theme.textPrimary,
                                   borderRadius: 16,
                                   paddingHorizontal: 12,
-                                  paddingVertical: 6,
+                                  paddingVertical: 8,
                                   fontSize: 13,
+                                  minHeight: 40,
+                                  maxHeight: 120,
+                                  textAlignVertical: 'top',
                                 }}
                               />
-                              <TouchableOpacity
-                                onPress={() => handleAddReply(comment.$id)}
-                                disabled={postingReply || !replyText.trim()}
-                                style={{
-                                  marginLeft: 8,
-                                  paddingHorizontal: 12,
-                                  paddingVertical: 6,
-                                  backgroundColor: postingReply ? theme.textMuted : theme.accent,
-                                  borderRadius: 16,
-                                }}
-                              >
-                                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>
-                                  {postingReply ? "..." : "Send"}
-                                </Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                onPress={() => {
-                                  setReplyingTo(null);
-                                  setReplyText("");
-                                }}
-                                style={{ marginLeft: 8 }}
-                              >
-                                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Cancel</Text>
-                              </TouchableOpacity>
+                              <View style={{ flexDirection: 'column', justifyContent: 'flex-end', marginLeft: 8 }}>
+                                <TouchableOpacity
+                                  onPress={() => handleAddReply(comment.$id)}
+                                  disabled={postingReply || !replyText.trim()}
+                                  style={{
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    backgroundColor: postingReply ? theme.textMuted : theme.accent,
+                                    borderRadius: 16,
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "600" }}>
+                                    {postingReply ? "..." : "Send"}
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setReplyingTo(null);
+                                    setReplyText("");
+                                  }}
+                                >
+                                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>Cancel</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
                           )}
                           
@@ -621,7 +662,7 @@ const PostDetails = () => {
                                         source={{ uri: reply.avatar || images.profile }}
                                         style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }}
                                       />
-                                      <View style={{ flex: 1 }}>
+                                      <View style={{ flex: 1, flexShrink: 1 }}>
                                         <Text
                                           style={{
                                             color: theme.textPrimary,
@@ -636,6 +677,7 @@ const PostDetails = () => {
                                             color: theme.textSecondary,
                                             fontSize: 13,
                                             marginVertical: 2,
+                                            flexWrap: 'wrap',
                                           }}
                                         >
                                           {reply.content}
@@ -698,16 +740,17 @@ const PostDetails = () => {
               paddingVertical: 12,
             }}
           >
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
               <Image
                 source={{ uri: user?.avatar || images.profile }}
-                style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }}
+                style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10, marginTop: 4 }}
               />
               <TextInput
                 value={newComment}
                 onChangeText={setNewComment}
                 placeholder="Add a comment..."
                 placeholderTextColor={theme.textMuted}
+                multiline={true}
                 style={{
                   flex: 1,
                   backgroundColor: themedColor("#2a2a40", theme.cardSoft),
@@ -715,6 +758,9 @@ const PostDetails = () => {
                   borderRadius: 20,
                   paddingHorizontal: 16,
                   paddingVertical: Platform.OS === "ios" ? 12 : 8,
+                  minHeight: 40,
+                  maxHeight: 120,
+                  textAlignVertical: 'top',
                 }}
               />
               <TouchableOpacity
@@ -728,6 +774,7 @@ const PostDetails = () => {
                     ? theme.textMuted
                     : theme.accent,
                   borderRadius: 20,
+                  alignSelf: 'flex-end',
                 }}
               >
                 <Text style={{ color: "#fff", fontWeight: "600" }}>

@@ -8,8 +8,15 @@ import * as Linking from 'expo-linking'; // ✅ fix: use from expo-linking
 import { StripeProvider } from '@stripe/stripe-react-native';
 import Constants from 'expo-constants';
 import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser, getOrCreateGoogleUser } from '../lib/appwrite';
+import { useBadgeNotifications } from '../hooks/useBadgeNotifications';
 
 SplashScreen.preventAutoHideAsync();
+
+// ✅ Badge Notification Handler Component
+function BadgeNotificationHandler() {
+  useBadgeNotifications();
+  return null;
+}
 
 // ✅ OAuth Handler Component
 function OAuthHandler() {
@@ -286,6 +293,7 @@ export default function RootLayout() {
     <StripeProvider publishableKey={stripePublishableKey || 'pk_test_placeholder_key_that_will_fail_but_allow_app_to_load'}>
       <GlobalProvider>
         <OAuthHandler />
+        <BadgeNotificationHandler />
         <Stack>
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />

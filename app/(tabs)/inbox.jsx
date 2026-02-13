@@ -337,58 +337,94 @@ const Inbox = () => {
           </Text>
         </View>
 
-        {/* Action Button */}
-        {isFollow && (() => {
-          const isFollowingUser = followingStates[item.fromUserId] || false;
-          return (
-            <TouchableOpacity
-              onPress={async () => {
-                if (!currentUser?.$id || !item.fromUserId || currentUser.$id === item.fromUserId) return;
-                
-                // Immediate visual feedback
-                const newFollowState = !isFollowingUser;
-                setFollowingStates(prev => ({ ...prev, [item.fromUserId]: newFollowState }));
-                updateFollowStatus(item.fromUserId, newFollowState);
-                
-                try {
-                  await toggleFollowUser(currentUser.$id, item.fromUserId);
-                  // Refresh notifications to update UI
-                  fetchNotifications();
-                } catch (error) {
-                  // Revert on error
-                  setFollowingStates(prev => ({ ...prev, [item.fromUserId]: !newFollowState }));
-                  updateFollowStatus(item.fromUserId, !newFollowState);
-                  Alert.alert(t('common.error'), error.message || t('profile.alerts.followError'));
-                }
-              }}
-              style={{
-                backgroundColor: isFollowingUser ? theme.cardSoft : theme.accent,
-                paddingHorizontal: 16,
-                paddingVertical: 8,
-                borderRadius: 16
-              }}
-            >
-              <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
-                {isFollowingUser ? 'Following' : 'Follow Back'}
+        {/* Action Buttons */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {isFollow && (() => {
+            const isFollowingUser = followingStates[item.fromUserId] || false;
+            return (
+              <TouchableOpacity
+                onPress={async () => {
+                  if (!currentUser?.$id || !item.fromUserId || currentUser.$id === item.fromUserId) return;
+                  
+                  // Immediate visual feedback
+                  const newFollowState = !isFollowingUser;
+                  setFollowingStates(prev => ({ ...prev, [item.fromUserId]: newFollowState }));
+                  updateFollowStatus(item.fromUserId, newFollowState);
+                  
+                  try {
+                    await toggleFollowUser(currentUser.$id, item.fromUserId);
+                    // Refresh notifications to update UI
+                    fetchNotifications();
+                  } catch (error) {
+                    // Revert on error
+                    setFollowingStates(prev => ({ ...prev, [item.fromUserId]: !newFollowState }));
+                    updateFollowStatus(item.fromUserId, !newFollowState);
+                    Alert.alert(t('common.error'), error.message || t('profile.alerts.followError'));
+                  }
+                }}
+                style={{
+                  backgroundColor: isFollowingUser ? theme.cardSoft : theme.accent,
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                  borderRadius: 16
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
+                  {isFollowingUser ? 'Following' : 'Follow Back'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })()}
+          {isLive && (
+            <View style={{
+              backgroundColor: '#ff4757',
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 12,
+              flexDirection: 'row',
+              alignItems: 'center'
+            }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', marginRight: 6 }} />
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                LIVE
               </Text>
-            </TouchableOpacity>
-          );
-        })()}
-        {isLive && (
-          <View style={{
-            backgroundColor: '#ff4757',
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-            borderRadius: 12,
-            flexDirection: 'row',
-            alignItems: 'center'
-          }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', marginRight: 6 }} />
-            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
-              LIVE
-            </Text>
-          </View>
-        )}
+            </View>
+          )}
+          {/* Delete Button */}
+          <TouchableOpacity
+            onPress={async () => {
+              Alert.alert(
+                t('Delete Notification'),
+                t('Confirm Delete'),
+                [
+                  { text: t('cancel'), style: 'cancel' },
+                  {
+                    text: t('delete'),
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await databases.deleteDocument(
+                          appwriteConfig.databaseId,
+                          appwriteConfig.notificationsCollectionId,
+                          item.$id
+                        );
+                        setNotifications(prev => prev.filter(n => n.$id !== item.$id));
+                      } catch (error) {
+                        Alert.alert(t('common.error'), error.message || t('common.deleteError'));
+                      }
+                    }
+                  }
+                ]
+              );
+            }}
+            style={{
+              padding: 8,
+              borderRadius: 8
+            }}
+          >
+            <Text style={{ color: theme.textMuted, fontSize: 18 }}>×</Text>
+          </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -422,11 +458,11 @@ const Inbox = () => {
           resizeMode="cover"
         />
         {/* Message Content */}
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, flexShrink: 1 }}>
           <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: '600' }}>
             {item.otherUsername}
           </Text>
-          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+          <Text style={{ color: theme.textSecondary, fontSize: 14, flexWrap: 'wrap' }}>
             {latestMsg ? latestMsg.content : ''}
           </Text>
           <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>

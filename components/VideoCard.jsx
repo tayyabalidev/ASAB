@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { ResizeMode, Video } from "expo-av";
 import { View, Text, TouchableOpacity, Image, Alert, Share } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -7,11 +7,16 @@ import { router } from "expo-router";
 import { icons } from "../constants";
 import { addBookmark, isVideoBookmarked, incrementShareCount } from "../lib/appwrite";
 import { useGlobalContext } from "../context/GlobalProvider";
+import VideoProgressBar from "./VideoProgressBar";
 
 const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, creatorId }) => {
   const [play, setPlay] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [playCount, setPlayCount] = useState(0);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [showProgressBar, setShowProgressBar] = useState(false);
+  const [isVideoReady, setIsVideoReady] = useState(false);
   const videoRef = useRef(null);
   const { user } = useGlobalContext();
 
@@ -115,6 +120,16 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
     }
   };
 
+  const handleVideoPress = () => {
+    // Only show progress bar when video is tapped, don't pause/play
+    setShowProgressBar(true);
+  };
+
+  const handlePausePlay = () => {
+    setPlay((prev) => !prev);
+    setShowProgressBar(true);
+  };
+
   return (
     <View className="flex flex-col items-center px-4 mb-14">
       <View className="flex flex-row gap-3 items-start">
@@ -159,33 +174,31 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
       </View>
 
       {play ? (
-        <View className="w-full h-60 rounded-xl mt-3 relative">
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={handleVideoPress}
+          className="w-full h-60 rounded-xl mt-3 relative"
+        >
           <Video
             ref={videoRef}
             source={{ uri: video }}
             className="w-full h-full rounded-xl"
             resizeMode={ResizeMode.CONTAIN}
-            useNativeControls
-            shouldPlay
+            useNativeControls={false}
+            shouldPlay={play}
+            isLooping={true}
             isMuted={isMuted}
-            onPlaybackStatusUpdate={async (status) => {
-              if (status.didJustFinish) {
-                const newPlayCount = playCount + 1;
-                if (newPlayCount < 3) {
-                  // Loop the video by replaying it
-                  setPlayCount(newPlayCount);
-                  try {
-                    await videoRef.current?.setPositionAsync(0);
-                    await videoRef.current?.playAsync();
-                  } catch (error) {
-                    // If replay fails, just stop
-                    setPlay(false);
-                    setPlayCount(0);
-                  }
-                } else {
-                  // After 3 plays, stop the video
-                  setPlay(false);
-                  setPlayCount(0);
+            onLoad={(status) => {
+              if (status.isLoaded) {
+                setPlaybackDuration(status.durationMillis || 0);
+                setIsVideoReady(true);
+              }
+            }}
+            onPlaybackStatusUpdate={(status) => {
+              if (status.isLoaded) {
+                setPlaybackPosition(status.positionMillis || 0);
+                if (status.durationMillis) {
+                  setPlaybackDuration(status.durationMillis);
                 }
               }
             }}
@@ -202,7 +215,39 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
               color="#fff"
             />
           </TouchableOpacity>
-        </View>
+          {/* Progress Bar */}
+          <VideoProgressBar
+            videoRef={videoRef}
+            playbackPosition={playbackPosition}
+            playbackDuration={playbackDuration}
+            isVideoReady={isVideoReady}
+            showProgressBar={showProgressBar}
+            onShowProgressBar={setShowProgressBar}
+            bottomOffset={10}
+          />
+          {/* Play/Pause Button */}
+          <TouchableOpacity
+            onPress={handlePausePlay}
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: [{ translateX: -25 }, { translateY: -25 }],
+              width: 50,
+              height: 50,
+              borderRadius: 25,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 20
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: '#fff', fontSize: 24 }}>
+              {play ? '❚❚' : '▶'}
+            </Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
       ) : (
         <TouchableOpacity
           activeOpacity={0.7}
@@ -210,6 +255,7 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
             setPlay(true);
             setPlayCount(0);
             setIsMuted(false);
+            setShowProgressBar(true);
           }}
           className="w-full h-60 rounded-xl mt-3 relative flex justify-center items-center"
         >

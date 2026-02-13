@@ -24,6 +24,9 @@
         "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication",
         "UIStatusBarStyle": "UIStatusBarStyleLightContent",
         "UIViewControllerBasedStatusBarAppearance": false,
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -54,7 +57,15 @@
       "expo-font",
       "expo-video",
       "expo-web-browser",
-      "expo-camera"
+      "expo-camera",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#ffffff",
+          "sounds": []
+        }
+      ]
     ]
   }
 }

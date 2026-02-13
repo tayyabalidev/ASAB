@@ -12,9 +12,9 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
-import { EmptyState, InfoBox, VideoCard, ThemeToggle } from "../../components";
+import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar } from "../../components";
 import { images } from "../../constants";
 import { useTranslation } from "react-i18next";
 import { isAdminUser } from "../../lib/admin";
@@ -352,10 +352,12 @@ const Profile = () => {
   const [modalIndex, setModalIndex] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
   const modalVideoRef = useRef(null);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [showProgressBar, setShowProgressBar] = useState(false);
+  const [isVideoReady, setIsVideoReady] = useState(false);
   
   // Modal interaction states
-  const [liked, setLiked] = useState(false);
-  const [likesCount, setLikesCount] = useState(0);
   const [bookmarked, setBookmarked] = useState(false);
   const [commentsCount, setCommentsCount] = useState(0);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -363,10 +365,7 @@ const Profile = () => {
   const [loadingComments, setLoadingComments] = useState(false);
   const [newComment, setNewComment] = useState("");
   const [posting, setPosting] = useState(false);
-  const [likesModalVisible, setLikesModalVisible] = useState(false);
-  const [likesList, setLikesList] = useState([]);
-  const [loadingLikes, setLoadingLikes] = useState(false);
-    const [shareCount, setShareCount] = useState(0);
+  const [shareCount, setShareCount] = useState(0);
   
  
   // Following/Followers modal state
@@ -959,6 +958,10 @@ const Profile = () => {
     setModalIndex(index);
     setModalVisible(true);
     setIsVideoPlaying(true);
+    setShowProgressBar(true);
+    setPlaybackPosition(0);
+    setPlaybackDuration(0);
+    setIsVideoReady(false);
   };
 
   const navigateToNextVideo = () => {
@@ -967,13 +970,11 @@ const Profile = () => {
       setModalVideo(nextVideo);
       setModalIndex(modalIndex + 1);
       setIsVideoPlaying(true);
-      // Reset modal states for new video
-      setLiked(nextVideo.likes?.includes(user?.$id));
-      setLikesCount(nextVideo.likes ? nextVideo.likes.length : 0);
-      setCommentsCount(nextVideo.comments ? nextVideo.comments.length : 0);
-      setBookmarked(false);
+      // Reset modal states for new video - will be synced by useEffect
       setComments([]);
       setNewComment("");
+      // Reset like action flag when navigating
+      recentLikeActionRef.current = false;
     }
   };
 
@@ -983,13 +984,11 @@ const Profile = () => {
       setModalVideo(prevVideo);
       setModalIndex(modalIndex - 1);
       setIsVideoPlaying(true);
-      // Reset modal states for new video
-      setLiked(prevVideo.likes?.includes(user?.$id));
-      setLikesCount(prevVideo.likes ? prevVideo.likes.length : 0);
-      setCommentsCount(prevVideo.comments ? prevVideo.comments.length : 0);
-      setBookmarked(false);
+      // Reset modal states for new video - will be synced by useEffect
       setComments([]);
       setNewComment("");
+      // Reset like action flag when navigating
+      recentLikeActionRef.current = false;
     }
   };
 
@@ -1005,14 +1004,6 @@ const Profile = () => {
     }
   };
 
-  const handleLike = async () => {
-    if (!user?.$id || !modalVideo) return;
-    setLiked((prev) => !prev);
-    setLikesCount((prev) => (liked ? prev - 1 : prev + 1));
-    try {
-      await toggleLikePost(modalVideo.$id, user.$id);
-    } catch {}
-  };
 
   const handleBookmark = async () => {
     if (!user?.$id || !modalVideo) {
@@ -1079,16 +1070,6 @@ const Profile = () => {
     setPosting(false);
   };
 
-  const handleOpenLikesModal = () => {
-    setLikesModalVisible(true);
-  };
-
-  const handleUserPress = (userId) => {
-    setLikesModalVisible(false);
-    if (userId && userId !== user?.$id) {
-      router.push(`/profile/${userId}`);
-    }
-  };
 
   // Real-time follow toggle function
   const handleFollowToggle = async (targetUserId) => {
@@ -1128,15 +1109,12 @@ const Profile = () => {
     return count.toString();
   };
 
-  // When modalVideo changes, set up like/comment state
+  // When modalVideo changes, set up comment state
   useEffect(() => {
     if (modalVideo) {
-      setLiked(modalVideo.likes?.includes(user?.$id));
-      setLikesCount(modalVideo.likes ? modalVideo.likes.length : 0);
-      setBookmarked(false); // TODO: implement bookmark logic
       setCommentsCount(modalVideo.comments ? modalVideo.comments.length : 0);
     }
-  }, [modalVideo, user]);
+  }, [modalVideo]);
 
   // Comments logic for modal
   useEffect(() => {
@@ -1149,28 +1127,6 @@ const Profile = () => {
     }
   }, [commentsModalVisible, modalVideo]);
 
-  // Likes list logic for modal
-  useEffect(() => {
-    if (likesModalVisible && modalVideo) {
-      setLoadingLikes(true);
-      getPostLikes(modalVideo.$id)
-        .then(async (userIds) => {
-          const users = await Promise.all(
-            userIds.map(async (uid) => {
-              try {
-                const u = await databases.getDocument(appwriteConfig.databaseId, appwriteConfig.userCollectionId, uid);
-                return { $id: u.$id, username: u.username, avatar: u.avatar };
-              } catch {
-                return { $id: uid, username: t('profile.general.unknownUser'), avatar: images.profile };
-              }
-            })
-          );
-          setLikesList(users);
-        })
-        .catch(() => setLikesList([]))
-        .finally(() => setLoadingLikes(false));
-    }
-  }, [likesModalVisible, modalVideo]);
 
   // Check bookmark status and share count when modal video changes
   useEffect(() => {
@@ -2615,12 +2571,23 @@ const Profile = () => {
                       style={{ flex: 1, width: '100%', height: '100%' }}
                       resizeMode={ResizeMode.CONTAIN}
                       shouldPlay={isVideoPlaying}
+                      isLooping={true}
                       isMuted={false}
                       useNativeControls={false}
                       posterSource={modalVideo.thumbnail && !modalVideo.thumbnail.includes('placeholder') ? { uri: modalVideo.thumbnail } : undefined}
+                      onLoad={(status) => {
+                        if (status.isLoaded) {
+                          setPlaybackDuration(status.durationMillis || 0);
+                          setIsVideoReady(true);
+                        }
+                      }}
                       onPlaybackStatusUpdate={status => {
-                        
-                        if (status.didJustFinish) setModalVisible(false);
+                        if (status.isLoaded) {
+                          setPlaybackPosition(status.positionMillis || 0);
+                          if (status.durationMillis) {
+                            setPlaybackDuration(status.durationMillis);
+                          }
+                        }
                       }}
                       onError={(error) => {
                        
@@ -2628,24 +2595,15 @@ const Profile = () => {
                       onLoadStart={() => {
                        
                       }}
-                      onLoad={() => {
-                        
-                      }}
                       onReadyForDisplay={() => {
-                        
+                       
                       }}
                     />
                     
-                    {/* Video Control Overlay */}
+                    {/* Video Control Overlay - Only shows progress bar, doesn't pause/play */}
                     <TouchableOpacity
                       onPress={() => {
-                        if (isVideoPlaying) {
-                          modalVideoRef.current?.pauseAsync();
-                          setIsVideoPlaying(false);
-                        } else {
-                          modalVideoRef.current?.playAsync();
-                          setIsVideoPlaying(true);
-                        }
+                        setShowProgressBar(true);
                       }}
                       style={{
                         position: 'absolute',
@@ -2659,6 +2617,16 @@ const Profile = () => {
                         opacity: 0
                       }}
                       activeOpacity={1}
+                    />
+                    {/* Progress Bar */}
+                    <VideoProgressBar
+                      videoRef={modalVideoRef}
+                      playbackPosition={playbackPosition}
+                      playbackDuration={playbackDuration}
+                      isVideoReady={isVideoReady}
+                      showProgressBar={showProgressBar}
+                      onShowProgressBar={setShowProgressBar}
+                      bottomOffset={20}
                     />
                     
                     {/* Play/Pause Button */}
@@ -2742,30 +2710,6 @@ const Profile = () => {
                       </View>
                     </TouchableOpacity>
 
-                    {/* Like Button */}
-                    <TouchableOpacity onPress={handleLike} style={{ marginBottom: 20, alignItems: 'center' }}>
-                      <View style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 20,
-                        backgroundColor: liked
-                          ? themedColor('rgba(255, 71, 87, 0.2)', 'rgba(248,113,113,0.18)')
-                          : themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        marginBottom: 5
-                      }}>
-                        <Image 
-                          source={liked ? icons.heartCheck : icons.heartUncheck} 
-                          style={{ width: 60, height: 60 }} 
-                          resizeMode="contain" 
-                        />
-                      </View>
-                      <TouchableOpacity onPress={handleOpenLikesModal}>
-                        <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
-                      </TouchableOpacity>
-                    </TouchableOpacity>
-                    
                     {/* Comments Button */}
                     <TouchableOpacity onPress={handleCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
                       <View style={{
@@ -2912,9 +2856,9 @@ const Profile = () => {
                             renderItem={({ item: c }) => (
                               <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 14, paddingHorizontal: 16 }}>
                                 <Image source={{ uri: c.avatar || images.profile }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
-                                <View style={{ flex: 1 }}>
+                                <View style={{ flex: 1, flexShrink: 1 }}>
                                   <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 15 }}>{c.username || c.userId}</Text>
-                                  <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{c.content}</Text>
+                                  <Text style={{ color: theme.textPrimary, fontSize: 16, flexWrap: 'wrap' }}>{c.content}</Text>
                                   <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>{new Date(c.createdAt).toLocaleString()}</Text>
                                 </View>
                               </View>
@@ -2940,6 +2884,7 @@ const Profile = () => {
                             onChangeText={setNewComment}
                             placeholder={t('profile.modals.addCommentPlaceholder')}
                             placeholderTextColor={theme.inputPlaceholder}
+                            multiline={true}
                             style={{
                               flex: 1,
                               backgroundColor: themedColor('#333', theme.inputBackground),
@@ -2950,6 +2895,9 @@ const Profile = () => {
                               fontSize: 16,
                               borderWidth: 1,
                               borderColor: theme.border,
+                              minHeight: 40,
+                              maxHeight: 120,
+                              textAlignVertical: 'top',
                             }}
                             editable={!posting}
                           />
@@ -2962,6 +2910,7 @@ const Profile = () => {
                               borderRadius: 8,
                               paddingHorizontal: 18,
                               paddingVertical: 12,
+                              alignSelf: 'flex-end',
                             }}
                           >
                             <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
@@ -2989,70 +2938,6 @@ const Profile = () => {
                     </KeyboardAvoidingView>
                   </Modal>
                   
-                  {/* Likes List Modal */}
-                  <Modal
-                    visible={likesModalVisible}
-                    animationType="slide"
-                    transparent={true}
-                    onRequestClose={() => setLikesModalVisible(false)}
-                  >
-                    <KeyboardAvoidingView
-                      style={{ flex: 1, justifyContent: 'flex-end' }}
-                      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                    >
-                      <View
-                        style={{
-                          backgroundColor: theme.surface,
-                          borderTopLeftRadius: 18,
-                          borderTopRightRadius: 18,
-                          width: '100%',
-                          maxHeight: '70%',
-                          borderWidth: 1,
-                          borderColor: theme.border,
-                        }}
-                      >
-                        <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-                          <View style={{ width: 40, height: 4, backgroundColor: theme.border, borderRadius: 2, marginBottom: 4 }} />
-                          <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.likesTitle')}</Text>
-                        </View>
-                        {loadingLikes ? (
-                          <ActivityIndicator color={theme.accent} size="large" style={{ marginVertical: 24 }} />
-                        ) : likesList.length === 0 ? (
-                          <Text style={{ color: theme.textSecondary, textAlign: 'center', marginVertical: 24 }}>{t('profile.modals.noLikes')}</Text>
-                        ) : (
-                          <FlatList
-                            data={likesList}
-                            keyExtractor={u => u.$id}
-                            renderItem={({ item: u }) => (
-                              <TouchableOpacity
-                                onPress={() => handleUserPress(u.$id)}
-                                style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 18 }}
-                              >
-                                <Image source={{ uri: u.avatar || images.profile }} style={{ width: 38, height: 38, borderRadius: 19, marginRight: 12 }} />
-                                <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600' }}>{u.username}</Text>
-                              </TouchableOpacity>
-                            )}
-                            style={{ maxHeight: 320, marginBottom: 8 }}
-                            showsVerticalScrollIndicator={false}
-                          />
-                        )}
-                        <TouchableOpacity
-                          onPress={() => setLikesModalVisible(false)}
-                          style={{
-                            alignSelf: 'center',
-                            backgroundColor: theme.card,
-                            paddingHorizontal: 32,
-                            paddingVertical: 10,
-                            borderRadius: 8,
-                            marginBottom: 12,
-                            marginTop: 2,
-                          }}
-                        >
-                          <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 15 }}>{t('profile.modals.close')}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </KeyboardAvoidingView>
-                  </Modal>
                 </SafeAreaView>
               </PanGestureHandler>
             </GestureHandlerRootView>

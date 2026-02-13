@@ -13,8 +13,8 @@ import { icons } from "../../../constants";
 import useAppwrite from "../../../lib/useAppwrite";
 import { getUserPosts, getCurrentUser, databases, appwriteConfig } from "../../../lib/appwrite";
 import { useGlobalContext } from "../../../context/GlobalProvider";
-import { EmptyState, InfoBox, VideoCard } from "../../../components";
-import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout } from "../../../lib/appwrite";
+import { EmptyState, InfoBox, VideoCard, VideoProgressBar } from "../../../components";
+import { toggleFollowUser, getFollowers, getUserLikesCount, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLikeComment } from "../../../lib/appwrite";
 import { images } from "../../../constants";
 
 const UserProfile = () => {
@@ -32,8 +32,6 @@ const UserProfile = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalVideo, setModalVideo] = useState(null);
   // Modal interaction states
-  const [liked, setLiked] = useState(false);
-  const [likesCount, setLikesCount] = useState(0);
   const [bookmarked, setBookmarked] = useState(false);
   const [commentsCount, setCommentsCount] = useState(0);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -41,14 +39,18 @@ const UserProfile = () => {
   const [loadingComments, setLoadingComments] = useState(false);
   const [newComment, setNewComment] = useState("");
   const [posting, setPosting] = useState(false);
-  const [likesModalVisible, setLikesModalVisible] = useState(false);
-  const [likesList, setLikesList] = useState([]);
-  const [loadingLikes, setLoadingLikes] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [replyText, setReplyText] = useState("");
+  const [postingReply, setPostingReply] = useState(false);
   const [shareCount, setShareCount] = useState(0);
   const videoRefs = useRef({});
   const [modalIndex, setModalIndex] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
   const modalVideoRef = useRef(null);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [showProgressBar, setShowProgressBar] = useState(false);
+  const [isVideoReady, setIsVideoReady] = useState(false);
   
   // Earnings Dashboard States
   const [totalEarnings, setTotalEarnings] = useState(0);
@@ -196,15 +198,12 @@ const UserProfile = () => {
     }
   }, [id, currentUser]);
 
-  // When modalVideo changes, set up like/comment state
+  // When modalVideo changes, set up comment state
   useEffect(() => {
     if (modalVideo) {
-      setLiked(modalVideo.likes?.includes(currentUser?.$id));
-      setLikesCount(modalVideo.likes ? modalVideo.likes.length : 0);
-      setBookmarked(false); // TODO: implement bookmark logic
       setCommentsCount(modalVideo.comments ? modalVideo.comments.length : 0);
     }
-  }, [modalVideo, currentUser]);
+  }, [modalVideo]);
 
   // Comments logic for modal
   useEffect(() => {
@@ -217,28 +216,6 @@ const UserProfile = () => {
     }
   }, [commentsModalVisible, modalVideo]);
 
-  // Likes list logic for modal
-  useEffect(() => {
-    if (likesModalVisible && modalVideo) {
-      setLoadingLikes(true);
-      getPostLikes(modalVideo.$id)
-        .then(async (userIds) => {
-          const users = await Promise.all(
-            userIds.map(async (uid) => {
-              try {
-                const u = await databases.getDocument(appwriteConfig.databaseId, appwriteConfig.userCollectionId, uid);
-                return { $id: u.$id, username: u.username, avatar: u.avatar };
-              } catch {
-                return { $id: uid, username: t('profile.general.unknownUser'), avatar: images.profile };
-              }
-            })
-          );
-          setLikesList(users);
-        })
-        .catch(() => setLikesList([]))
-        .finally(() => setLoadingLikes(false));
-    }
-  }, [likesModalVisible, modalVideo]);
 
   const handleBack = () => {
     router.replace('/home');
@@ -292,14 +269,6 @@ const UserProfile = () => {
     router.push({ pathname: '/chat', params: { userId: id } });
   };
 
-  const handleLike = async () => {
-    if (!currentUser?.$id || !modalVideo) return;
-    setLiked((prev) => !prev);
-    setLikesCount((prev) => (liked ? prev - 1 : prev + 1));
-    try {
-      await toggleLikePost(modalVideo.$id, currentUser.$id);
-    } catch {}
-  };
 
   const handleBookmark = async () => {
     if (!currentUser?.$id || !modalVideo) {
@@ -359,23 +328,77 @@ const UserProfile = () => {
     setPosting(true);
     try {
       const comment = await addComment(modalVideo.$id, currentUser.$id, newComment.trim());
-      setComments([comment, ...comments]);
+      const updatedComments = await getComments(modalVideo.$id);
+      setComments(updatedComments);
       setNewComment("");
       setCommentsCount((prev) => prev + 1);
-    } catch {}
+    } catch (error) {
+      console.error("Error adding comment:", error);
+    } finally {
       setPosting(false);
-  };
-
-  const handleOpenLikesModal = () => {
-    setLikesModalVisible(true);
-  };
-
-  const handleUserPress = (userId) => {
-    setLikesModalVisible(false);
-    if (userId && userId !== currentUser?.$id) {
-      router.push(`/profile/${userId}`);
     }
   };
+
+  const handleAddReply = async (parentCommentId) => {
+    if (!replyText.trim() || !currentUser?.$id || !modalVideo) return;
+    setPostingReply(true);
+    try {
+      await addComment(modalVideo.$id, currentUser.$id, replyText.trim(), parentCommentId);
+      const updatedComments = await getComments(modalVideo.$id);
+      setComments(updatedComments);
+      setReplyText("");
+      setReplyingTo(null);
+      setCommentsCount((prev) => prev + 1);
+    } catch (error) {
+      console.error("Error adding reply:", error);
+    } finally {
+      setPostingReply(false);
+    }
+  };
+
+  const handleLikeComment = async (commentId, currentLikes) => {
+    if (!currentUser?.$id) return;
+    
+    const isLiked = Array.isArray(currentLikes) ? currentLikes.includes(currentUser.$id) : false;
+    const newLikedState = !isLiked;
+    
+    // Optimistic update
+    setComments((prev) =>
+      prev.map((comment) => {
+        if (comment.$id === commentId) {
+          const currentLikesArray = Array.isArray(comment.likes) ? comment.likes : [];
+          const updatedLikes = newLikedState
+            ? [...currentLikesArray, currentUser.$id]
+            : currentLikesArray.filter((id) => id !== currentUser.$id);
+          return { ...comment, likes: updatedLikes };
+        }
+        // Also update in replies
+        if (comment.replies && Array.isArray(comment.replies)) {
+          const updatedReplies = comment.replies.map((reply) => {
+            if (reply.$id === commentId) {
+              const replyLikesArray = Array.isArray(reply.likes) ? reply.likes : [];
+              const updatedLikes = newLikedState
+                ? [...replyLikesArray, currentUser.$id]
+                : replyLikesArray.filter((id) => id !== currentUser.$id);
+              return { ...reply, likes: updatedLikes };
+            }
+            return reply;
+          });
+          return { ...comment, replies: updatedReplies };
+        }
+        return comment;
+      })
+    );
+    
+    try {
+      await toggleLikeComment(commentId, currentUser.$id);
+    } catch (error) {
+      // Revert on error
+      const updatedComments = await getComments(modalVideo.$id);
+      setComments(updatedComments);
+    }
+  };
+
 
   const formatCount = (count) => {
     if (!count || count === undefined || count === null) {
@@ -503,6 +526,10 @@ const UserProfile = () => {
     setModalIndex(index);
     setModalVisible(true);
     setIsVideoPlaying(true);
+    setShowProgressBar(true);
+    setPlaybackPosition(0);
+    setPlaybackDuration(0);
+    setIsVideoReady(false);
   };
 
   const navigateToNextVideo = () => {
@@ -511,13 +538,11 @@ const UserProfile = () => {
       setModalVideo(nextVideo);
       setModalIndex(modalIndex + 1);
       setIsVideoPlaying(true);
-      // Reset modal states for new video
-      setLiked(nextVideo.likes?.includes(currentUser?.$id));
-      setLikesCount(nextVideo.likes ? nextVideo.likes.length : 0);
-      setCommentsCount(nextVideo.comments ? nextVideo.comments.length : 0);
-      setBookmarked(false);
+      // Reset modal states for new video - will be synced by useEffect
       setComments([]);
       setNewComment("");
+      // Reset like action flag when navigating
+      recentLikeActionRef.current = false;
     }
   };
 
@@ -527,13 +552,11 @@ const UserProfile = () => {
       setModalVideo(prevVideo);
       setModalIndex(modalIndex - 1);
       setIsVideoPlaying(true);
-      // Reset modal states for new video
-      setLiked(prevVideo.likes?.includes(currentUser?.$id));
-      setLikesCount(prevVideo.likes ? prevVideo.likes.length : 0);
-      setCommentsCount(prevVideo.comments ? prevVideo.comments.length : 0);
-      setBookmarked(false);
+      // Reset modal states for new video - will be synced by useEffect
       setComments([]);
       setNewComment("");
+      // Reset like action flag when navigating
+      recentLikeActionRef.current = false;
     }
   };
 
@@ -1199,32 +1222,36 @@ const UserProfile = () => {
                     style={{ flex: 1, width: '100%', height: '100%' }}
                     resizeMode={ResizeMode.CONTAIN}
                     shouldPlay={isVideoPlaying}
+                    isLooping={true}
                     isMuted={false}
                     useNativeControls={false}
                     posterSource={modalVideo.thumbnail ? { uri: modalVideo.thumbnail } : undefined}
+                    onLoad={(status) => {
+                      if (status.isLoaded) {
+                        setPlaybackDuration(status.durationMillis || 0);
+                        setIsVideoReady(true);
+                      }
+                    }}
                     onPlaybackStatusUpdate={status => {
-                      if (status.didJustFinish) setModalVisible(false);
+                      if (status.isLoaded) {
+                        setPlaybackPosition(status.positionMillis || 0);
+                        if (status.durationMillis) {
+                          setPlaybackDuration(status.durationMillis);
+                        }
+                      }
                     }}
                     onError={(error) => {
                     }}
                     onLoadStart={() => {
                     }}
-                    onLoad={() => {
-                    }}
                     onReadyForDisplay={() => {
                     }}
                   />
                   
-                  {/* Video Control Overlay */}
+                  {/* Video Control Overlay - Only shows progress bar, doesn't pause/play */}
                   <TouchableOpacity
                     onPress={() => {
-                      if (isVideoPlaying) {
-                        modalVideoRef.current?.pauseAsync();
-                        setIsVideoPlaying(false);
-                      } else {
-                        modalVideoRef.current?.playAsync();
-                        setIsVideoPlaying(true);
-                      }
+                      setShowProgressBar(true);
                     }}
                     style={{
                       position: 'absolute',
@@ -1238,6 +1265,16 @@ const UserProfile = () => {
                       opacity: 0
                     }}
                     activeOpacity={1}
+                  />
+                  {/* Progress Bar */}
+                  <VideoProgressBar
+                    videoRef={modalVideoRef}
+                    playbackPosition={playbackPosition}
+                    playbackDuration={playbackDuration}
+                    isVideoReady={isVideoReady}
+                    showProgressBar={showProgressBar}
+                    onShowProgressBar={setShowProgressBar}
+                    bottomOffset={20}
                   />
                   
                   {/* Play/Pause Button */}
@@ -1289,7 +1326,7 @@ const UserProfile = () => {
                 
                {/* Right Side Interaction Buttons - TikTok Style */}
                <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 10 }}>
-                 {/* Profile Picture - Above Like Button */}
+                 {/* Profile Picture */}
                  <TouchableOpacity style={{ marginBottom: 15, alignItems: 'center' }}>
                    <View style={{ position: 'relative' }}>
                      <Image
@@ -1303,28 +1340,6 @@ const UserProfile = () => {
                    </View>
                  </TouchableOpacity>
 
-                 {/* Like Button */}
-                 <TouchableOpacity onPress={handleLike} style={{ marginBottom: 20, alignItems: 'center' }}>
-                   <View style={{
-                     width: 40,
-                     height: 40,
-                     borderRadius: 20,
-                     backgroundColor: liked ? 'rgba(255, 71, 87, 0.2)' : 'rgba(255, 255, 255, 0.1)',
-                     justifyContent: 'center',
-                     alignItems: 'center',
-                     marginBottom: 5
-                   }}>
-                     <Image 
-                       source={liked ? icons.heartCheck : icons.heartUncheck} 
-                       style={{ width: 60, height: 60 }} 
-                       resizeMode="contain" 
-                     />
-                   </View>
-                   <TouchableOpacity onPress={handleOpenLikesModal}>
-                     <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
-                   </TouchableOpacity>
-                 </TouchableOpacity>
-                 
                  {/* Comments Button */}
                  <TouchableOpacity onPress={handleCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
                    <View style={{
@@ -1396,7 +1411,7 @@ const UserProfile = () => {
                    </Text>
                    
                  </View>
-                 <Text style={{ color: '#fff', fontSize: 14, marginBottom: 8, lineHeight: 18 }}>
+                 <Text style={{ color: '#fff', fontSize: 14, marginBottom: 8, lineHeight: 18, flexWrap: 'wrap' }}>
                    {t('profile.general.videoTitle', { title: modalVideo.title || t('profile.general.untitled') })}
                  </Text>
                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
@@ -1426,40 +1441,129 @@ const UserProfile = () => {
                        <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
                        <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.commentsTitle')}</Text>
                      </View>
-                     {loadingComments ? (
-                       <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
-                     ) : (
-                       <FlatList
-                         data={[...comments].reverse()} // Newest at bottom
-                         keyExtractor={c => c.$id}
-                         renderItem={({ item: c }) => (
-                           <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 14, paddingHorizontal: 16 }}>
-                             <Image source={{ uri: c.avatar || images.profile }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
-                             <View style={{ flex: 1 }}>
-                               <Text style={{ color: '#a77df8', fontWeight: 'bold', fontSize: 15 }}>{c.username || c.userId}</Text>
-                               <Text style={{ color: '#fff', fontSize: 16 }}>{c.content}</Text>
-                               <Text style={{ color: '#aaa', fontSize: 11, marginTop: 2 }}>{new Date(c.createdAt).toLocaleString()}</Text>
-                             </View>
-                           </View>
-                         )}
-                         style={{ maxHeight: 320, marginBottom: 8 }}
-                         showsVerticalScrollIndicator={false}
-                         inverted // So newest is at the bottom
-                       />
-                     )}
-                     <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 12, backgroundColor: '#22223b' }}>
+                    {loadingComments ? (
+                      <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
+                    ) : comments.length === 0 ? (
+                      <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                        <Text style={{ color: '#aaa', fontSize: 16 }}>No comments yet</Text>
+                      </View>
+                    ) : (
+                      <FlatList
+                        data={comments}
+                        keyExtractor={c => c.$id}
+                        renderItem={({ item: c }) => {
+                          const isLiked = Array.isArray(c.likes) ? c.likes.includes(currentUser?.$id) : false;
+                          const likesCount = Array.isArray(c.likes) ? c.likes.length : 0;
+                          return (
+                            <View style={{ marginBottom: 14, paddingHorizontal: 16 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                                <Image source={{ uri: c.avatar || images.profile }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }} />
+                                <View style={{ flex: 1, flexShrink: 1 }}>
+                                  <Text style={{ color: '#a77df8', fontWeight: 'bold', fontSize: 15 }}>{c.username || c.userId}</Text>
+                                  <Text style={{ color: '#fff', fontSize: 16, flexWrap: 'wrap' }}>{c.content}</Text>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+                                    <TouchableOpacity 
+                                      onPress={() => handleLikeComment(c.$id, c.likes)}
+                                      style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}
+                                    >
+                                      <Text style={{ color: isLiked ? '#ff4757' : '#aaa', fontSize: 14, marginRight: 4 }}>
+                                        {isLiked ? '❤️' : '🤍'}
+                                      </Text>
+                                      <Text style={{ color: '#aaa', fontSize: 12 }}>{likesCount > 0 ? likesCount : ''}</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                      onPress={() => {
+                                        setReplyingTo(c);
+                                        setReplyText("");
+                                      }}
+                                      style={{ marginRight: 16 }}
+                                    >
+                                      <Text style={{ color: '#aaa', fontSize: 12 }}>Reply</Text>
+                                    </TouchableOpacity>
+                                    <Text style={{ color: '#aaa', fontSize: 11 }}>{new Date(c.createdAt).toLocaleString()}</Text>
+                                  </View>
+                                  {replyingTo?.$id === c.$id && (
+                                    <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#333' }}>
+                                      <TextInput
+                                        value={replyText}
+                                        onChangeText={setReplyText}
+                                        placeholder="Write a reply..."
+                                        placeholderTextColor="#aaa"
+                                        style={{ backgroundColor: '#333', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, marginBottom: 8 }}
+                                        multiline
+                                      />
+                                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                                        <TouchableOpacity
+                                          onPress={() => {
+                                            setReplyingTo(null);
+                                            setReplyText("");
+                                          }}
+                                          style={{ marginRight: 8, paddingHorizontal: 12, paddingVertical: 6 }}
+                                        >
+                                          <Text style={{ color: '#aaa', fontSize: 14 }}>Cancel</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                          onPress={() => handleAddReply(c.$id)}
+                                          disabled={!replyText.trim() || postingReply}
+                                          style={{ backgroundColor: postingReply ? '#888' : '#a77df8', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
+                                        >
+                                          <Text style={{ color: '#fff', fontSize: 14 }}>{postingReply ? 'Posting...' : 'Reply'}</Text>
+                                        </TouchableOpacity>
+                                      </View>
+                                    </View>
+                                  )}
+                                  {c.replies && Array.isArray(c.replies) && c.replies.length > 0 && (
+                                    <View style={{ marginTop: 8, paddingLeft: 16, borderLeftWidth: 2, borderLeftColor: '#333' }}>
+                                      {c.replies.map((reply) => {
+                                        const isReplyLiked = Array.isArray(reply.likes) ? reply.likes.includes(currentUser?.$id) : false;
+                                        const replyLikesCount = Array.isArray(reply.likes) ? reply.likes.length : 0;
+                                        return (
+                                          <View key={reply.$id} style={{ marginBottom: 10, flexDirection: 'row', alignItems: 'flex-start' }}>
+                                            <Image source={{ uri: reply.avatar || images.profile }} style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }} />
+                                            <View style={{ flex: 1, flexShrink: 1 }}>
+                                              <Text style={{ color: '#a77df8', fontWeight: 'bold', fontSize: 13 }}>{reply.username || reply.userId}</Text>
+                                              <Text style={{ color: '#fff', fontSize: 14, flexWrap: 'wrap' }}>{reply.content}</Text>
+                                              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                                                <TouchableOpacity 
+                                                  onPress={() => handleLikeComment(reply.$id, reply.likes)}
+                                                  style={{ flexDirection: 'row', alignItems: 'center', marginRight: 12 }}
+                                                >
+                                                  <Text style={{ color: isReplyLiked ? '#ff4757' : '#aaa', fontSize: 12, marginRight: 4 }}>
+                                                    {isReplyLiked ? '❤️' : '🤍'}
+                                                  </Text>
+                                                  <Text style={{ color: '#aaa', fontSize: 11 }}>{replyLikesCount > 0 ? replyLikesCount : ''}</Text>
+                                                </TouchableOpacity>
+                                                <Text style={{ color: '#aaa', fontSize: 10 }}>{new Date(reply.createdAt).toLocaleString()}</Text>
+                                              </View>
+                                            </View>
+                                          </View>
+                                        );
+                                      })}
+                                    </View>
+                                  )}
+                                </View>
+                              </View>
+                            </View>
+                          );
+                        }}
+                        style={{ maxHeight: 400, marginBottom: 8 }}
+                        showsVerticalScrollIndicator={false}
+                      />
+                    )}
+                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 12, paddingBottom: 12, backgroundColor: '#22223b' }}>
                        <TextInput
                          value={newComment}
                          onChangeText={setNewComment}
                          placeholder={t('profile.modals.addCommentPlaceholder')}
                          placeholderTextColor="#aaa"
-                         style={{ flex: 1, backgroundColor: '#333', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
+                         multiline={true}
+                         style={{ flex: 1, backgroundColor: '#333', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, minHeight: 40, maxHeight: 120, textAlignVertical: 'top' }}
                          editable={!posting}
                        />
                        <TouchableOpacity
                          onPress={handleAddComment}
                          disabled={posting || !newComment.trim()}
-                         style={{ marginLeft: 8, backgroundColor: posting ? '#888' : '#a77df8', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12 }}
+                         style={{ marginLeft: 8, backgroundColor: posting ? '#888' : '#a77df8', borderRadius: 8, paddingHorizontal: 18, paddingVertical: 12, alignSelf: 'flex-end' }}
                        >
                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
                            {posting ? t('profile.modals.posting') : t('profile.modals.post')}
@@ -1467,47 +1571,6 @@ const UserProfile = () => {
                        </TouchableOpacity>
                      </View>
                      <TouchableOpacity onPress={() => setCommentsModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
-                       <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t('profile.modals.close')}</Text>
-                     </TouchableOpacity>
-                   </View>
-                 </KeyboardAvoidingView>
-               </Modal>
-               
-               {/* Likes List Modal */}
-               <Modal
-                 visible={likesModalVisible}
-                 animationType="slide"
-                 transparent={true}
-                 onRequestClose={() => setLikesModalVisible(false)}
-               >
-                 <KeyboardAvoidingView
-                   style={{ flex: 1, justifyContent: 'flex-end' }}
-                   behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                 >
-                   <View style={{ backgroundColor: '#22223b', borderTopLeftRadius: 18, borderTopRightRadius: 18, width: '100%', maxHeight: '70%' }}>
-                     <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-                       <View style={{ width: 40, height: 4, backgroundColor: '#444', borderRadius: 2, marginBottom: 4 }} />
-                       <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('profile.modals.likesTitle')}</Text>
-                     </View>
-                     {loadingLikes ? (
-                       <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
-                     ) : likesList.length === 0 ? (
-                       <Text style={{ color: '#fff', textAlign: 'center', marginVertical: 24 }}>{t('profile.modals.noLikes')}</Text>
-                     ) : (
-                       <FlatList
-                         data={likesList}
-                         keyExtractor={u => u.$id}
-                         renderItem={({ item: u }) => (
-                           <TouchableOpacity onPress={() => handleUserPress(u.$id)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 18 }}>
-                             <Image source={{ uri: u.avatar || images.profile }} style={{ width: 38, height: 38, borderRadius: 19, marginRight: 12 }} />
-                             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>{u.username}</Text>
-                           </TouchableOpacity>
-                         )}
-                         style={{ maxHeight: 320, marginBottom: 8 }}
-                         showsVerticalScrollIndicator={false}
-                       />
-                     )}
-                     <TouchableOpacity onPress={() => setLikesModalVisible(false)} style={{ alignSelf: 'center', backgroundColor: '#444', paddingHorizontal: 32, paddingVertical: 10, borderRadius: 8, marginBottom: 12, marginTop: 2 }}>
                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{t('profile.modals.close')}</Text>
                      </TouchableOpacity>
                    </View>

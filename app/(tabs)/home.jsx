@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getLatestPosts, toggleLikePost, getComments, addComment, getPostLikes, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes } from "../../lib/appwrite";
+import { getAllPosts, getLatestPosts, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes } from "../../lib/appwrite";
 import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
@@ -173,8 +173,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
   const { t } = useTranslation();
   const [play, setPlay] = useState(false);
-  const [liked, setLiked] = useState(item.likes?.includes(user?.$id));
-  const [likesCount, setLikesCount] = useState(item.likes ? item.likes.length : 0);
   const [bookmarked, setBookmarked] = useState(false);
   const [commentsCount, setCommentsCount] = useState(item.comments ? item.comments.length : 0);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -189,9 +187,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [selectedCommentId, setSelectedCommentId] = useState(null);
   const [commentLikesList, setCommentLikesList] = useState([]);
   const [loadingCommentLikes, setLoadingCommentLikes] = useState(false);
-  const [likesModalVisible, setLikesModalVisible] = useState(false);
-  const [likesList, setLikesList] = useState([]);
-  const [loadingLikes, setLoadingLikes] = useState(false);
   const [shareCount, setShareCount] = useState(item.shares || 0);
   const [isFollowing, setIsFollowing] = useState(false);
   const [showProfileHint, setShowProfileHint] = useState(false);
@@ -208,8 +203,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   // Fetch creator data if creator is a string ID
   // Use a ref to track the creator ID we've already processed to prevent infinite loops
   const processedCreatorIdRef = useRef(null);
-  // Track recent like actions to avoid overriding optimistic updates
-  const recentLikeActionRef = useRef(false);
   
   // Get stable creator ID for dependency - extract just the ID string
   const creatorIdString = typeof item?.creator === 'object' && item?.creator !== null 
@@ -307,36 +300,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     fetchShareCount();
   }, [item.$id]);
 
-  // Sync liked state and likes count with item data when item changes
-  // This ensures the state persists when scrolling away and coming back
-  useEffect(() => {
-    // Don't sync if we just made a like action (optimistic update)
-    if (recentLikeActionRef.current) {
-      recentLikeActionRef.current = false;
-      return;
-    }
-    
-    if (item.likes) {
-      setLiked(item.likes.includes(user?.$id));
-      setLikesCount(item.likes.length);
-    } else {
-      setLiked(false);
-      setLikesCount(0);
-    }
-  }, [item.$id, user?.$id]);
-
-  // Also sync when item becomes visible again (handles case where same item is shown with updated data)
-  useEffect(() => {
-    if (isVisible && !recentLikeActionRef.current) {
-      if (item.likes) {
-        setLiked(item.likes.includes(user?.$id));
-        setLikesCount(item.likes.length);
-      } else {
-        setLiked(false);
-        setLikesCount(0);
-      }
-    }
-  }, [isVisible, item.$id, user?.$id]);
 
   // Check if current user is following the video/photo creator
   useEffect(() => {
@@ -384,29 +347,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     }
   }, [commentsModalVisible, item.$id]);
 
-  // Fetch likes list when modal opens
-  useEffect(() => {
-    if (likesModalVisible) {
-      setLoadingLikes(true);
-      getPostLikes(item.$id)
-        .then(async (userIds) => {
-          // Fetch user info for each userId
-          const users = await Promise.all(
-            userIds.map(async (uid) => {
-              try {
-                const u = await databases.getDocument(appwriteConfig.databaseId, appwriteConfig.userCollectionId, uid);
-                return { $id: u.$id, username: u.username, avatar: u.avatar };
-              } catch {
-                return { $id: uid, username: 'Unknown', avatar: images.profile };
-              }
-            })
-          );
-          setLikesList(users);
-        })
-        .catch(() => setLikesList([]))
-        .finally(() => setLoadingLikes(false));
-    }
-  }, [likesModalVisible, item.$id]);
 
   // Reset video ready state when item changes
   useEffect(() => {
@@ -446,8 +386,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   }, []);
 
   const handleVideoPress = () => {
-    setPlay((prev) => !prev);
-    // Show progress bar when video is tapped
+    // Only show progress bar when video is tapped, don't pause/play
     if (item.video && item.postType !== 'photo') {
       setShowProgressBar(true);
       // Hide progress bar after 3 seconds
@@ -458,6 +397,17 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         setShowProgressBar(false);
       }, 3000);
     }
+  };
+
+  const handlePausePlay = () => {
+    setPlay((prev) => !prev);
+    setShowProgressBar(true);
+    if (progressBarTimeoutRef.current) {
+      clearTimeout(progressBarTimeoutRef.current);
+    }
+    progressBarTimeoutRef.current = setTimeout(() => {
+      setShowProgressBar(false);
+    }, 3000);
   };
 
   const handleSeekStart = () => {
@@ -540,23 +490,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const handleLike = async () => {
-    if (!user?.$id) return;
-    // Mark that we just made a like action to prevent sync from overriding optimistic update
-    recentLikeActionRef.current = true;
-    setLiked((prev) => !prev);
-    setLikesCount((prev) => (liked ? prev - 1 : prev + 1));
-    try {
-      await toggleLikePost(item.$id, user.$id);
-      // Reset the flag after a short delay to allow future syncs
-      setTimeout(() => {
-        recentLikeActionRef.current = false;
-      }, 1000);
-    } catch {
-      // On error, reset the flag immediately so state can sync
-      recentLikeActionRef.current = false;
-    }
-  };
 
   const handleBookmark = async () => {
     if (!user?.$id) {
@@ -775,16 +708,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     }
   };
 
-  const handleOpenLikesModal = () => {
-    setLikesModalVisible(true);
-  };
-
-  const handleUserPress = (userId) => {
-    setLikesModalVisible(false);
-    if (userId && userId !== user?.$id) {
-      router.push(`/profile/${userId}`);
-    }
-  };
 
   const formatCount = (count) => {
     if (!count || count === undefined || count === null) {
@@ -1215,11 +1138,28 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t("home.noVideoAvailable")}</Text>
           </View>
         )}
-        {!play && item.video && item.postType !== 'photo' && (
-          <View style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -24 }, { translateY: -24 }] }}>
-            <Image source={icons.play} style={{ width: 48, height: 48 }} resizeMode="contain" />
-          </View>
-        )}
+        {/* Play/Pause Button */}
+        <TouchableOpacity
+          onPress={handlePausePlay}
+          style={{ 
+            position: 'absolute', 
+            top: '50%', 
+            left: '50%', 
+            transform: [{ translateX: -25 }, { translateY: -25 }],
+            width: 50,
+            height: 50,
+            borderRadius: 25,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 20
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={{ color: '#fff', fontSize: 24 }}>
+            {play ? '❚❚' : '▶'}
+          </Text>
+        </TouchableOpacity>
       </TouchableOpacity>
 
       {/* Progress Bar - Only show for native Video component (not WebView) - Outside TouchableOpacity to receive touches */}
@@ -1313,28 +1253,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           </View>
         </TouchableOpacity>
 
-        {/* Like Button */}
-        <TouchableOpacity onPress={handleLike} style={{ marginBottom: 20, alignItems: 'center' }}>
-          <View style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-           
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginBottom: 5
-          }}>
-            <Image 
-              source={liked ? icons.heartCheck : icons.heartUncheck} 
-              style={{ width: 60, height: 60 }} 
-              resizeMode="contain" 
-            />
-          </View>
-          <TouchableOpacity onPress={handleOpenLikesModal}>
-            <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likesCount)}</Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
-
         {/* Comments Button */}
         <TouchableOpacity onPress={handleCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
           <View style={{
@@ -1400,10 +1318,10 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
 
       {/* Bottom Left Video/Photo Information */}
       <View style={{ position: 'absolute', bottom: 100, left: 15, right: 80, zIndex: 20 }}>
-        <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>
+        <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600', marginBottom: 8, flexWrap: 'wrap' }}>
           {creator?.username || (typeof item.creator === 'string' ? 'Unknown' : item.creator?.username || 'Unknown')}
         </Text>
-        <Text style={{ color: theme.textPrimary, fontSize: 14, marginBottom: 8 }}>
+        <Text style={{ color: theme.textPrimary, fontSize: 14, marginBottom: 8, flexWrap: 'wrap' }}>
           {item.title} ♫ ✨
         </Text>
         {/* Link Display */}
@@ -1504,11 +1422,11 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                           source={c.avatar && typeof c.avatar === 'string' ? { uri: c.avatar } : images.profile}
                           style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }}
                         />
-                        <View style={{ flex: 1 }}>
+                        <View style={{ flex: 1, flexShrink: 1 }}>
                           <Text style={{ color: themedColor('#a77df8', theme.accent), fontWeight: 'bold', fontSize: 15 }}>
                             {c.username || c.userId}
                           </Text>
-                          <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16 }}>{c.content}</Text>
+                          <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16, flexWrap: 'wrap' }}>{c.content}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
                             <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11, marginRight: 12 }}>
                               {new Date(c.createdAt).toLocaleString()}
@@ -1550,50 +1468,55 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                           
                           {/* Reply input */}
                           {replyingTo === c.$id && (
-                            <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center' }}>
+                            <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'flex-start' }}>
                               <Image
                                 source={{ uri: user?.avatar || images.profile }}
-                                style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }}
+                                style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8, marginTop: 4 }}
                               />
                               <TextInput
                                 value={replyText}
                                 onChangeText={setReplyText}
                                 placeholder="Write a reply..."
                                 placeholderTextColor={themedColor('#aaa', theme.textMuted)}
+                                multiline={true}
                                 style={{
                                   flex: 1,
                                   backgroundColor: themedColor('#333', theme.inputBackground),
                                   color: themedColor('#fff', theme.textPrimary),
                                   borderRadius: 16,
                                   paddingHorizontal: 12,
-                                  paddingVertical: 6,
+                                  paddingVertical: 8,
                                   fontSize: 13,
+                                  minHeight: 40,
+                                  maxHeight: 120,
+                                  textAlignVertical: 'top',
                                 }}
                               />
-                              <TouchableOpacity
-                                onPress={() => handleAddReply(c.$id)}
-                                disabled={postingReply || !replyText.trim()}
-                                style={{
-                                  marginLeft: 8,
-                                  paddingHorizontal: 12,
-                                  paddingVertical: 6,
-                                  backgroundColor: postingReply ? themedColor('#888', theme.border) : theme.accent,
-                                  borderRadius: 16,
-                                }}
-                              >
-                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
-                                  {postingReply ? '...' : 'Send'}
-                                </Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                onPress={() => {
-                                  setReplyingTo(null);
-                                  setReplyText("");
-                                }}
-                                style={{ marginLeft: 8 }}
-                              >
-                                <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 12 }}>Cancel</Text>
-                              </TouchableOpacity>
+                              <View style={{ flexDirection: 'column', justifyContent: 'flex-end', marginLeft: 8 }}>
+                                <TouchableOpacity
+                                  onPress={() => handleAddReply(c.$id)}
+                                  disabled={postingReply || !replyText.trim()}
+                                  style={{
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    backgroundColor: postingReply ? themedColor('#888', theme.border) : theme.accent,
+                                    borderRadius: 16,
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                    {postingReply ? '...' : 'Send'}
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setReplyingTo(null);
+                                    setReplyText("");
+                                  }}
+                                >
+                                  <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 12 }}>Cancel</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
                           )}
                           
@@ -1612,11 +1535,11 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                         source={{ uri: reply.avatar || images.profile }}
                                         style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }}
                                       />
-                                      <View style={{ flex: 1 }}>
+                                      <View style={{ flex: 1, flexShrink: 1 }}>
                                         <Text style={{ color: themedColor('#a77df8', theme.accent), fontWeight: '600', fontSize: 13 }}>
                                           {reply.username || reply.userId}
                                         </Text>
-                                        <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 13, marginVertical: 2 }}>
+                                        <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 13, marginVertical: 2, flexWrap: 'wrap' }}>
                                           {reply.content}
                                         </Text>
                                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
@@ -1679,6 +1602,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 onChangeText={setNewComment}
                 placeholder={t("home.commentPlaceholder")}
                 placeholderTextColor={theme.inputPlaceholder}
+                multiline={true}
                 style={{
                   flex: 1,
                   backgroundColor: themedColor('#333', theme.inputBackground),
@@ -1688,8 +1612,11 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                   paddingVertical: 10,
                   fontSize: 16,
                   textAlign: isRTL ? 'right' : 'left',
+                  textAlignVertical: 'top',
                   borderWidth: 1,
                   borderColor: theme.border,
+                  minHeight: 40,
+                  maxHeight: 120,
                 }}
                 editable={!posting}
               />
@@ -1702,6 +1629,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                   borderRadius: 8,
                   paddingHorizontal: 18,
                   paddingVertical: 12,
+                  alignSelf: 'flex-end',
                 }}
               >
                 <Text style={{ color: themedColor('#fff', '#FFFFFF'), fontWeight: 'bold', fontSize: 16 }}>
@@ -1829,81 +1757,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         </View>
       </Modal>
 
-      {/* Likes List Modal */}
-      <Modal
-        visible={likesModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setLikesModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          style={{ flex: 1, justifyContent: 'flex-end' }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View
-            style={{
-              backgroundColor: themedColor('#22223b', theme.surface),
-              borderTopLeftRadius: 18,
-              borderTopRightRadius: 18,
-              width: '100%',
-              maxHeight: '70%',
-              borderWidth: 1,
-              borderColor: theme.border,
-            }}
-          >
-            <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-              <View
-                style={{
-                  width: 40,
-                  height: 4,
-                  backgroundColor: themedColor('#444', theme.border),
-                  borderRadius: 2,
-                  marginBottom: 4,
-                }}
-              />
-              <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 18, fontWeight: 'bold' }}>
-                {t("home.likesTitle")}
-              </Text>
-            </View>
-            {loadingLikes ? (
-              <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
-            ) : likesList.length === 0 ? (
-              <Text style={{ color: themedColor('#fff', theme.textSecondary), textAlign: 'center', marginVertical: 24 }}>
-                {t("home.likesEmpty")}
-              </Text>
-            ) : (
-              <FlatList
-                data={likesList}
-                keyExtractor={u => u.$id}
-                renderItem={({ item: u }) => (
-                  <TouchableOpacity onPress={() => handleUserPress(u.$id)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 18 }}>
-                    <Image source={u.avatar && typeof u.avatar === 'string' ? { uri: u.avatar } : images.profile} style={{ width: 38, height: 38, borderRadius: 19, marginRight: 12 }} />
-                    <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16, fontWeight: '600' }}>{u.username}</Text>
-                  </TouchableOpacity>
-                )}
-                style={{ maxHeight: 320, marginBottom: 8 }}
-                showsVerticalScrollIndicator={false}
-              />
-            )}
-            <TouchableOpacity
-              onPress={() => setLikesModalVisible(false)}
-              style={{
-                alignSelf: 'center',
-                backgroundColor: themedColor('#444', theme.card),
-                paddingHorizontal: 32,
-                paddingVertical: 10,
-                borderRadius: 8,
-                marginBottom: 12,
-                marginTop: 2,
-              }}
-            >
-              <Text style={{ color: themedColor('#fff', theme.textPrimary), fontWeight: 'bold', fontSize: 15 }}>
-                {t("home.close")}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </View>
   );
 };
@@ -1923,7 +1776,19 @@ const Home = () => {
   const [trendingModalVisible, setTrendingModalVisible] = useState(false);
   const [trendingModalVideo, setTrendingModalVideo] = useState(null);
   const [isTrendingVideoPlaying, setIsTrendingVideoPlaying] = useState(true);
+  const [trendingCommentsCount, setTrendingCommentsCount] = useState(0);
+  const [trendingShareCount, setTrendingShareCount] = useState(0);
+  const [trendingCommentsModalVisible, setTrendingCommentsModalVisible] = useState(false);
+  const [trendingComments, setTrendingComments] = useState([]);
+  const [loadingTrendingComments, setLoadingTrendingComments] = useState(false);
+  const [trendingNewComment, setTrendingNewComment] = useState("");
+  const [trendingPosting, setTrendingPosting] = useState(false);
+  const [trendingReplyingTo, setTrendingReplyingTo] = useState(null);
+  const [trendingReplyText, setTrendingReplyText] = useState("");
+  const [trendingPostingReply, setTrendingPostingReply] = useState(false);
+  const [trendingBookmarked, setTrendingBookmarked] = useState(false);
   const trendingVideoRef = useRef(null);
+  const lastSyncedVideoIdRef = useRef(null); // Track last synced video ID to prevent re-syncing
   const flatListRef = useRef(null);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   
@@ -1931,6 +1796,19 @@ const Home = () => {
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
     [isDarkMode]
   );
+
+  // Format count for display (K, M format)
+  const formatCount = useCallback((count) => {
+    if (!count || count === undefined || count === null) {
+      return '0';
+    }
+    if (count >= 1000000) {
+      return (count / 1000000).toFixed(1) + 'M';
+    } else if (count >= 1000) {
+      return (count / 1000).toFixed(1) + 'K';
+    }
+    return count.toString();
+  }, []);
   
   // Get posts based on selected tab
   const { data: forYouPosts, refetch: refetchForYou } = useAppwrite(getAllPosts, []);
@@ -2179,6 +2057,7 @@ const Home = () => {
     useCallback(() => {
       setIsHomeFocused(true);
       // Refresh posts when screen comes into focus (including trending)
+      // BUT: Don't refetch trending posts if modal is open to prevent resetting like state
       if (refetchForYou) {
         refetchForYou();
       }
@@ -2188,17 +2067,56 @@ const Home = () => {
       if (refetchFollowing) {
         refetchFollowing();
       }
-      if (refetchLatestPosts) {
-        refetchLatestPosts();
-      }
-      if (refetchLatestPhotos) {
-        refetchLatestPhotos();
+      // Only refetch trending posts if modal is NOT open
+      // This prevents the like state from being reset when data is refetched
+      if (!trendingModalVisible) {
+        if (refetchLatestPosts) {
+          refetchLatestPosts();
+        }
+        if (refetchLatestPhotos) {
+          refetchLatestPhotos();
+        }
       }
       return () => {
         setIsHomeFocused(false);
       };
-    }, [refetchForYou, refetchForYouPhotos, refetchFollowing, refetchLatestPosts, refetchLatestPhotos])
+    }, [refetchForYou, refetchForYouPhotos, refetchFollowing, refetchLatestPosts, refetchLatestPhotos, trendingModalVisible])
   );
+
+  // Sync trending modal data when trendingModalVideo changes
+  useEffect(() => {
+    // Only sync if:
+    // 1. trendingModalVideo exists
+    // 2. Modal is visible (to prevent syncing when modal is closed)
+    // 3. This is a different video than we last synced (to prevent re-syncing on object reference changes)
+    if (
+      trendingModalVideo && 
+      trendingModalVisible &&
+      trendingModalVideo.$id !== lastSyncedVideoIdRef.current
+    ) {
+      // Mark this video as synced
+      lastSyncedVideoIdRef.current = trendingModalVideo.$id;
+      
+      // Fetch comments count
+      getComments(trendingModalVideo.$id)
+        .then((comments) => setTrendingCommentsCount(comments.length))
+        .catch(() => setTrendingCommentsCount(0));
+      
+      // Check bookmark status
+      if (user?.$id) {
+        isVideoBookmarked(user.$id, trendingModalVideo.$id)
+          .then((isBookmarked) => setTrendingBookmarked(isBookmarked))
+          .catch(() => setTrendingBookmarked(false));
+      }
+    }
+  }, [trendingModalVideo?.$id, user?.$id, trendingModalVisible]);
+  
+  // Reset synced video ID when modal closes
+  useEffect(() => {
+    if (!trendingModalVisible) {
+      lastSyncedVideoIdRef.current = null;
+    }
+  }, [trendingModalVisible]);
 
   // Handle trending videos scroll to determine center video
   const handleTrendingScroll = (event) => {
@@ -2214,6 +2132,161 @@ const Home = () => {
     
     if (newIndex !== currentTrendingIndex && newIndex < (combinedLatestPosts?.length || 0)) {
       setCurrentTrendingIndex(newIndex);
+    }
+  };
+
+
+  // Handle trending modal bookmark
+  const handleTrendingBookmark = async () => {
+    if (!user?.$id || !trendingModalVideo) {
+      Alert.alert(t("common.error"), t("alerts.loginToBookmark"));
+      return;
+    }
+
+    try {
+      const postData = {
+        title: trendingModalVideo.title,
+        creator: typeof trendingModalVideo.creator === 'object' ? trendingModalVideo.creator.username : 'Unknown',
+        avatar: typeof trendingModalVideo.creator === 'object' ? trendingModalVideo.creator.avatar : images.profile,
+        thumbnail: trendingModalVideo.thumbnail || (trendingModalVideo.postType === 'photo' ? trendingModalVideo.photo : null),
+        video: trendingModalVideo.video || (trendingModalVideo.postType === 'photo' ? trendingModalVideo.photo : null),
+        videoId: trendingModalVideo.$id,
+        postType: trendingModalVideo.postType || 'video'
+      };
+
+      const newBookmarkStatus = await toggleBookmark(user.$id, trendingModalVideo.$id, postData);
+      setTrendingBookmarked(newBookmarkStatus);
+    } catch (error) {
+      Alert.alert(t("common.error"), t("alerts.bookmarkFailed"));
+    }
+  };
+
+  // Handle trending modal comment press
+  const handleTrendingCommentPress = () => {
+    if (!trendingModalVideo) return;
+    setTrendingCommentsModalVisible(true);
+  };
+
+  // Fetch trending comments when modal opens
+  useEffect(() => {
+    if (trendingCommentsModalVisible && trendingModalVideo) {
+      setLoadingTrendingComments(true);
+      getComments(trendingModalVideo.$id)
+        .then((res) => {
+          setTrendingComments(res);
+        })
+        .catch(() => {
+          setTrendingComments([]);
+        })
+        .finally(() => {
+          setLoadingTrendingComments(false);
+        });
+    }
+  }, [trendingCommentsModalVisible, trendingModalVideo?.$id]);
+
+  // Handle add trending comment
+  const handleTrendingAddComment = async () => {
+    if (!trendingNewComment.trim() || !user?.$id || !trendingModalVideo) return;
+    setTrendingPosting(true);
+    try {
+      await addComment(trendingModalVideo.$id, user.$id, trendingNewComment.trim());
+      const updatedComments = await getComments(trendingModalVideo.$id);
+      setTrendingComments(updatedComments);
+      setTrendingNewComment("");
+      setTrendingCommentsCount((prev) => prev + 1);
+    } catch (error) {
+      console.error("Error adding trending comment:", error);
+    } finally {
+      setTrendingPosting(false);
+    }
+  };
+
+  // Handle add trending reply
+  const handleTrendingAddReply = async (parentCommentId) => {
+    if (!trendingReplyText.trim() || !user?.$id || !trendingModalVideo) return;
+    setTrendingPostingReply(true);
+    try {
+      await addComment(trendingModalVideo.$id, user.$id, trendingReplyText.trim(), parentCommentId);
+      const updatedComments = await getComments(trendingModalVideo.$id);
+      setTrendingComments(updatedComments);
+      setTrendingReplyText("");
+      setTrendingReplyingTo(null);
+      setTrendingCommentsCount((prev) => prev + 1);
+    } catch (error) {
+      console.error("Error adding trending reply:", error);
+    } finally {
+      setTrendingPostingReply(false);
+    }
+  };
+
+  // Handle like trending comment
+  const handleTrendingLikeComment = async (commentId, currentLikes) => {
+    if (!user?.$id) return;
+    const isLiked = Array.isArray(currentLikes) ? currentLikes.includes(user.$id) : false;
+    const newLikedState = !isLiked;
+    
+    // Optimistic update
+    setTrendingComments((prev) =>
+      prev.map((comment) => {
+        if (comment.$id === commentId) {
+          const currentLikesArray = Array.isArray(comment.likes) ? comment.likes : [];
+          const updatedLikes = newLikedState
+            ? [...currentLikesArray, user.$id]
+            : currentLikesArray.filter((id) => id !== user.$id);
+          return { ...comment, likes: updatedLikes };
+        }
+        // Also update in replies
+        if (comment.replies && Array.isArray(comment.replies)) {
+          const updatedReplies = comment.replies.map((reply) => {
+            if (reply.$id === commentId) {
+              const replyLikesArray = Array.isArray(reply.likes) ? reply.likes : [];
+              const updatedLikes = newLikedState
+                ? [...replyLikesArray, user.$id]
+                : replyLikesArray.filter((id) => id !== user.$id);
+              return { ...reply, likes: updatedLikes };
+            }
+            return reply;
+          });
+          return { ...comment, replies: updatedReplies };
+        }
+        return comment;
+      })
+    );
+    
+    try {
+      await toggleLikeComment(commentId, user.$id);
+    } catch (error) {
+      // Revert on error
+      const updatedComments = await getComments(trendingModalVideo.$id);
+      setTrendingComments(updatedComments);
+    }
+  };
+
+  // Handle trending modal share
+  const handleTrendingShare = async () => {
+    if (!trendingModalVideo) return;
+    
+    try {
+      const shareUrl = trendingModalVideo.postType === 'photo' 
+        ? (trendingModalVideo.photo && typeof trendingModalVideo.photo === 'string' ? trendingModalVideo.photo : '') 
+        : trendingModalVideo.video;
+      const shareType = trendingModalVideo.postType === 'photo' ? 'photo' : 'video';
+      
+      const result = await Share.share({
+        message: t("home.shareMessage", {
+          title: trendingModalVideo.title || t("home.untitledVideo"),
+          username: typeof trendingModalVideo.creator === 'object' ? trendingModalVideo.creator.username : 'Unknown',
+          url: shareUrl
+        }),
+        title: trendingModalVideo.title || t("home.untitledVideo"),
+      });
+      
+      if (result.action === Share.sharedAction) {
+        const newShareCount = await incrementShareCount(trendingModalVideo.$id);
+        setTrendingShareCount(newShareCount);
+      }
+    } catch (error) {
+      console.error("Error sharing:", error);
     }
   };
 
@@ -2352,6 +2425,7 @@ const Home = () => {
     const handleCreatorPress = () => {
       if (creatorId) {
         setTrendingModalVisible(false);
+        setTrendingCommentsModalVisible(false);
         router.push(`/profile/${creatorId}`);
       }
     };
@@ -3116,7 +3190,10 @@ const Home = () => {
         visible={trendingModalVisible}
         animationType="slide"
         transparent={false}
-        onRequestClose={() => setTrendingModalVisible(false)}
+        onRequestClose={() => {
+          setTrendingModalVisible(false);
+          setTrendingCommentsModalVisible(false);
+        }}
         style={{ backgroundColor: theme.background }}
       >
         {trendingModalVideo && (
@@ -3124,7 +3201,10 @@ const Home = () => {
             <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
               {/* Close Button */}
               <TouchableOpacity 
-                onPress={() => setTrendingModalVisible(false)} 
+                onPress={() => {
+                  setTrendingModalVisible(false);
+                  setTrendingCommentsModalVisible(false);
+                }} 
                 style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}
               >
                 <Text style={{ color: theme.textPrimary, fontSize: 28 }}>×</Text>
@@ -3413,6 +3493,73 @@ const Home = () => {
                   </View>
                 )}
                 
+                {/* Right Side Interaction Buttons - TikTok Style */}
+                <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 10 }}>
+                  {/* Comments Button */}
+                  <TouchableOpacity onPress={handleTrendingCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
+                    <View style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      marginBottom: 5
+                    }}>
+                      <Image 
+                        source={icons.messages} 
+                        style={{ width: 60, height: 60 }} 
+                        resizeMode="contain" 
+                      />
+                    </View>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(trendingCommentsCount)}</Text>
+                  </TouchableOpacity>
+                  
+                  {/* Bookmark Button */}
+                  <TouchableOpacity onPress={handleTrendingBookmark} style={{ marginBottom: 20, alignItems: 'center' }}>
+                    <View style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: trendingBookmarked
+                        ? themedColor('rgba(255, 193, 7, 0.2)', theme.accentSoft)
+                        : themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      marginBottom: 5
+                    }}>
+                      <Image 
+                        source={trendingBookmarked ? icons.saved : icons.unsaved} 
+                        style={{ width: 60, height: 60 }} 
+                        resizeMode="contain" 
+                      />
+                    </View>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                      {trendingBookmarked ? t("home.saved") : t("home.save")}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  {/* Share Button */}
+                  <TouchableOpacity onPress={handleTrendingShare} style={{ marginBottom: 20, alignItems: 'center' }}>
+                    <View style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      marginBottom: 5
+                    }}>
+                      <Image 
+                        source={icons.unshared} 
+                        style={{ width: 60, height: 60 }} 
+                        resizeMode="contain" 
+                      />
+                    </View>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(trendingShareCount)}</Text>
+                  </TouchableOpacity>
+                </View>
+
                 {/* Video Info Overlay */}
                 <View style={{ 
                   position: 'absolute', 
@@ -3421,16 +3568,306 @@ const Home = () => {
                   right: 20,
                   zIndex: 5
                 }}>
-                  <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold', marginBottom: 5 }}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: 'bold', marginBottom: 5, flexWrap: 'wrap' }}>
                     {trendingModalVideo.title || t("home.untitledVideo")}
                   </Text>
                   {trendingModalVideo.creator && (
                     <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
-                      @{trendingModalVideo.creator.username}
+                      @{typeof trendingModalVideo.creator === 'object' ? trendingModalVideo.creator.username : 'Unknown'}
                     </Text>
                   )}
                 </View>
               </View>
+
+              {/* Comments Section - Inside the trending modal */}
+              {trendingCommentsModalVisible && (
+                <View
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    zIndex: 1000,
+                  }}
+                >
+                  {/* Backdrop - tap to close */}
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => setTrendingCommentsModalVisible(false)}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                    }}
+                  />
+                  <KeyboardAvoidingView
+                    style={{ flex: 1, justifyContent: 'flex-end' }}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                  >
+                    <View
+                      style={{
+                        backgroundColor: themedColor('#22223b', theme.surface),
+                        borderTopLeftRadius: 18,
+                        borderTopRightRadius: 18,
+                        width: '100%',
+                        maxHeight: '80%',
+                        paddingBottom: 0,
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                      }}
+                    >
+                      <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+                        <View
+                          style={{
+                            width: 40,
+                            height: 4,
+                            backgroundColor: themedColor('#444', theme.border),
+                            borderRadius: 2,
+                            marginBottom: 4,
+                          }}
+                        />
+                        <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 18, fontWeight: 'bold' }}>
+                          {t("home.commentsTitle")}
+                        </Text>
+                      </View>
+                      {loadingTrendingComments ? (
+                        <ActivityIndicator color="#a77df8" size="large" style={{ marginVertical: 24 }} />
+                      ) : (
+                        <FlatList
+                data={[...trendingComments].reverse()}
+                keyExtractor={c => c.$id}
+                renderItem={({ item: c }) => {
+                  const commentLikes = Array.isArray(c.likes) ? c.likes : [];
+                  const isLiked = commentLikes.includes(user?.$id);
+                  const isCommentAuthor = c.userId === user?.$id;
+                  
+                  return (
+                    <View style={{ marginBottom: 16, paddingHorizontal: 16 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                        <Image
+                          source={c.avatar && typeof c.avatar === 'string' ? { uri: c.avatar } : images.profile}
+                          style={{ width: 36, height: 36, borderRadius: 18, marginRight: 10 }}
+                        />
+                        <View style={{ flex: 1, flexShrink: 1 }}>
+                          <Text style={{ color: themedColor('#a77df8', theme.accent), fontWeight: 'bold', fontSize: 15 }}>
+                            {c.username || c.userId}
+                          </Text>
+                          <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 16, flexWrap: 'wrap' }}>{c.content}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                            <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11, marginRight: 12 }}>
+                              {new Date(c.createdAt).toLocaleString()}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => handleTrendingLikeComment(c.$id, commentLikes)}
+                              style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}
+                            >
+                              <Image
+                                source={isLiked ? icons.heartCheck : icons.heartUncheck}
+                                style={{ width: 20, height: 20, marginRight: 4 }}
+                                resizeMode="contain"
+                              />
+                              <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 12 }}>
+                                {commentLikes.length}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => {
+                                setTrendingReplyingTo(c.$id);
+                                setTrendingReplyText("");
+                              }}
+                              style={{ marginRight: 16 }}
+                            >
+                              <Text style={{ color: theme.accent, fontSize: 12 }}>
+                                Reply
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          
+                          {/* Reply input */}
+                          {trendingReplyingTo === c.$id && (
+                            <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'flex-start' }}>
+                              <Image
+                                source={{ uri: user?.avatar || images.profile }}
+                                style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8, marginTop: 4 }}
+                              />
+                              <TextInput
+                                value={trendingReplyText}
+                                onChangeText={setTrendingReplyText}
+                                placeholder="Write a reply..."
+                                placeholderTextColor={themedColor('#aaa', theme.textMuted)}
+                                multiline={true}
+                                style={{
+                                  flex: 1,
+                                  backgroundColor: themedColor('#333', theme.inputBackground),
+                                  color: themedColor('#fff', theme.textPrimary),
+                                  borderRadius: 16,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 8,
+                                  fontSize: 13,
+                                  minHeight: 40,
+                                  maxHeight: 120,
+                                  textAlignVertical: 'top',
+                                }}
+                              />
+                              <View style={{ flexDirection: 'column', justifyContent: 'flex-end', marginLeft: 8 }}>
+                                <TouchableOpacity
+                                  onPress={() => handleTrendingAddReply(c.$id)}
+                                  disabled={trendingPostingReply || !trendingReplyText.trim()}
+                                  style={{
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    backgroundColor: trendingPostingReply ? themedColor('#888', theme.border) : theme.accent,
+                                    borderRadius: 16,
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                    {trendingPostingReply ? '...' : 'Send'}
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setTrendingReplyingTo(null);
+                                    setTrendingReplyText("");
+                                  }}
+                                >
+                                  <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 12 }}>Cancel</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
+                          
+                          {/* Nested replies */}
+                          {c.replies && c.replies.length > 0 && (
+                            <View style={{ marginTop: 12, marginLeft: 20, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: theme.border }}>
+                              {c.replies.map((reply) => {
+                                const replyLikes = Array.isArray(reply.likes) ? reply.likes : [];
+                                const isReplyLiked = replyLikes.includes(user?.$id);
+                                
+                                return (
+                                  <View key={reply.$id} style={{ marginBottom: 12 }}>
+                                    <View style={{ flexDirection: 'row' }}>
+                                      <Image
+                                        source={{ uri: reply.avatar || images.profile }}
+                                        style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }}
+                                      />
+                                      <View style={{ flex: 1, flexShrink: 1 }}>
+                                        <Text style={{ color: themedColor('#a77df8', theme.accent), fontWeight: '600', fontSize: 13 }}>
+                                          {reply.username || reply.userId}
+                                        </Text>
+                                        <Text style={{ color: themedColor('#fff', theme.textPrimary), fontSize: 13, marginVertical: 2, flexWrap: 'wrap' }}>
+                                          {reply.content}
+                                        </Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                                          <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 10, marginRight: 12 }}>
+                                            {new Date(reply.createdAt).toLocaleString()}
+                                          </Text>
+                                          <TouchableOpacity
+                                            onPress={() => handleTrendingLikeComment(reply.$id, replyLikes)}
+                                            style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}
+                                          >
+                                            <Image
+                                              source={isReplyLiked ? icons.heartCheck : icons.heartUncheck}
+                                              style={{ width: 18, height: 18, marginRight: 4 }}
+                                              resizeMode="contain"
+                                            />
+                                            <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11 }}>
+                                              {replyLikes.length}
+                                            </Text>
+                                          </TouchableOpacity>
+                                        </View>
+                                      </View>
+                                    </View>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }}
+                          style={{ maxHeight: 320, marginBottom: 8 }}
+                          showsVerticalScrollIndicator={false}
+                          inverted
+                        />
+                      )}
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingHorizontal: 12,
+                          paddingBottom: 12,
+                          backgroundColor: themedColor('#22223b', theme.surface),
+                          borderTopWidth: 1,
+                          borderColor: theme.border,
+                        }}
+                      >
+                        <TextInput
+                          value={trendingNewComment}
+                          onChangeText={setTrendingNewComment}
+                          placeholder={t("home.commentPlaceholder")}
+                          placeholderTextColor={theme.inputPlaceholder}
+                          multiline={true}
+                          style={{
+                            flex: 1,
+                            backgroundColor: themedColor('#333', theme.inputBackground),
+                            color: themedColor('#fff', theme.textPrimary),
+                            borderRadius: 8,
+                            paddingHorizontal: 12,
+                            paddingVertical: 10,
+                            fontSize: 16,
+                            textAlign: isRTL ? 'right' : 'left',
+                            textAlignVertical: 'top',
+                            borderWidth: 1,
+                            borderColor: theme.border,
+                            minHeight: 40,
+                            maxHeight: 120,
+                          }}
+                          editable={!trendingPosting}
+                        />
+                        <TouchableOpacity
+                          onPress={handleTrendingAddComment}
+                          disabled={trendingPosting || !trendingNewComment.trim()}
+                          style={{
+                            marginLeft: 8,
+                            backgroundColor: trendingPosting ? themedColor('#888', theme.border) : theme.accent,
+                            borderRadius: 8,
+                            paddingHorizontal: 18,
+                            paddingVertical: 12,
+                            alignSelf: 'flex-end',
+                          }}
+                        >
+                          <Text style={{ color: themedColor('#fff', '#FFFFFF'), fontWeight: 'bold', fontSize: 16 }}>
+                            {trendingPosting ? '...' : t("home.post")}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => setTrendingCommentsModalVisible(false)}
+                        style={{
+                          alignSelf: 'center',
+                          backgroundColor: themedColor('#444', theme.card),
+                          paddingHorizontal: 32,
+                          paddingVertical: 10,
+                          borderRadius: 8,
+                          marginBottom: 12,
+                          marginTop: 2,
+                        }}
+                      >
+                        <Text style={{ color: themedColor('#fff', theme.textPrimary), fontWeight: 'bold', fontSize: 15 }}>
+                          {t("home.close")}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </KeyboardAvoidingView>
+                </View>
+              )}
             </SafeAreaView>
           </GestureHandlerRootView>
         )}

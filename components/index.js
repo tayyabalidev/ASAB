@@ -4,6 +4,7 @@ export { default as Loader } from './Loader';
 export { default as MediaEditor } from './MediaEditor';
 export { default as PhotoEditor } from './PhotoEditor';
 export { default as VideoCard } from './VideoCard';
+export { default as VideoProgressBar } from './VideoProgressBar';
 export { default as Trending } from './Trending';
 export { default as EmptyState } from './EmptyState';
 export { default as InfoBox } from './InfoBox';
