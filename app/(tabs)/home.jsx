@@ -1380,7 +1380,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         >
           <View
             style={{
-              backgroundColor: themedColor('#22223b', theme.surface),
+              backgroundColor: themedColor('#22223bdc', theme.surface),
               borderTopLeftRadius: 18,
               borderTopRightRadius: 18,
               width: '100%',
@@ -1437,7 +1437,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                             >
                               <Image
                                 source={isLiked ? icons.heartCheck : icons.heartUncheck}
-                                style={{ width: 20, height: 20, marginRight: 4 }}
+                                style={{ width: 48, height: 48, marginRight: 4 }}
                                 resizeMode="contain"
                               />
                               <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 12 }}>
