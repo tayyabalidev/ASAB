@@ -21,17 +21,13 @@ const Welcome = () => {
 
   // Show splash only for users who still need onboarding
   if (showSplash && !isLogged) {
-    console.log('Showing splash screen');
     return <SplashScreen onComplete={() => {
-      console.log('Splash screen completed, showing onboarding');
       setShowSplash(false);
     }} />;
   }
 
   // After splash screen, check if user is logged in
   if (!loading && isLogged) return <Redirect href="/home" />;
-
-  console.log('Showing onboarding page');
 
   return (
     <LinearGradient

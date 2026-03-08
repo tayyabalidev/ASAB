@@ -22,3 +22,5 @@ export { default as SplashScreen } from './SplashScreen';
 export { default as ThemeToggle } from './ThemeToggle';
 export { default as LanguageSelector } from './LanguageSelector';
 export { default as InstagramPreviewScreen } from './InstagramPreviewScreen';
+// Export CallButton
+export { default as CallButton } from './CallButton';

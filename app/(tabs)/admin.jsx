@@ -313,11 +313,9 @@ const AdminDashboard = () => {
                                                 creatorStripeAccountId = null; // Account not ready
                                               }
                                             } catch (statusError) {
-                                              console.log("Could not verify account status:", statusError);
                                             }
                                           }
                                         } catch (e) {
-                                          console.log("Could not fetch creator Stripe account:", e);
                                         }
 
                                         // Process payout via Stripe
@@ -333,7 +331,6 @@ const AdminDashboard = () => {
                                           transactionId = payoutResult.transferId;
                                         }
                                       } catch (payoutError) {
-                                        console.error("Stripe payout error:", payoutError);
                                         // Check if it requires manual processing
                                         if (payoutError.message?.includes('bank account not linked') || 
                                             payoutError.message?.includes('requiresManualProcessing')) {
@@ -381,7 +378,6 @@ const AdminDashboard = () => {
                                       // Refresh data
                                       await load();
                                     } catch (error) {
-                                      console.error("Error approving payout:", error);
                                       Alert.alert("Error", error.message || "Failed to approve payout");
                                     }
                                   }

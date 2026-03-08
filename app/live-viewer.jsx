@@ -36,7 +36,6 @@ const LiveViewer = () => {
 
         setStream(streamData);
       } catch (error) {
-        console.error('Error loading stream:', error);
         Alert.alert(t('common.error'), t('liveViewer.loadError'));
         router.replace('/live-streams');
       } finally {
@@ -80,7 +79,7 @@ const LiveViewer = () => {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <View style={styles.container}>
-          {/* Video Player - Agora will work after EAS build */}
+          {/* Video Player - Integrate your new live streaming SDK */}
           <LiveStreamPlayer 
             stream={stream}
             onClose={handleClose}

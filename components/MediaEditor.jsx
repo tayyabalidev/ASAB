@@ -550,7 +550,6 @@ const MediaEditor = ({
         });
         setFilterThumbnails(thumbnails);
       } catch (error) {
-        console.log('Error converting image to base64:', error);
         // Fallback to original URI
         const thumbnails = {};
         FILTERS.forEach(filter => {
@@ -848,7 +847,6 @@ const MediaEditor = ({
               } else {
                 // This should never happen - animated values should exist before drag
                 // If it does happen, log warning but don't update state (would cause glitch)
-                console.warn('Animated values missing for text', textId, '- TextItem may not have mounted yet');
                 // Don't update state here - wait for TextItem to create animated values
               }
               
@@ -1059,7 +1057,6 @@ const MediaEditor = ({
             setVideoEndTime(durationSeconds);
           }
         } catch (error) {
-          console.log('Error getting video duration:', error);
         }
       };
       
@@ -1122,7 +1119,6 @@ const MediaEditor = ({
       setCropData({ rotation, flipHorizontal, flipVertical });
       return updatedMedia;
     } catch (error) {
-      console.error('Crop/Rotate error:', error);
       Alert.alert('Error', 'Failed to crop/rotate image');
       return media;
     }
@@ -1303,7 +1299,6 @@ const MediaEditor = ({
             setIsCapturing(false);
             return uri;
           } catch (error) {
-            console.log('Capture failed:', error);
             setIsCapturing(false);
             return null;
           }
@@ -1458,11 +1453,9 @@ const MediaEditor = ({
                     pointerEvents="none"
                     onError={(syntheticEvent) => {
                       const { nativeEvent } = syntheticEvent;
-                      console.log('WebView error: ', nativeEvent);
                     }}
                     onHttpError={(syntheticEvent) => {
                       const { nativeEvent } = syntheticEvent;
-                      console.log('WebView HTTP error: ', nativeEvent);
                     }}
                     key={`preview-${selectedFilter}-${activeTab}`}
                   />

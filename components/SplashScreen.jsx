@@ -10,14 +10,12 @@ const SplashScreen = ({ onComplete }) => {
   
   const splashImages = [
     require('../assets/images/splash1.png'),
-    require('../assets/images/splash2.png'),
     require('../assets/images/splash3.png'),
     require('../assets/images/splash4.png'),
   ];
 
   const splashQuotes = [
     "Where memories live and connections grow.",
-    "Share your story, connect with hearts.",
     "Your moments, our connections. Let's share!",
     "Welcome to ASAB"
   ];

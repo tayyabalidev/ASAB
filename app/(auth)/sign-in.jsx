@@ -102,16 +102,11 @@ const SignIn = () => {
     const successUrl = `${appwriteConfig.platform}://auth/facebook-success`;
     const failureUrl = `${appwriteConfig.platform}://auth/facebook-failure`;
     
-    console.log('🚀 Starting Facebook login...');
-    console.log('📍 Success URL:', successUrl);
-    console.log('📍 Failure URL:', failureUrl);
-    
     try {
       // This opens a browser/webview for Facebook OAuth
       // After successful login, Appwrite will redirect back to the app via deep link
       // The deep link handler in app/_layout.jsx will handle user creation
       await signInWithFacebook(successUrl, failureUrl);
-      console.log('✅ Facebook OAuth initiated - Browser should open now');
       
       // Show instructions
       Alert.alert(
@@ -122,11 +117,9 @@ const SignIn = () => {
       
       // Wait a bit for browser to open, then start polling
       setTimeout(() => {
-        console.log('⏳ Starting polling for session...');
         startSessionPolling();
       }, 3000);
     } catch (error) {
-      console.error('❌ Facebook login error:', error);
       Alert.alert(t("common.error"), error.message || t("auth.oauthFailed"));
       setIsFacebookLoading(false);
     }
@@ -137,15 +130,12 @@ const SignIn = () => {
     const successUrl = `${appwriteConfig.platform}://auth/google-success`;
     const failureUrl = `${appwriteConfig.platform}://auth/google-failure`;
     
-    console.log('🚀 Starting Google login...');
-    console.log('📍 Success URL:', successUrl);
-    console.log('📍 Failure URL:', failureUrl);
-    
     try {
+      console.log('Starting Google OAuth with URLs:', { successUrl, failureUrl });
       // This opens a browser/webview for Google OAuth
       await signInWithGoogle(successUrl, failureUrl);
-      console.log('✅ Google OAuth initiated - Browser should open now');
       
+      console.log('Google OAuth browser opened, starting polling...');
       // Show instructions
       Alert.alert(
         t("auth.googleLoginTitle"),
@@ -153,12 +143,17 @@ const SignIn = () => {
         [{ text: t("common.ok") }]
       );
       
-      // Start polling for session
-      startGoogleSessionPolling();
+      // Wait a moment for browser to open, then start polling
+      setTimeout(() => {
+        startGoogleSessionPolling();
+      }, 2000);
     } catch (error) {
-      console.error('❌ Google login error:', error);
-      Alert.alert(t("common.error"), error.message || t("auth.oauthFailed"));
+      console.error('Google OAuth error:', error);
       setIsGoogleLoading(false);
+      Alert.alert(
+        t("common.error"), 
+        error.message || t("auth.oauthFailed")
+      );
     }
   };
 
@@ -169,27 +164,23 @@ const SignIn = () => {
     
     const pollInterval = setInterval(async () => {
       pollCount++;
-      console.log(`🔄 Polling for session... (${pollCount}/${maxPolls})`);
       
       try {
         // Check if we have a valid session
         const currentAccount = await getAccount();
         if (currentAccount && currentAccount.$id) {
-          console.log('✅ Session found via polling!');
           clearInterval(pollInterval);
           
           // Get or create user
           try {
             const user = await getOrCreateFacebookUser();
             if (user) {
-              console.log('✅ User created/logged in via polling:', user);
               setUser(user);
               setIsLogged(true);
               setIsFacebookLoading(false);
               router.replace('/(tabs)/home');
             }
           } catch (error) {
-            console.error('❌ Error creating user:', error);
             setIsFacebookLoading(false);
             Alert.alert(t("common.error"), t("auth.createUserFailed"));
           }
@@ -197,14 +188,11 @@ const SignIn = () => {
       } catch (error) {
         // Log error for debugging
         if (pollCount % 5 === 0) { // Log every 5 seconds
-          console.log(`⚠️ Session check error (${pollCount}/30):`, error.message || error);
         }
         
         // Session not ready yet, continue polling
         if (pollCount >= maxPolls) {
-          console.log('⏰ Polling timeout - no session found');
-          console.error('❌ Final error:', error);
-          clearInterval(pollInterval);
+            clearInterval(pollInterval);
           setIsFacebookLoading(false);
           
           // Show more helpful error message
@@ -227,58 +215,92 @@ const SignIn = () => {
   // Poll for OAuth session after Google login
   const startGoogleSessionPolling = () => {
     let pollCount = 0;
-    const maxPolls = 30; // Poll for 30 seconds (30 * 1 second)
+    const maxPolls = 90; // Poll for 90 seconds - session establishment can take time
+    let missingScopesCount = 0; // Track consecutive "missing scopes" errors
     
     const pollInterval = setInterval(async () => {
       pollCount++;
-      console.log(`🔄 Google: Polling for session... (${pollCount}/${maxPolls})`);
       
       try {
-        // Check if we have a valid session
+        // Check if we have a valid authenticated session
+        // If account.get() succeeds without "missing scopes" error, session is ready
         const currentAccount = await getAccount();
+        
+        // If we get here without error, the session is authenticated
         if (currentAccount && currentAccount.$id) {
-          console.log('✅ Google: Session found via polling!');
           clearInterval(pollInterval);
+          missingScopesCount = 0; // Reset counter
+          
+          console.log('Google OAuth session authenticated, creating user...');
           
           // Get or create user
           try {
             const user = await getOrCreateGoogleUser();
             if (user) {
-              console.log('✅ Google: User created/logged in via polling:', user);
               setUser(user);
               setIsLogged(true);
               setIsGoogleLoading(false);
               router.replace('/(tabs)/home');
+              return;
             }
           } catch (error) {
-            console.error('❌ Google: Error creating user:', error);
+            console.error('Error creating Google user:', error);
             setIsGoogleLoading(false);
-            Alert.alert(t("common.error"), t("auth.createUserFailed"));
+            Alert.alert(t("common.error"), error.message || t("auth.createUserFailed"));
+            return;
           }
         }
       } catch (error) {
-        // Log error for debugging
-        if (pollCount % 5 === 0) {
-          console.log(`⚠️ Google: Session check error (${pollCount}/30):`, error.message || error);
+        const errorMessage = error.message || '';
+        
+        // "Missing scopes" means session is being established but not ready yet
+        // This is normal during OAuth flow - continue polling
+        if (errorMessage.includes('missing scopes') || errorMessage.includes('scope')) {
+          missingScopesCount++;
+          
+          // Log every 10 seconds
+          if (pollCount % 10 === 0) {
+            console.log(`Google OAuth polling attempt ${pollCount}/${maxPolls}: Session establishing... (missing scopes - this is normal)`);
+          }
+          
+          // If we've been getting "missing scopes" for too long, it might be a real issue
+          if (missingScopesCount > 60) {
+            clearInterval(pollInterval);
+            setIsGoogleLoading(false);
+            Alert.alert(
+              t("auth.oauthIssueTitle"),
+              `The Google OAuth session is taking too long to establish. Please:\n\n1. Verify the callback URI is added in Google Cloud Console:\nhttps://nyc.cloud.appwrite.io/v1/account/sessions/oauth2/callback/google/6854922e0036a1e8dee6\n\n2. Complete the sign in flow in your browser\n\n3. Return to the app after authentication\n\n4. Try signing in again`
+            );
+            return;
+          }
+          
+          // Continue polling - session is being established
+          return;
         }
+        
+        // Log other errors every 10 seconds
+        if (pollCount % 10 === 0) {
+          console.log(`Google OAuth polling attempt ${pollCount}/${maxPolls}:`, errorMessage);
+        }
+        
+        // Reset missing scopes counter if we get a different error
+        missingScopesCount = 0;
         
         // Session not ready yet, continue polling
         if (pollCount >= maxPolls) {
-          console.log('⏰ Google: Polling timeout - no session found');
-          console.error('❌ Google: Final error:', error);
           clearInterval(pollInterval);
           setIsGoogleLoading(false);
           
-          // Show more helpful error message
-          if (error.message && error.message.includes('missing scopes')) {
+          // Show more helpful error message with troubleshooting steps
+          if (errorMessage.includes('401') || errorMessage.includes('unauthorized')) {
             Alert.alert(
               t("auth.oauthIssueTitle"),
-              t("auth.oauthConfigCheck", { provider: "Google" })
+              `Google OAuth authentication failed. Please verify:\n\n1. The callback URI is correctly configured in Google Cloud Console\n2. The App ID and Secret are correct in Appwrite\n3. Try signing in again`
             );
           } else {
             Alert.alert(
-              t("common.info"),
-              t("auth.oauthIncomplete")
+              t("auth.oauthIssueTitle"),
+              `The Google OAuth session was not established. Please verify:\n\n1. The callback URI is added in Google Cloud Console:\nhttps://nyc.cloud.appwrite.io/v1/account/sessions/oauth2/callback/google/6854922e0036a1e8dee6\n\n2. Complete the sign in flow in your browser\n\n3. Return to the app after authentication`
             );
           }
         }

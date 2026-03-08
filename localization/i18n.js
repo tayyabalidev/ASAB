@@ -37,7 +37,6 @@ if (!i18n.isInitialized) {
       },
     })
     .catch((error) => {
-      console.error('i18n initialization error:', error);
     });
 }
 

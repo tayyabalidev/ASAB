@@ -197,7 +197,6 @@ const Create = () => {
       } catch (error) {
         // Silently ignore seeking errors - they're harmless
         if (!error?.message?.includes?.("Seeking interrupted")) {
-          console.log("Seek error:", error);
         }
       } finally {
         // Reset seeking flag after a short delay
@@ -385,10 +384,6 @@ const Create = () => {
         const isAppwriteAvailable = await checkAppwriteFunctions();
         setUseAppwriteFunctions(isAppwriteAvailable);
         
-        console.log('📊 Server Status Check:', {
-          separateServer: isServerAvailable ? '✅ Available' : '❌ Not Available',
-          appwriteFunctions: isAppwriteAvailable ? '✅ Available' : '❌ Not Available'
-        });
       } catch (error) {
         setUseProcessing(false);
         setUseAppwriteFunctions(false);
@@ -424,7 +419,6 @@ const Create = () => {
         // For now, we'll extract it when the filter modal opens
         // The thumbnails will use WebView with the video frame once extracted
       } catch (error) {
-        console.error("Error extracting video frame:", error);
       }
     };
 
@@ -564,14 +558,10 @@ const Create = () => {
           if (fileInfo.exists) {
             // Use the permanent path - this is the trimmed video
             finalUri = permanentPath;
-          } else {
-            console.warn(
-              "Trimmed video copy verification failed, using original URI"
-            );
+          } else {  
             finalUri = selectedAsset.uri;
           }
         } catch (copyError) {
-          console.error("Error copying trimmed video:", copyError);
           // If copy fails, use original URI (might still work on some platforms)
           // but the trimmed video might not persist
           finalUri = selectedAsset.uri;
@@ -595,21 +585,7 @@ const Create = () => {
         }
 
         if (selectType === "video") {
-          console.log("📹 Video selected:", {
-            uri: file.uri ? "present" : "missing",
-            name: file.name,
-            type: file.type,
-            size: file.size
-          });
           
-          // Update form with video - use functional update to ensure we have latest state
-          setForm((prevForm) => ({
-            ...prevForm,
-            video: file,
-            filter: "none", // Reset filter when new video is selected
-          }));
-          
-          console.log("✅ Video set in form");
           setIsMediaEdited(false); // Reset edit flag when new video is selected
           // Reset all video editing states
           setVideoTrimStart(0);
@@ -644,7 +620,6 @@ const Create = () => {
         manuallySetBase64Ref.current = false; // Reset manual base64 flag when new image is selected
       }
     } catch (error) {
-      console.error("Error in openPicker:", error);
       const errorMessage =
         error?.message || error?.toString() || "Unknown error occurred";
       Alert.alert(
@@ -688,7 +663,6 @@ const Create = () => {
       }
       setShowFilterModal(false);
     } catch (error) {
-      console.error("Filter application error:", error);
       Alert.alert(
         t("common.error") || "Error",
         error.message || "Failed to apply filter. Please try again."
@@ -738,7 +712,6 @@ const Create = () => {
       }
       setShowAdjustModal(false);
     } catch (error) {
-      console.error("Adjustments application error:", error);
       Alert.alert(
         t("common.error") || "Error",
         error.message || "Failed to apply adjustments. Please try again."
@@ -776,7 +749,6 @@ const Create = () => {
         setShowMusicModal(false);
       }
     } catch (error) {
-      console.error("Music selection error:", error);
       Alert.alert(t("common.error"), "Failed to select music file");
     }
   };
@@ -861,12 +833,6 @@ const Create = () => {
         setProcessingMedia(true);
         setProcessingProgress(10);
         
-        console.log("🔄 Processing video with trim/speed changes:", {
-          trim: trimData,
-          speed: videoSpeed,
-          filter: form.filter
-        });
-        
         let processedResult = null;
         
         // Try Appwrite Functions first if available
@@ -882,7 +848,6 @@ const Create = () => {
               videoSpeed: videoSpeed,
             });
           } catch (appwriteError) {
-            console.warn("⚠️ Appwrite Functions failed, trying separate server:", appwriteError.message);
             // Fallback to separate server if Appwrite fails
             if (useProcessing) {
               try {
@@ -896,7 +861,6 @@ const Create = () => {
                   videoSpeed: videoSpeed,
                 });
               } catch (serverError) {
-                console.error("❌ Separate server also failed:", serverError);
                 throw appwriteError; // Throw original error
               }
             } else {
@@ -929,13 +893,11 @@ const Create = () => {
           );
           
           setProcessedVideoUri(processedUri);
-          console.log("✅ Preview video processed with trim/speed:", processedUri);
         }
         
         setProcessingProgress(100);
         setProcessingMedia(false);
       } catch (error) {
-        console.error("❌ Preview processing error:", error);
         setProcessingMedia(false);
         // Don't clear processedVideoUri on error - keep previous processed video if it exists
         // Trim/speed values are saved in state, so they will be applied during final upload
@@ -949,7 +911,6 @@ const Create = () => {
     } else {
       // If no processing server available, trim/speed changes will still be applied during final upload
       // The values are saved in state (videoTrimStart, videoTrimEnd, videoSpeed)
-      console.log("ℹ️ No processing server available - trim/speed will be applied during upload");
     }
   };
 
@@ -964,12 +925,6 @@ const Create = () => {
       try {
         setProcessingMedia(true);
         setProcessingProgress(10);
-        
-        console.log("🔄 Processing video preview with filter:", filterId);
-        console.log("🔧 Available processing:", {
-          appwrite: useAppwriteFunctions ? "✅" : "❌",
-          separate: useProcessing ? "✅" : "❌"
-        });
         
         // Determine if trim is needed for preview
         // Only apply trim if video duration is known and trim values are set
@@ -1003,13 +958,11 @@ const Create = () => {
           );
           
           setProcessedVideoUri(processedUri);
-          console.log("✅ Preview video processed:", processedUri);
         }
         
         setProcessingProgress(100);
         setProcessingMedia(false);
       } catch (error) {
-        console.error("❌ Preview processing error:", error);
         setProcessingMedia(false);
         // Don't clear processedVideoUri on error - keep previous processed video if it exists
         // Filter state is saved in form.filter, so it will be applied during upload
@@ -1175,7 +1128,6 @@ const Create = () => {
 
       // IMPORTANT: If base64 was manually set (from PhotoEditor), don't overwrite it
       if (manuallySetBase64Ref.current) {
-        console.log("Skipping base64 conversion - manually set base64 exists");
         return;
       }
 
@@ -1222,8 +1174,7 @@ const Create = () => {
         const base64Data = `data:image/jpeg;base64,${base64}`;
         setImageBase64(base64Data);
         lastConvertedUri.current = currentUri;
-      } catch (error) {
-        console.error("Error converting image to base64:", error);
+      } catch (error) { 
         // Fallback: try using the URI directly (WebView might handle it)
         setImageBase64(currentUri);
         lastConvertedUri.current = currentUri;
@@ -1534,8 +1485,7 @@ const Create = () => {
                     }
                     
                     ctx.putImageData(imageData, 0, 0);
-                  } catch (e) {
-                    console.error('Error applying filters:', e);
+                  } catch (e) { 
                   }
                 }
                 
@@ -1633,8 +1583,7 @@ const Create = () => {
                   type: 'captureSuccess',
                   data: dataURL
                 }));
-              } catch (error) {
-                console.error('Capture error:', error);
+              } catch (error) {   
                 window.ReactNativeWebView.postMessage(JSON.stringify({
                   type: 'captureError',
                   message: error.message || 'Failed to capture image'
@@ -1701,35 +1650,18 @@ const Create = () => {
 
   const submit = async () => {
     if (postType === "video") {
-      console.log("📤 Submit button clicked");
-      console.log("📋 Form state:", {
-        hasPrompt: !!form.prompt,
-        hasTitle: !!form.title,
-        hasVideo: !!form.video,
-        videoDetails: form.video ? {
-          uri: form.video.uri ? "present" : "missing",
-          name: form.video.name,
-          type: form.video.type
-        } : "null"
-      });
-
       if (!form.prompt || form.prompt.trim() === "") {
-        console.log("❌ Validation failed: Prompt required");
         return Alert.alert(t("common.error"), t("alerts.promptRequired"));
       }
 
       if (!form.title || form.title.trim() === "") {
-        console.log("❌ Validation failed: Title required");
         return Alert.alert(t("common.error"), t("alerts.titleRequired"));
       }
 
       if (!form.video) {
-        console.log("❌ Validation failed: Video required");
-        console.log("🔍 Current form.video:", form.video);
         return Alert.alert(t("common.error"), t("alerts.videoRequired"));
       }
       
-      console.log("✅ All validations passed, starting upload...");
 
       if (!user || !user.$id) {
         return Alert.alert(t("common.error"), t("alerts.loginToUpload"));
@@ -1758,25 +1690,12 @@ const Create = () => {
             setProcessingMedia(true);
             setProcessingProgress(10);
 
-            console.log("🔄 Processing video with filter:", form.filter);
-            console.log("📹 Video file:", form.video);
-            console.log("🔧 Available servers:", {
-              appwrite: useAppwriteFunctions ? "✅" : "❌",
-              separate: useProcessing ? "✅" : "❌"
-            });
 
             let processedResult = null;
 
             // Try Appwrite Functions first if available
             if (useAppwriteFunctions) {
               try {
-                console.log("☁️ Using Appwrite Functions for processing...");
-                console.log("📤 Video details:", {
-                  uri: form.video.uri ? "present" : "missing",
-                  name: form.video.name,
-                  type: form.video.type,
-                  size: form.video.size
-                });
                 
                 processedResult = await processVideoAuto({
                   video: form.video,
@@ -1788,14 +1707,7 @@ const Create = () => {
                   videoSpeed: videoSpeed,
                 });
                 
-                console.log("✅ Appwrite Functions processing result:", {
-                  success: !!processedResult,
-                  hasBase64: !!(processedResult && processedResult.base64),
-                  resultKeys: processedResult ? Object.keys(processedResult) : []
-                });
               } catch (appwriteError) {
-                console.error("❌ Appwrite Functions error:", appwriteError);
-                console.warn("⚠️ Appwrite Functions failed, trying separate server:", appwriteError.message);
                 // Fallback to separate server if Appwrite fails
                 if (useProcessing) {
                   try {
@@ -1808,8 +1720,7 @@ const Create = () => {
                       trim: trimData,
                       videoSpeed: videoSpeed,
                     });
-                  } catch (serverError) {
-                    console.error("❌ Separate server also failed:", serverError);
+                  } catch (serverError) { 
                     throw appwriteError; // Throw original error
                   }
                 } else {
@@ -1820,7 +1731,6 @@ const Create = () => {
             } 
             // Use separate server if Appwrite Functions not available
             else if (useProcessing) {
-              console.log("🖥️ Using separate server for processing...");
               processedResult = await processVideo({
                 video: form.video,
                 music: form.music || null,
@@ -1830,12 +1740,9 @@ const Create = () => {
                 trim: trimData,
                 videoSpeed: videoSpeed,
               });
-              console.log("✅ Separate server processing:", processedResult ? "Success" : "Failed");
             } else {
-              console.log("ℹ️ No processing server available - using original video");
             }
             
-            console.log("✅ Final processing result:", processedResult ? "Success" : "Failed");
 
             setProcessingProgress(50);
 
@@ -1863,38 +1770,20 @@ const Create = () => {
                 size: fileSize,
               };
 
-              console.log("💾 Processed video saved:", processedUri);
             }
 
             setProcessingProgress(100);
             setProcessingMedia(false);
           } catch (processError) {
-            console.error("❌ Video processing error:", processError);
-            console.error("❌ Error details:", {
-              message: processError.message,
-              stack: processError.stack,
-              name: processError.name
-            });
             setProcessingMedia(false);
             // Continue with original video - don't block upload
-            console.warn("⚠️ Video processing failed, using original video:", processError.message);
-            console.log("ℹ️ Continuing upload with original video (no filter applied)");
             processedVideo = finalVideo;
           }
         } else {
           // No processing needed - use original video
-          console.log("ℹ️ No filter/music/trim/speed selected - using original video");
         }
 
         setProcessingProgress(0);
-
-        console.log("📤 Starting video upload to Appwrite...");
-        console.log("📹 Video to upload:", {
-          uri: processedVideo.uri ? "present" : "missing",
-          name: processedVideo.name,
-          type: processedVideo.type,
-          size: processedVideo.size
-        });
 
         try {
           await createVideoPost({
@@ -1903,20 +1792,11 @@ const Create = () => {
             userId: user.$id,
           });
 
-          console.log("✅ Video uploaded successfully!");
           Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
           
-          // Navigate to home and refresh data
-          router.push("/home");
-          
-          // Force refresh home screen data after a short delay
-          // This ensures the new video appears in the feed
-          setTimeout(() => {
-            console.log("🔄 Triggering home screen refresh...");
-            // The home screen will auto-refresh on focus due to useFocusEffect
-          }, 500);
+          // Stay on create page - user can navigate manually if they want
+          // The home screen will auto-refresh when user navigates to it
         } catch (uploadError) {
-          console.error("❌ Video upload error:", uploadError);
           throw uploadError; // Re-throw to be caught by outer catch
         }
       } catch (error) {
@@ -1991,7 +1871,6 @@ const Create = () => {
           try {
             setProcessingMedia(true);
             setProcessingProgress(20);
-            console.log("Capturing WebView content with text/overlays...");
 
             const capturedDataURL = await captureWebViewContent();
 
@@ -2051,13 +1930,6 @@ const Create = () => {
           try {
             setProcessingMedia(true);
             setProcessingProgress(10);
-
-            console.log(
-              "Processing photo with filter:",
-              photoForm.filter,
-              "adjustments:",
-              adjustments
-            );
 
             let processedPhoto = null;
 
@@ -2144,10 +2016,6 @@ const Create = () => {
             setProcessingProgress(100);
             setProcessingMedia(false);
           } catch (processError) {
-            console.log(
-              "⚠️ Processing failed, using original photo:",
-              processError
-            );
             setProcessingMedia(false);
             // Continue with original photo if processing fails (filters will be applied via CSS)
           }
@@ -2221,7 +2089,7 @@ const Create = () => {
         setUploading(false);
 
         Alert.alert(t("common.success"), "Photo uploaded successfully!");
-        router.push("/profile");
+        // Stay on create page - user can navigate manually if they want
       } catch (error) {
         // Check for network-related errors and show user-friendly messages
         const errorMessage = error.message || error.toString();
@@ -3282,10 +3150,7 @@ const Create = () => {
                                     );
                                   }
                                 } catch (error) {
-                                  console.log(
-                                    "Error parsing WebView message:",
-                                    error
-                                  );
+                                 
                                 }
                               }}
                             />
@@ -3663,10 +3528,7 @@ const Create = () => {
                                           }
                                         }
                                       } catch (error) {
-                                        console.error(
-                                          "Error picking overlay image:",
-                                          error
-                                        );
+                                       
                                         Alert.alert(
                                           "Error",
                                           "Failed to pick overlay image"
@@ -5553,7 +5415,6 @@ const Create = () => {
                             );
                           } catch (error) {
                             // Ignore seeking errors
-                            console.log("Seek error (ignored):", error);
                           }
                         }
                       }}
@@ -6739,7 +6600,6 @@ const Create = () => {
                         onShouldStartLoadWithRequest={() => true}
                         onError={(syntheticEvent) => {
                           const { nativeEvent } = syntheticEvent;
-                          console.warn("WebView error: ", nativeEvent);
                         }}
                         onLoadEnd={() => {
                           // WebView loaded successfully
@@ -6793,10 +6653,7 @@ const Create = () => {
                               }
                             }
                           } catch (error) {
-                            console.log(
-                              "Error parsing WebView message:",
-                              error
-                            );
+                           
                           }
                         }}
                         ref={textWebViewRef}
@@ -7793,18 +7650,13 @@ const Create = () => {
 
                               setImageOverlays([...imageOverlays, newOverlay]);
                             } catch (error) {
-                              console.error(
-                                "Error processing overlay image:",
-                                error
-                              );
                               Alert.alert(
                                 "Error",
                                 "Failed to process overlay image"
                               );
                             }
                           }
-                        } catch (error) {
-                          console.error("Error picking overlay image:", error);
+                        } catch (error) {   
                           Alert.alert("Error", "Failed to pick overlay image");
                         }
                       }}
@@ -7973,16 +7825,10 @@ const Create = () => {
                         }
                       );
                       editedBase64 = `data:image/jpeg;base64,${base64}`;
-                      console.log(
-                        "✅ Converted edited image to base64, length:",
-                        editedBase64.length
-                      );
+                     
                     }
                   } catch (conversionError) {
-                    console.error(
-                      "Error converting edited image to base64:",
-                      conversionError
-                    );
+                   
                   }
 
                   if (!editedBase64) {
@@ -8004,10 +7850,7 @@ const Create = () => {
                   // Use a promise to ensure state is updated
                   await new Promise((resolve) => {
                     setImageBase64(editedBase64);
-                    console.log(
-                      "✅ Set imageBase64 state, length:",
-                      editedBase64.length
-                    );
+                   
                     // Use requestAnimationFrame to ensure React has processed the state update
                     requestAnimationFrame(() => {
                       setTimeout(resolve, 150);
@@ -8054,7 +7897,6 @@ const Create = () => {
                   }, 2000);
                   Alert.alert("Success", "Photo edited and saved!");
                 } catch (error) {
-                  console.error("Error saving edited photo:", error);
                   isConvertingRef.current = false;
                   manuallySetBase64Ref.current = false; // Reset on error
                   Alert.alert(

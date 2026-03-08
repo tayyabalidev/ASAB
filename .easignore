@@ -1,0 +1,75 @@
+# EAS Build ignore file
+# Files and directories to exclude from EAS Build upload
+
+# Dependencies (will be installed on build server)
+node_modules/
+
+# Build outputs
+build/
+dist/
+.expo/
+web-build/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Environment files (sensitive)
+.env.local
+.env.*.local
+
+# Test files
+coverage/
+.nyc_output/
+*.test.js
+*.spec.js
+__tests__/
+
+# Documentation (not needed for build)
+*.md
+docs/
+
+# Server files (not needed for mobile build)
+server/
+appwrite-functions/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Cache
+.cache/
+.parcel-cache/
+.metro-health-check*
+
+# Android build files (will be regenerated)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+
+# iOS build files (will be regenerated)
+ios/build/
+ios/Pods/
+ios/.xcode.env.local
+
+# Large media files (if not needed)
+# Uncomment if you have large video/image files
+# assets/videos/
+# assets/large-images/

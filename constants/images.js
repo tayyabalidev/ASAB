@@ -12,7 +12,6 @@ import blogo from "../assets/images/blogo.png";
 import amedia from "../assets/images/amedia.png";
 import Asearch from "../assets/images/Asearch.png";
 import splash1 from "../assets/images/splash1.png";
-import splash2 from "../assets/images/splash2.png";
 import splash3 from "../assets/images/splash3.png";
 import splash4 from "../assets/images/splash4.png";
 import beigeBack from "../assets/images/Beige Back.png";
@@ -36,7 +35,6 @@ export default {
   amedia,
   Asearch,
   splash1,
-  splash2,
   splash3,
   splash4,
   beigeBack,

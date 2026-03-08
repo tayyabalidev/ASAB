@@ -97,7 +97,6 @@ const GoLive = () => {
         }
       });
     } catch (error) {
-      console.error('Error starting live stream:', error);
       Alert.alert(t('common.error'), t('liveGo.startError'));
     } finally {
       setLoading(false);

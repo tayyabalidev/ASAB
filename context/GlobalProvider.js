@@ -90,7 +90,6 @@ const GlobalProvider = ({ children }) => {
           setIsDarkMode(savedTheme === "dark");
         }
       } catch (error) {
-        console.warn("Failed to load theme preference:", error);
       }
     };
 
@@ -123,7 +122,6 @@ const GlobalProvider = ({ children }) => {
           await AsyncStorage.setItem("app_language", langCode);
         }
       } catch (error) {
-        console.error("Error changing language:", error);
       }
     },
     []
@@ -132,7 +130,6 @@ const GlobalProvider = ({ children }) => {
   useEffect(() => {
     // Check if getCurrentUser is available
     if (typeof getCurrentUser !== 'function') {
-      console.error('getCurrentUser is not a function:', getCurrentUser);
       setLoading(false);
       return;
     }
@@ -148,7 +145,6 @@ const GlobalProvider = ({ children }) => {
         }
       })
       .catch((error) => {
-        console.error('Error getting current user:', error);
         setIsLogged(false);
         setUser(null);
       })
@@ -169,7 +165,6 @@ const GlobalProvider = ({ children }) => {
         // Ensure direction matches the initial language
         applyLayoutDirection(i18n.language);
       } catch (error) {
-        console.warn("Failed to load language preference:", error);
         applyLayoutDirection(i18n.language);
       }
     };

@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Image, RefreshControl } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Image, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useGlobalContext } from '../../context/GlobalProvider';
-import { getActiveLiveStreams } from '../../lib/livestream';
+import { getActiveLiveStreams, endLiveStream, forceEndUserStreams } from '../../lib/livestream';
 import { EmptyState } from '../../components';
 
-const LiveStreamCard = ({ stream, onPress, t, isRTL }) => {
+const LiveStreamCard = ({ stream, onPress, onEndStream, currentUserId, t, isRTL }) => {
   const getDuration = () => {
     const startTime = new Date(stream.startTime).getTime();
     const now = Date.now();
@@ -62,13 +62,26 @@ const LiveStreamCard = ({ stream, onPress, t, isRTL }) => {
             </View>
           </View>
         </View>
+        
+        {/* End Stream Button (only for own streams) */}
+        {currentUserId && stream.hostId === currentUserId && (
+          <TouchableOpacity
+            style={styles.endStreamButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              if (onEndStream) onEndStream(stream);
+            }}
+          >
+            <Text style={styles.endStreamText}>End Stream</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </TouchableOpacity>
   );
 };
 
 const LiveStreams = () => {
-  const { isRTL } = useGlobalContext();
+  const { isRTL, user } = useGlobalContext();
   const { t } = useTranslation();
   const [streams, setStreams] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -79,7 +92,6 @@ const LiveStreams = () => {
       const activeStreams = await getActiveLiveStreams();
       setStreams(activeStreams);
     } catch (error) {
-      console.error('Error loading live streams:', error);
     } finally {
       setLoading(false);
     }
@@ -111,6 +123,34 @@ const LiveStreams = () => {
 
   const handleGoLive = () => {
     router.push('/go-live');
+  };
+
+  const handleEndStream = async (stream) => {
+    if (stream.hostId !== user?.$id) {
+      Alert.alert('Error', 'You can only end your own streams.');
+      return;
+    }
+
+    Alert.alert(
+      'End Stream',
+      `Are you sure you want to end "${stream.title}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'End Stream',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await endLiveStream(stream.$id);
+              Alert.alert('Success', 'Stream ended successfully.');
+              loadStreams(); // Refresh list
+            } catch (error) {
+              Alert.alert('Error', `Failed to end stream: ${error.message}`);
+            }
+          }
+        }
+      ]
+    );
   };
 
  
@@ -148,6 +188,8 @@ const LiveStreams = () => {
             <LiveStreamCard
               stream={item}
               onPress={() => handleStreamPress(item)}
+              onEndStream={handleEndStream}
+              currentUserId={user?.$id}
               t={t}
               isRTL={isRTL}
             />
@@ -323,6 +365,19 @@ const styles = StyleSheet.create({
   loadingText: {
     color: '#fff',
     fontSize: 16,
+  },
+  endStreamButton: {
+    marginTop: 10,
+    backgroundColor: '#ff4757',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  endStreamText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
 });
 

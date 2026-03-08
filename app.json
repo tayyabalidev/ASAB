@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "sora",
-    "slug": "sora",
-    "version": "1.0.0",
+    "name": "ASAB",
+    "slug": "asab",
+    "version": "1.0.3",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/images/asab.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash.png",
@@ -15,43 +15,51 @@
       "**/*"
     ],
     "ios": {
+      "icon": "./assets/images/asab.png",
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.sora",
+      "bundleIdentifier": "com.bilal.asab",
+      "displayName": "ASAB",
       "infoPlist": {
+        "CFBundleDisplayName": "ASAB",
+        "CFBundleName": "ASAB",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.bilal.asab"
+            ]
+          }
+        ],
         "NSCameraUsageDescription": "This app needs access to camera for video calls and recording videos",
         "NSMicrophoneUsageDescription": "This app needs access to microphone for audio calls and video recording",
         "NSPhotoLibraryUsageDescription": "This app needs access to photo library to select and upload videos",
         "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication",
         "UIStatusBarStyle": "UIStatusBarStyleLightContent",
-        "UIViewControllerBasedStatusBarAppearance": false,
+        "UIViewControllerBasedStatusBarAppearance": false
       },
       "config": {
         "usesNonExemptEncryption": false
       }
     },
     "android": {
+      "icon": "./assets/images/asab.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/images/asab.png",
+        "backgroundColor": "#000000",
+        "monochromeImage": "./assets/images/asab.png"
       },
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.INTERNET",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.INTERNET"
       ],
-      "package": "com.anonymous.sora",
+      "package": "com.bilal.asab"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "com.jsm.asabcorp",
+    "scheme": "com.bilal.asab",
     "plugins": [
       "expo-router",
       "expo-font",
@@ -59,13 +67,31 @@
       "expo-web-browser",
       "expo-camera",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "buildToolsVersion": "35.0.0",
+            "ndkVersion": "27.0.12077973"
+          }
+        }
+      ],
+      [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
+          "icon": "./assets/images/asab.png",
           "color": "#ffffff",
           "sounds": []
         }
-      ]
-    ]
+      ],
+      "expo-localization"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c9976d74-4083-48ee-a4dd-1e5be3536af9"
+      }
+    }
   }
 }

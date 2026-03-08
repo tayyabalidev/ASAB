@@ -14,9 +14,7 @@ let ffmpegAvailable = false;
 try {
   execSync('ffmpeg -version', { stdio: 'ignore' });
   ffmpegAvailable = true;
-  console.log('FFmpeg is available');
 } catch (error) {
-  console.warn('FFmpeg not found - video processing will fail');
   ffmpegAvailable = false;
 }
 
@@ -123,7 +121,6 @@ module.exports = async (req, res) => {
     }
 
     // Download video from Appwrite Storage
-    console.log('Downloading video file:', videoFileId);
     const videoBuffer = await storage.getFileDownload(storageId, videoFileId);
     
     // Create temp file paths
@@ -196,11 +193,9 @@ module.exports = async (req, res) => {
               fs.unlinkSync(tempMusicPath);
             }
           } catch (e) {
-            console.error('Error cleaning up music file:', e);
           }
         }, 5000);
       } catch (musicError) {
-        console.error('Error processing music:', musicError);
         // Continue without music if music processing fails
       }
     }
@@ -210,15 +205,12 @@ module.exports = async (req, res) => {
       command
         .output(tempOutputPath)
         .on('end', () => {
-          console.log('Video processing completed');
           resolve();
         })
         .on('error', (err) => {
-          console.error('FFmpeg error:', err);
           reject(err);
         })
         .on('progress', (progress) => {
-          console.log('Processing: ' + (progress.percent || 0) + '% done');
         })
         .run();
     });
@@ -227,7 +219,6 @@ module.exports = async (req, res) => {
     const processedBuffer = fs.readFileSync(tempOutputPath);
 
     // Upload processed video back to Appwrite Storage
-    console.log('Uploading processed video...');
     const processedFile = await storage.createFile(
       storageId,
       ID.unique(),
@@ -243,7 +234,6 @@ module.exports = async (req, res) => {
         fs.unlinkSync(tempOutputPath);
       }
     } catch (cleanupError) {
-      console.error('Error cleaning up temp files:', cleanupError);
     }
 
     // Return processed file information
@@ -259,7 +249,6 @@ module.exports = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Video processing error:', error);
     
     // Cleanup temp files on error
     try {
@@ -270,7 +259,6 @@ module.exports = async (req, res) => {
         fs.unlinkSync(tempOutputPath);
       }
     } catch (cleanupError) {
-      console.error('Error cleaning up temp files:', cleanupError);
     }
 
     return res.json({

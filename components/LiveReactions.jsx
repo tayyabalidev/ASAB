@@ -93,7 +93,6 @@ const LiveReactions = ({ streamId, isHost = false }) => {
       // Auto-hide reactions panel after selecting
       setShowReactions(false);
     } catch (error) {
-      console.error('Error adding reaction:', error);
     }
   };
 

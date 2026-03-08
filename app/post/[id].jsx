@@ -76,19 +76,8 @@ const PostDetails = () => {
     setCommentsLoading(true);
     try {
       const postComments = await getComments(id);
-      console.log("Comments fetched:", postComments.length);
-      if (postComments.length > 0) {
-        console.log("First comment:", {
-          id: postComments[0].$id,
-          likes: postComments[0].likes,
-          likesType: typeof postComments[0].likes,
-          isArray: Array.isArray(postComments[0].likes),
-          parentCommentId: postComments[0].parentCommentId,
-        });
-      }
       setComments(postComments);
     } catch (err) {
-      console.error("Error fetching comments:", err);
       setComments([]);
     } finally {
       setCommentsLoading(false);
@@ -138,7 +127,6 @@ const PostDetails = () => {
   };
 
   const handleAddReply = async (parentCommentId) => {
-    console.log("handleAddReply called:", { parentCommentId, replyText, userId: user?.$id, postId: post?.$id });
     if (!replyText.trim()) {
       Alert.alert("Error", "Please enter a reply.");
       return;
@@ -155,12 +143,10 @@ const PostDetails = () => {
     setPostingReply(true);
     try {
       const result = await addComment(post.$id, user.$id, replyText.trim(), parentCommentId);
-      console.log("Reply added:", result);
       await fetchPostComments(); // Refresh comments to get structured data
       setReplyText("");
       setReplyingTo(null);
     } catch (error) {
-      console.error("Error adding reply:", error);
       Alert.alert("Error", error.message || "Failed to add reply.");
     } finally {
       setPostingReply(false);
@@ -168,7 +154,6 @@ const PostDetails = () => {
   };
 
   const handleLikeComment = async (commentId, currentLikes) => {
-    console.log("handleLikeComment called:", { commentId, currentLikes, userId: user?.$id });
     if (!user?.$id) {
       Alert.alert("Error", "Please log in to like comments.");
       return;
@@ -176,7 +161,6 @@ const PostDetails = () => {
     
     const isLiked = Array.isArray(currentLikes) ? currentLikes.includes(user.$id) : false;
     const newLikedState = !isLiked;
-    console.log("Like state:", { isLiked, newLikedState });
     
     // Optimistic update
     setComments((prev) =>
@@ -209,7 +193,6 @@ const PostDetails = () => {
     try {
       await toggleLikeComment(commentId, user.$id);
     } catch (error) {
-      console.error("Error liking comment:", error);
       // Revert on error
       await fetchPostComments();
       Alert.alert("Error", error.message || "Failed to like comment.");

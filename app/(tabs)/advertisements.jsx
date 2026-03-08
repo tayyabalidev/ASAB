@@ -91,25 +91,20 @@ const Advertisements = () => {
 
   const loadAds = async () => {
     if (!user?.$id) {
-      console.log("No user ID available, skipping ad load");
       return;
     }
     
     // Validate user ID before making the request
     if (typeof user.$id !== 'string' || user.$id.trim() === '') {
-      console.error("Invalid user ID:", user.$id);
       Alert.alert(t("common.error"), "Invalid user information. Please login again.");
       return;
     }
     
     setLoading(true);
     try {
-      console.log("Loading ads for user:", user.$id);
       const advertiserAds = await getAdvertiserAds(user.$id);
-      console.log("Loaded ads count:", advertiserAds.length);
       setAds(advertiserAds);
     } catch (error) {
-      console.error("Error in loadAds:", error);
       Alert.alert(t("common.error"), error.message || "Failed to load advertisements");
     } finally {
       setLoading(false);
@@ -224,7 +219,6 @@ const Advertisements = () => {
       setShowCreateModal(false);
       loadAds();
     } catch (error) {
-      console.error("Error creating advertisement:", error);
       Alert.alert(
         t("common.error"), 
         error.message || "Failed to create advertisement. Payment may have been processed but advertisement creation failed."

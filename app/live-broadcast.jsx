@@ -33,7 +33,7 @@ const LiveBroadcast = () => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.container}>
-        {/* Camera View - Agora will work after EAS build */}
+        {/* Camera View - Integrate your new live streaming SDK */}
         <LiveStreamBroadcaster 
           streamId={streamId}
           onStreamEnd={handleStreamEnd}

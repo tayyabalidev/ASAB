@@ -96,14 +96,9 @@ const SignUp = () => {
     const successUrl = `${appwriteConfig.platform}://auth/google-success`;
     const failureUrl = `${appwriteConfig.platform}://auth/google-failure`;
     
-    console.log('🚀 Starting Google sign up...');
-    console.log('📍 Success URL:', successUrl);
-    console.log('📍 Failure URL:', failureUrl);
-    
     try {
       // This opens a browser/webview for Google OAuth
       await signInWithGoogle(successUrl, failureUrl);
-      console.log('✅ Google OAuth initiated - Browser should open now');
       
       // Show instructions
       Alert.alert(
@@ -115,7 +110,6 @@ const SignUp = () => {
       // Start polling for session
       startGoogleSessionPolling();
     } catch (error) {
-      console.error('❌ Google sign up error:', error);
       Alert.alert(t("common.error"), error.message || t("auth.oauthFailed"));
       setGoogleSubmitting(false);
     }
@@ -153,27 +147,23 @@ const SignUp = () => {
     
     const pollInterval = setInterval(async () => {
       pollCount++;
-      console.log(`🔄 Google: Polling for session... (${pollCount}/${maxPolls})`);
       
       try {
         // Check if we have a valid session
         const currentAccount = await getAccount();
         if (currentAccount && currentAccount.$id) {
-          console.log('✅ Google: Session found via polling!');
           clearInterval(pollInterval);
           
           // Get or create user
           try {
             const user = await getOrCreateGoogleUser();
             if (user) {
-              console.log('✅ Google: User created/logged in via polling:', user);
               setUser(user);
               setIsLogged(true);
               setGoogleSubmitting(false);
               router.replace('/(tabs)/home');
             }
           } catch (error) {
-            console.error('❌ Google: Error creating user:', error);
             setGoogleSubmitting(false);
             Alert.alert(t("common.error"), t("auth.createUserFailed"));
           }
@@ -181,13 +171,10 @@ const SignUp = () => {
       } catch (error) {
         // Log error for debugging
         if (pollCount % 5 === 0) {
-          console.log(`⚠️ Google: Session check error (${pollCount}/30):`, error.message || error);
         }
         
         // Session not ready yet, continue polling
         if (pollCount >= maxPolls) {
-          console.log('⏰ Google: Polling timeout - no session found');
-          console.error('❌ Google: Final error:', error);
           clearInterval(pollInterval);
           setGoogleSubmitting(false);
           
@@ -215,27 +202,23 @@ const SignUp = () => {
     
     const pollInterval = setInterval(async () => {
       pollCount++;
-      console.log(`🔄 Polling for session... (${pollCount}/${maxPolls})`);
       
       try {
         // Check if we have a valid session
         const currentAccount = await getAccount();
         if (currentAccount && currentAccount.$id) {
-          console.log('✅ Session found via polling!');
           clearInterval(pollInterval);
           
           // Get or create user
           try {
             const user = await getOrCreateFacebookUser();
             if (user) {
-              console.log('✅ User created/logged in via polling:', user);
               setUser(user);
               setIsLogged(true);
               setIsFacebookLoading(false);
               router.replace('/(tabs)/home');
             }
           } catch (error) {
-            console.error('❌ Error creating user:', error);
             setIsFacebookLoading(false);
             Alert.alert(t("common.error"), t("auth.createUserFailed"));
           }
@@ -243,7 +226,6 @@ const SignUp = () => {
       } catch (error) {
         // Session not ready yet, continue polling
         if (pollCount >= maxPolls) {
-          console.log('⏰ Polling timeout - no session found');
           clearInterval(pollInterval);
           setIsFacebookLoading(false);
           Alert.alert(t("common.info"), t("auth.oauthIncomplete"));

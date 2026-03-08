@@ -1,4 +1,4 @@
-package com.anonymous.sora
+package com.bilal.asab
 
 import android.app.Application
 import android.content.res.Configuration

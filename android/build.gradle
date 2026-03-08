@@ -16,7 +16,15 @@ allprojects {
   repositories {
     google()
     mavenCentral()
-    maven { url 'https://www.jitpack.io' }
+    // JitPack REMOVED - USB camera code is patched, dependencies excluded
+    // This prevents Stripe timeout issue (Stripe tries to resolve from JitPack)
+    // VideoSDK will work fine without JitPack since USB camera support is disabled
+  }
+  
+  // VideoSDK dependency fix - exclude all problematic USB camera libraries
+  // These libraries are not needed for mobile devices (only for USB cameras)
+  configurations.all {
+    exclude group: 'com.github.jiangdongguo.AndroidUSBCamera'
   }
 }
 

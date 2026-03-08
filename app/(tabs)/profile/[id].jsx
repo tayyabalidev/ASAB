@@ -14,6 +14,7 @@ import useAppwrite from "../../../lib/useAppwrite";
 import { getUserPosts, getCurrentUser, databases, appwriteConfig } from "../../../lib/appwrite";
 import { useGlobalContext } from "../../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, VideoProgressBar } from "../../../components";
+import CallButton from "../../../components/CallButton";
 import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout } from "../../../lib/appwrite";
 import { images } from "../../../constants";
 
@@ -28,6 +29,7 @@ const UserProfile = () => {
   const [loading, setLoading] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
+  const [likesCount, setLikesCount] = useState(0);
   const [playingIndex, setPlayingIndex] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalVideo, setModalVideo] = useState(null);
@@ -87,6 +89,13 @@ const UserProfile = () => {
       try {
         setLoading(true);
         
+        // Validate required data
+        if (!id) {
+          Alert.alert(t('common.error'), 'User ID is required');
+          router.back(); // Go back instead of redirecting to home
+          return;
+        }
+        
         // Get the profile user's data
         const userResponse = await databases.getDocument(
           appwriteConfig.databaseId,
@@ -94,27 +103,33 @@ const UserProfile = () => {
           id
         );
         
+        if (!userResponse) {
+          Alert.alert(t('common.error'), 'User not found');
+          router.back(); // Go back instead of redirecting to home
+          return;
+        }
+        
         setProfileUser(userResponse);
         
         // Re-enable privacy logic
         const isProfilePrivate = userResponse.isPrivate || false;
         setIsPrivate(isProfilePrivate);
         
-        // Re-enable access control logic
-        if (currentUser.$id === id) {
+        // Re-enable access control logic - with null checks
+        if (currentUser && currentUser.$id === id) {
           // User viewing their own profile
           setCanView(true);
         } else if (isProfilePrivate) {
           // Check if current user is in the allowed viewers list
           const allowedViewers = userResponse.allowedViewers || [];
-          setCanView(allowedViewers.includes(currentUser.$id));
+          setCanView(currentUser ? allowedViewers.includes(currentUser.$id) : false);
         } else {
           // Public profile
           setCanView(true);
         }
         
-        // Fetch followers for follow/unfollow button
-        if (currentUser.$id !== id) {
+        // Fetch followers for follow/unfollow button - with null checks
+        if (currentUser && currentUser.$id !== id) {
           const followers = userResponse.followers || [];
           const isFollowingUser = followers.includes(currentUser.$id);
           setIsFollowing(isFollowingUser);
@@ -129,16 +144,19 @@ const UserProfile = () => {
         setLikesCount(totalLikes);
         
       } catch (error) {
-        console.error("Error fetching profile user:", error);
-        Alert.alert(t('common.error'), t('profile.alerts.loadProfileError'));
-        router.replace('/home');
+        console.error('Error fetching profile user:', error);
+        Alert.alert(t('common.error'), error.message || t('profile.alerts.loadProfileError'));
+        router.back(); // Go back instead of redirecting to home
       } finally {
         setLoading(false);
       }
     };
 
-    if (id && currentUser) {
+    if (id) {
       fetchProfileUser();
+    } else {
+      // If no id, go back to previous screen
+      router.back();
     }
   }, [id, currentUser]);
 
@@ -187,7 +205,6 @@ const UserProfile = () => {
         
         setDonationsWithDonors(donationsWithDonorInfo);
       } catch (error) {
-        console.error("Error fetching earnings data:", error);
       } finally {
         setLoadingEarnings(false);
       }
@@ -218,7 +235,7 @@ const UserProfile = () => {
 
 
   const handleBack = () => {
-    router.replace('/home');
+    router.back(); // Go back to previous screen instead of redirecting to home
   };
 
   // Re-enable request access function
@@ -236,7 +253,6 @@ const UserProfile = () => {
       
       Alert.alert(t('profile.alerts.requestSentTitle'), t('profile.alerts.requestSentMessage'));
     } catch (error) {
-      console.error("Error requesting access:", error);
       Alert.alert(t('common.error'), t('profile.alerts.requestError'));
     }
   };
@@ -253,14 +269,12 @@ const UserProfile = () => {
       
       // Show success message
       const action = newFollowState ? 'followed' : 'unfollowed';
-      console.log(`Successfully ${action} ${profileUser?.username || 'user'}`);
     } catch (error) {
       // Revert on error
       setIsFollowing(!newFollowState);
       setFollowersCount((prev) => !newFollowState ? prev + 1 : prev - 1);
       updateFollowStatus(id, !newFollowState);
       Alert.alert(t('common.error'), error.message || t('profile.alerts.followError'));
-      console.error("Follow error:", error);
     }
   };
 
@@ -289,7 +303,6 @@ const UserProfile = () => {
       const newBookmarkStatus = await toggleBookmark(currentUser.$id, modalVideo.$id, videoData);
       setBookmarked(newBookmarkStatus);
     } catch (error) {
-      console.error("Error toggling bookmark:", error);
       Alert.alert(t('common.error'), t('profile.alerts.bookmarkError'));
     }
   };
@@ -311,10 +324,8 @@ const UserProfile = () => {
         // Increment share count
         const newShareCount = await incrementShareCount(modalVideo.$id);
         setShareCount(newShareCount);
-        console.log("Video shared successfully");
       }
     } catch (error) {
-      console.error("Error sharing video:", error);
       Alert.alert(t('common.error'), t('profile.alerts.shareError'));
     }
   };
@@ -333,7 +344,6 @@ const UserProfile = () => {
       setNewComment("");
       setCommentsCount((prev) => prev + 1);
     } catch (error) {
-      console.error("Error adding comment:", error);
     } finally {
       setPosting(false);
     }
@@ -350,7 +360,6 @@ const UserProfile = () => {
       setReplyingTo(null);
       setCommentsCount((prev) => prev + 1);
     } catch (error) {
-      console.error("Error adding reply:", error);
     } finally {
       setPostingReply(false);
     }
@@ -510,7 +519,6 @@ const UserProfile = () => {
               
               setDonationsWithDonors(donationsWithDonorInfo);
             } catch (error) {
-              console.error("Error requesting withdrawal:", error);
               Alert.alert('Error', error.message || 'Failed to request withdrawal. Please try again.');
             }
           }
@@ -520,8 +528,6 @@ const UserProfile = () => {
   };
 
   const openVideoModal = (item, index) => {
-    console.log("Opening video modal:", item);
-    console.log("Video URL:", item.video);
     setModalVideo(item);
     setModalIndex(index);
     setModalVisible(true);
@@ -581,7 +587,6 @@ const UserProfile = () => {
           const isBookmarked = await isVideoBookmarked(currentUser.$id, modalVideo.$id);
           setBookmarked(isBookmarked);
         } catch (error) {
-          console.error("Error checking bookmark status:", error);
         }
       };
 
@@ -591,7 +596,6 @@ const UserProfile = () => {
           const shares = await getShareCount(modalVideo.$id);
           setShareCount(shares);
         } catch (error) {
-          console.error("Error fetching share count:", error);
         }
       };
 
@@ -1141,6 +1145,39 @@ const UserProfile = () => {
                         <Image source={icons.menu} style={{ width: 22, height: 22, tintColor: '#fff' }} resizeMode="contain" />
                       </TouchableOpacity>
                     </View>
+                    {/* Call Buttons Row */}
+                    {profileUser && (
+                      <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 8, marginBottom: 8, gap: 12 }}>
+                        <CallButton 
+                          receiverId={profileUser.$id}
+                          receiverName={profileUser.username || profileUser.name}
+                          callType="video"
+                          showLabel={true}
+                          style={{ 
+                            paddingHorizontal: 20, 
+                            paddingVertical: 12,
+                            borderRadius: 8,
+                            backgroundColor: '#4CAF50',
+                            minWidth: 120,
+                          }}
+                          iconSize={20}
+                        />
+                        <CallButton 
+                          receiverId={profileUser.$id}
+                          receiverName={profileUser.username || profileUser.name}
+                          callType="audio"
+                          showLabel={true}
+                          style={{ 
+                            paddingHorizontal: 20, 
+                            paddingVertical: 12,
+                            borderRadius: 8,
+                            backgroundColor: '#2196F3',
+                            minWidth: 120,
+                          }}
+                          iconSize={20}
+                        />
+                      </View>
+                    )}
                     {/* Support Creator Button */}
                     <View style={{ alignItems: 'center' }}>
                       <TouchableOpacity

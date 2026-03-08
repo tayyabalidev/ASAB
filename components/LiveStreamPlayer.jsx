@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image, Alert } from 'react-native';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { subscribeLiveStreamUpdates, followStreamer, unfollowStreamer, isFollowing, getFollowerCount } from '../lib/livestream';
-import AgoraViewerWrapper from './AgoraViewerWrapper';
 
 const { width, height } = Dimensions.get('window');
 
@@ -71,7 +70,6 @@ const LiveStreamPlayer = ({ stream, onClose }) => {
         Alert.alert('Success', `Following ${stream.hostUsername}`);
       }
     } catch (error) {
-      console.error('Error toggling follow:', error);
       Alert.alert('Error', 'Failed to update follow status');
     }
   };
@@ -86,12 +84,21 @@ const LiveStreamPlayer = ({ stream, onClose }) => {
 
   return (
     <View style={styles.container}>
-      {/* Use Agora Viewer wrapper (handles missing SDK gracefully) */}
-      <AgoraViewerWrapper 
-        stream={stream}
-        userId={user.$id}
-        onClose={onClose}
-      />
+      {/* TODO: Integrate your new live streaming SDK here */}
+      <View style={styles.placeholderContainer}>
+        <Text style={styles.placeholderText}>📺 Live Stream</Text>
+        <Text style={styles.placeholderSubtext}>
+          Live streaming feature needs to be integrated with your new SDK.
+        </Text>
+        <Text style={styles.placeholderSubtext}>
+          Stream: {stream.title}
+        </Text>
+        {onClose && (
+          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+            <Text style={styles.closeButtonText}>Close</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       
       {/* Bottom Overlay - Stream Details */}
       <View style={styles.bottomOverlay}>
@@ -202,6 +209,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     marginTop: 50,
+  },
+  placeholderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+    padding: 20,
+  },
+  placeholderText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  placeholderSubtext: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  closeButton: {
+    backgroundColor: '#F44336',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 25,
+    marginTop: 30,
+  },
+  closeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

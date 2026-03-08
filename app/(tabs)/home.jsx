@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getLatestPosts, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes } from "../../lib/appwrite";
+import { getAllPosts, getLatestPosts, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
 import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
@@ -188,6 +188,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [commentLikesList, setCommentLikesList] = useState([]);
   const [loadingCommentLikes, setLoadingCommentLikes] = useState(false);
   const [shareCount, setShareCount] = useState(item.shares || 0);
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
   const [showProfileHint, setShowProfileHint] = useState(false);
   const [creatorData, setCreatorData] = useState(null);
@@ -298,6 +300,34 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       }
     }
     fetchShareCount();
+  }, [item.$id]);
+
+  // Check like status on mount
+  useEffect(() => {
+    async function checkLikeStatus() {
+      if (user?.$id) {
+        try {
+          const isLiked = await isPostLiked(user.$id, item.$id);
+          setLiked(isLiked);
+        } catch (error) {
+          
+        }
+      }
+    }
+    checkLikeStatus();
+  }, [user?.$id, item.$id]);
+
+  // Fetch like count on mount
+  useEffect(() => {
+    async function fetchLikeCount() {
+      try {
+        const likes = await getLikeCount(item.$id);
+        setLikeCount(likes);
+      } catch (error) {
+        
+      }
+    }
+    fetchLikeCount();
   }, [item.$id]);
 
 
@@ -591,6 +621,33 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       // Revert the state change on error
       setIsFollowing(!newFollowState);
       updateFollowStatus(creatorId, !newFollowState);
+    }
+  };
+
+  const handleLike = async () => {
+    if (!user?.$id) {
+      Alert.alert(t("common.error"), "Please login to like posts");
+      return;
+    }
+
+    try {
+      // Optimistic update
+      const newLikedState = !liked;
+      setLiked(newLikedState);
+      setLikeCount(prev => newLikedState ? prev + 1 : Math.max(0, prev - 1));
+
+      const newLikeStatus = await toggleLike(user.$id, item.$id);
+      setLiked(newLikeStatus);
+      
+      // Refresh like count to ensure accuracy
+      const updatedLikeCount = await getLikeCount(item.$id);
+      setLikeCount(updatedLikeCount);
+    } catch (error) {
+      // Revert optimistic update on error
+      setLiked(!liked);
+      setLikeCount(prev => liked ? prev + 1 : Math.max(0, prev - 1));
+      console.error('Like error:', error);
+      Alert.alert(t("common.error"), error.message || "Failed to like post");
     }
   };
 
@@ -1253,6 +1310,25 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           </View>
         </TouchableOpacity>
 
+        {/* Like Button */}
+        <TouchableOpacity onPress={handleLike} style={{ marginBottom: 20, alignItems: 'center' }}>
+          <View style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginBottom: 5
+          }}>
+            <Image 
+              source={liked ? icons.heartCheck : icons.heartUncheck} 
+              style={{ width: 60, height: 60 }} 
+              resizeMode="contain" 
+            />
+          </View>
+          <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likeCount)}</Text>
+        </TouchableOpacity>
+
         {/* Comments Button */}
         <TouchableOpacity onPress={handleCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
           <View style={{
@@ -1552,7 +1628,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                                           >
                                             <Image
                                               source={isReplyLiked ? icons.heartCheck : icons.heartUncheck}
-                                              style={{ width: 48, height: 48, marginRight: 4 }}
+                                              style={{ width: 18, height: 18, marginRight: 4 }}
                                               resizeMode="contain"
                                             />
                                             <Text style={{ color: themedColor('#aaa', theme.textMuted), fontSize: 11 }}>
@@ -1778,6 +1854,8 @@ const Home = () => {
   const [isTrendingVideoPlaying, setIsTrendingVideoPlaying] = useState(true);
   const [trendingCommentsCount, setTrendingCommentsCount] = useState(0);
   const [trendingShareCount, setTrendingShareCount] = useState(0);
+  const [trendingLiked, setTrendingLiked] = useState(false);
+  const [trendingLikeCount, setTrendingLikeCount] = useState(0);
   const [trendingCommentsModalVisible, setTrendingCommentsModalVisible] = useState(false);
   const [trendingComments, setTrendingComments] = useState([]);
   const [loadingTrendingComments, setLoadingTrendingComments] = useState(false);
@@ -2108,6 +2186,18 @@ const Home = () => {
           .then((isBookmarked) => setTrendingBookmarked(isBookmarked))
           .catch(() => setTrendingBookmarked(false));
       }
+
+      // Check like status
+      if (user?.$id) {
+        isPostLiked(user.$id, trendingModalVideo.$id)
+          .then((isLiked) => setTrendingLiked(isLiked))
+          .catch(() => setTrendingLiked(false));
+      }
+
+      // Fetch like count
+      getLikeCount(trendingModalVideo.$id)
+        .then((likes) => setTrendingLikeCount(likes))
+        .catch(() => setTrendingLikeCount(0));
     }
   }, [trendingModalVideo?.$id, user?.$id, trendingModalVisible]);
   
@@ -2135,6 +2225,33 @@ const Home = () => {
     }
   };
 
+
+  // Handle trending modal like
+  const handleTrendingLike = async () => {
+    if (!user?.$id || !trendingModalVideo) {
+      Alert.alert(t("common.error"), "Please login to like posts");
+      return;
+    }
+
+    try {
+      // Optimistic update
+      const newLikedState = !trendingLiked;
+      setTrendingLiked(newLikedState);
+      setTrendingLikeCount(prev => newLikedState ? prev + 1 : Math.max(0, prev - 1));
+
+      const newLikeStatus = await toggleLike(user.$id, trendingModalVideo.$id);
+      setTrendingLiked(newLikeStatus);
+      
+      // Refresh like count to ensure accuracy
+      const updatedLikeCount = await getLikeCount(trendingModalVideo.$id);
+      setTrendingLikeCount(updatedLikeCount);
+    } catch (error) {
+      // Revert optimistic update on error
+      setTrendingLiked(!trendingLiked);
+      setTrendingLikeCount(prev => trendingLiked ? prev + 1 : Math.max(0, prev - 1));
+      Alert.alert(t("common.error"), "Failed to like post");
+    }
+  };
 
   // Handle trending modal bookmark
   const handleTrendingBookmark = async () => {
@@ -2195,7 +2312,6 @@ const Home = () => {
       setTrendingNewComment("");
       setTrendingCommentsCount((prev) => prev + 1);
     } catch (error) {
-      console.error("Error adding trending comment:", error);
     } finally {
       setTrendingPosting(false);
     }
@@ -2213,7 +2329,6 @@ const Home = () => {
       setTrendingReplyingTo(null);
       setTrendingCommentsCount((prev) => prev + 1);
     } catch (error) {
-      console.error("Error adding trending reply:", error);
     } finally {
       setTrendingPostingReply(false);
     }
@@ -2286,7 +2401,6 @@ const Home = () => {
         setTrendingShareCount(newShareCount);
       }
     } catch (error) {
-      console.error("Error sharing:", error);
     }
   };
 
@@ -2837,7 +2951,7 @@ const Home = () => {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.background }}>
       <SafeAreaView 
         style={{ flex: 1, backgroundColor: theme.background }} 
-        edges={Platform.OS === 'ios' ? ['top', 'left', 'right'] : ['top', 'left', 'right']}
+        edges={Platform.OS === 'ios' ? ['top'] : ['top']}
       >
         <View style={{ flex: 1, position: 'relative' }}>
           {/* Background Image */}
@@ -3073,7 +3187,7 @@ const Home = () => {
                     snapToAlignment="center"
                     pagingEnabled={false}
                   >
-                    {combinedLatestPosts.slice(0, 100).map((item, index) => renderTrendingItem({ item, index }))}
+                    {combinedLatestPosts.slice(0, 5).map((item, index) => renderTrendingItem({ item, index }))}
                   </ScrollView>
                   
                   {/* Carousel Indicators */}
@@ -3495,6 +3609,26 @@ const Home = () => {
                 
                 {/* Right Side Interaction Buttons - TikTok Style */}
                 <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 10 }}>
+                  {/* Like Button */}
+                  <TouchableOpacity onPress={handleTrendingLike} style={{ marginBottom: 20, alignItems: 'center' }}>
+                    <View style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: themedColor('rgba(255, 255, 255, 0.1)', theme.cardSoft),
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      marginBottom: 5
+                    }}>
+                      <Image 
+                        source={trendingLiked ? icons.heartCheck : icons.heartUncheck} 
+                        style={{ width: 60, height: 60 }} 
+                        resizeMode="contain" 
+                      />
+                    </View>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(trendingLikeCount)}</Text>
+                  </TouchableOpacity>
+
                   {/* Comments Button */}
                   <TouchableOpacity onPress={handleTrendingCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
                     <View style={{

@@ -13,7 +13,7 @@ const client = new Client();
 client
   .setEndpoint(appwriteConfig.endpoint)
   .setProject(appwriteConfig.projectId)
-  .setPlatform("com.jsm.asabcorp");
+  .setPlatform("com.bilal.asab");
 
 const databases = new Databases(client);
 
@@ -25,11 +25,7 @@ export async function createLikesAttribute() {
   try {
     // Note: Appwrite SDK doesn't directly support creating attributes
     // You need to use the REST API or Appwrite Console
-    
-    console.log("To create the attribute, use one of these methods:");
-    console.log("1. Use Appwrite Console (recommended)");
-    console.log("2. Use Appwrite REST API");
-    console.log("3. Use Appwrite CLI");
+   
     
     // Alternative: Try to update a document with likes to see if it auto-creates
     // This won't work if the attribute doesn't exist in schema
@@ -39,7 +35,6 @@ export async function createLikesAttribute() {
       message: "Use Appwrite Console or REST API to create attributes"
     };
   } catch (error) {
-    console.error("Error:", error);
     return { success: false, error: error.message };
   }
 }

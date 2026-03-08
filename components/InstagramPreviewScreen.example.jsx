@@ -42,28 +42,22 @@ const ExampleUsage = () => {
           onClose={() => setShowPreview(false)}
           onNext={() => {
             // Navigate to next screen (editing, posting, etc.)
-            console.log('Navigate to next screen');
             setShowPreview(false);
           }}
           suggestedAudio={suggestedAudio}
           onAudioPress={() => {
-            console.log('Audio button pressed');
             // Open audio selection modal
           }}
           onTextPress={() => {
-            console.log('Text button pressed');
             // Open text overlay editor
           }}
           onOverlayPress={() => {
-            console.log('Overlay button pressed');
             // Open overlay/sticker selection
           }}
           onFilterPress={() => {
-            console.log('Filter button pressed');
             // Open filter selection
           }}
           onEditPress={() => {
-            console.log('Edit button pressed');
             // Open advanced editor
           }}
         />

@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar } from "../../components";
 import { images } from "../../constants";
@@ -231,7 +231,6 @@ const Profile = () => {
   useEffect(() => {
     const handleStripeConnectCallback = async (url) => {
       if (url && url.includes('earnings') && url.includes('connected=true')) {
-        console.log('✅ Stripe Connect callback received:', url);
         
         // Extract account ID from URL if present
         const urlParams = new URLSearchParams(url.split('?')[1] || '');
@@ -270,7 +269,6 @@ const Profile = () => {
               setPendingPayout(pending || 0);
             }
           } catch (error) {
-            console.error("Error refreshing Stripe status after callback:", error);
           }
         }
       }
@@ -312,7 +310,8 @@ const Profile = () => {
           .then(status => {
             setStripeAccountStatus(status);
           })
-          .catch(err => console.error("Error refreshing Stripe status:", err));
+          .catch(err => {
+          });
       }
     }, [refetchPosts, refetchPhotos, user?.stripeAccountId, showEarningsDashboard])
   );
@@ -510,7 +509,6 @@ const Profile = () => {
                     postsData.push({ ...photo, postType: 'photo', bookmarkId: bookmark.$id });
                     continue;
                   } catch (photoError) {
-                    console.error(`Error fetching post ${bookmark.postId} as both video and photo:`, videoError, photoError);
                   }
                 }
               } else {
@@ -524,17 +522,15 @@ const Profile = () => {
                     const video = await getVideoById(bookmark.postId);
                     postsData.push({ ...video, postType: 'video', bookmarkId: bookmark.$id });
                   } catch (videoError) {
-                    console.error(`Error fetching post ${bookmark.postId}:`, error, videoError);
                   }
                 }
               }
             } catch (error) {
-              console.error(`Error processing bookmark ${bookmark.postId}:`, error);
+              
             }
           }
           setBookmarkedPosts(postsData);
         } catch (error) {
-          console.error('Error fetching bookmarks:', error);
           setBookmarks([]);
           setBookmarkedPosts([]);
         } finally {
@@ -598,11 +594,9 @@ const Profile = () => {
             setStripeAccountStatus(status);
             setStripeAccountId(user.stripeAccountId);
           } catch (error) {
-            console.error("Error checking Stripe account status:", error);
           }
         }
       } catch (error) {
-        console.error("Error fetching earnings data:", error);
       } finally {
         setLoadingEarnings(false);
       }
@@ -678,9 +672,9 @@ const Profile = () => {
       }
       
       // Create account link for onboarding
-      // Use the app scheme from app.json: com.jsm.asabcorp
-      const returnUrl = `com.jsm.asabcorp://earnings?connected=true&accountId=${accountId}`;
-      const refreshUrl = `com.jsm.asabcorp://earnings`;
+      // Use the app scheme from app.json: com.bilal.asab
+      const returnUrl = `com.bilal.asab://earnings?connected=true&accountId=${accountId}`;
+      const refreshUrl = `com.bilal.asab://earnings`;
       
       const linkResult = await createAccountLink(accountId, returnUrl, refreshUrl);
       
@@ -697,7 +691,6 @@ const Profile = () => {
         Alert.alert('Error', 'Cannot open Stripe onboarding link');
       }
     } catch (error) {
-      console.error("Error linking Stripe account:", error);
       Alert.alert('Error', error.message || 'Failed to link Stripe account. Please try again.');
     } finally {
       setLinkingStripe(false);
@@ -788,7 +781,6 @@ const Profile = () => {
               
               setDonationsWithDonors(donationsWithDonorInfo);
             } catch (error) {
-              console.error("Error requesting withdrawal:", error);
               Alert.alert('Error', error.message || 'Failed to request withdrawal. Please try again.');
             }
           }
@@ -802,6 +794,74 @@ const Profile = () => {
     setUser(null);
     setIsLogged(false);
     router.replace("/sign-in");
+  };
+
+  // Delete Account - App Store Compliance (Guideline 5.1.1)
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      t('profile.deleteAccount.title', 'Delete Account'),
+      t('profile.deleteAccount.message', 'Are you sure you want to delete your account? This action cannot be undone. All your data, posts, and content will be permanently deleted.'),
+      [
+        {
+          text: t('common.cancel', 'Cancel'),
+          style: 'cancel'
+        },
+        {
+          text: t('profile.deleteAccount.confirm', 'Delete Account'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Show confirmation dialog
+              Alert.alert(
+                t('profile.deleteAccount.finalTitle', 'Final Confirmation'),
+                t('profile.deleteAccount.finalMessage', 'This will permanently delete your account and all associated data. This cannot be undone. Are you absolutely sure?'),
+                [
+                  {
+                    text: t('common.cancel', 'Cancel'),
+                    style: 'cancel'
+                  },
+                  {
+                    text: t('profile.deleteAccount.delete', 'Yes, Delete My Account'),
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await deleteAccount();
+                        // Clear user state
+                        setUser(null);
+                        setIsLogged(false);
+                        // Navigate to sign in
+                        Alert.alert(
+                          t('profile.deleteAccount.successTitle', 'Account Deleted'),
+                          t('profile.deleteAccount.successMessage', 'Your account has been permanently deleted.'),
+                          [
+                            {
+                              text: t('common.ok', 'OK'),
+                              onPress: () => {
+                                router.replace("/(auth)/sign-in");
+                              }
+                            }
+                          ]
+                        );
+                      } catch (error) {
+                        Alert.alert(
+                          t('common.error', 'Error'),
+                          error.message || t('profile.deleteAccount.error', 'Failed to delete account. Please try again.')
+                        );
+                      }
+                    }
+                  }
+                ]
+              );
+            } catch (error) {
+              Alert.alert(
+                t('common.error', 'Error'),
+                error.message || t('profile.deleteAccount.error', 'Failed to delete account. Please try again.')
+              );
+            }
+          }
+        }
+      ]
+    );
   };
 
   const openEditModal = () => {
@@ -1169,7 +1229,6 @@ const Profile = () => {
         const unreadCount = notifications.filter(n => !n.isRead || n.isRead === false).length;
         setUnreadNotificationCount(unreadCount);
       } catch (error) {
-        console.error('Error fetching notification count:', error);
       }
     };
 
@@ -2116,7 +2175,6 @@ const Profile = () => {
                                 imageOverlays = edits.imageOverlays || [];
                               }
                             } catch (e) {
-                              console.log('Error parsing edits:', e);
                             }
                           }
                           
@@ -2379,7 +2437,6 @@ const Profile = () => {
                                   textOverlays = edits.textOverlays || [];
                                   imageOverlays = edits.imageOverlays || [];
                                 } catch (e) {
-                                  console.error('Error parsing photo edits:', e);
                                 }
                               }
                               
@@ -3123,7 +3180,6 @@ const Profile = () => {
                         imageOverlays = edits.imageOverlays || [];
                       }
                     } catch (e) {
-                      console.log('Error parsing edits:', e);
                     }
                   }
                   
@@ -3548,7 +3604,7 @@ const Profile = () => {
               )}
 
               {/* Save and Cancel Buttons */}
-              <View style={{ flexDirection: "row", gap: 12 }}>
+              <View style={{ flexDirection: "row", gap: 12, marginBottom: 16 }}>
                 <TouchableOpacity
                   onPress={saveProfileChanges}
                   disabled={saving}
@@ -3578,6 +3634,36 @@ const Profile = () => {
                 >
                   <Text style={{ color: theme.textPrimary, fontWeight: "bold" }}>{t('profile.modals.cancel')}</Text>
                 </TouchableOpacity>
+              </View>
+
+              {/* Delete Account Button - App Store Compliance */}
+              <View style={{ 
+                borderTopWidth: 1, 
+                borderTopColor: theme.border, 
+                paddingTop: 16, 
+                marginTop: 8 
+              }}>
+                <TouchableOpacity
+                  onPress={handleDeleteAccount}
+                  style={{
+                    backgroundColor: theme.danger || '#ff4757',
+                    padding: 12,
+                    borderRadius: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "600" }}>
+                    {t('profile.deleteAccount.button', 'Delete Account')}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={{ 
+                  color: theme.textSecondary, 
+                  fontSize: 12, 
+                  textAlign: 'center', 
+                  marginTop: 8 
+                }}>
+                  {t('profile.deleteAccount.warning', 'Permanently delete your account and all data')}
+                </Text>
               </View>
             </View>
           </View>

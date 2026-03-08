@@ -34,7 +34,6 @@ const LiveChatPanel = ({ streamId, isHost = false }) => {
   useEffect(() => {
     // Validate streamId before proceeding
     if (!isValidStreamId(streamId)) {
-      console.error('Invalid streamId provided to LiveChatPanel:', streamId);
       return;
     }
 
@@ -50,7 +49,6 @@ const LiveChatPanel = ({ streamId, isHost = false }) => {
           setLastCommentTime(initialComments[initialComments.length - 1].$createdAt);
         }
       } catch (error) {
-        console.error('Error loading comments:', error);
       }
     };
 
@@ -98,7 +96,6 @@ const LiveChatPanel = ({ streamId, isHost = false }) => {
       );
       setNewComment('');
     } catch (error) {
-      console.error('Error sending comment:', error);
     } finally {
       setPosting(false);
     }

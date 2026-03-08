@@ -44,7 +44,6 @@ const AdvertisementCard = ({ advertisement, style }) => {
           await Linking.openURL(advertisement.linkUrl);
         }
       } catch (error) {
-        console.error("Error opening ad link:", error);
       }
     }
   };

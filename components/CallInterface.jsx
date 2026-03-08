@@ -33,7 +33,6 @@ const CallInterface = ({
 
   const setupVideoViews = async () => {
     // Video calling functionality has been removed
-    console.log('Video calling functionality is not available');
     Alert.alert('Feature Unavailable', 'Video calling features have been disabled.');
   };
 

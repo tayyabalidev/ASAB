@@ -54,7 +54,6 @@ const cleanupFiles = (files) => {
       try {
         fs.unlinkSync(file);
       } catch (err) {
-        console.log('Error cleaning up file:', file, err);
       }
     }
   });
@@ -209,15 +208,12 @@ const processSingleVideo = async (videoPath, options, outputPath) => {
     command
       .output(outputPath)
       .on('end', () => {
-        console.log('Video processing completed');
         resolve();
       })
       .on('error', (err) => {
-        console.error('Video processing error:', err);
         reject(err);
       })
       .on('progress', (progress) => {
-        console.log('Processing: ' + (progress.percent || 0) + '% done');
       })
       .run();
   });
@@ -457,20 +453,17 @@ const processMultipleClips = async (videoFiles, clipsData, options, outputPath, 
         .outputOptions(outputOptions)
         .output(outputPath)
         .on('end', () => {
-          console.log('Multiple clips merged successfully');
           // Cleanup temp files
           cleanupFn([...processedClips, tempDir]);
           resolve();
         })
         .on('error', (err) => {
-          console.error('Clip merging error:', err);
           cleanupFn([...processedClips, tempDir]);
           reject(err);
         })
         .run();
     });
   } catch (error) {
-    console.error('Error processing multiple clips:', error);
     throw error;
   }
 };
@@ -632,7 +625,6 @@ app.post('/api/process-video', upload.fields([
       clipsData = typeof videoClips === 'string' ? JSON.parse(videoClips) : videoClips;
     }
   } catch (parseError) {
-    console.log('Error parsing data:', parseError);
   }
 
   try {
@@ -696,11 +688,9 @@ app.post('/api/process-video', upload.fields([
     
     fileStream.on('error', (err) => {
       cleanupFiles(filesToCleanup);
-      console.error('Stream error:', err);
     });
 
   } catch (error) {
-    console.error('Processing error:', error);
     const filesToCleanup = [...videoFiles.map(f => f.path), musicFile?.path, outputPath].filter(Boolean);
     cleanupFiles(filesToCleanup);
     res.status(500).json({ error: 'Video processing failed', details: error.message });
@@ -835,11 +825,9 @@ app.post('/api/process-photo', upload.single('photo'), async (req, res) => {
     
     fileStream.on('error', (err) => {
       cleanupFiles([photoPath, outputPath]);
-      console.error('Stream error:', err);
     });
 
   } catch (error) {
-    console.error('Processing error:', error);
     cleanupFiles([photoPath, outputPath]);
     res.status(500).json({ error: 'Photo processing failed', details: error.message });
   }
@@ -890,7 +878,6 @@ app.post('/api/create-payment-intent', async (req, res) => {
       paymentIntentId: paymentIntent.id
     });
   } catch (error) {
-    console.error('Error creating payment intent:', error);
     res.status(500).json({ error: error.message || 'Failed to create payment intent' });
   }
 });
@@ -915,7 +902,6 @@ app.post('/api/confirm-payment', async (req, res) => {
 
     // If payment already succeeded (from Stripe SDK confirmation), just verify and return
     if (paymentIntent.status === 'succeeded') {
-      console.log('Payment already succeeded via Stripe SDK');
       return res.json({
         success: true,
         paymentIntentId: paymentIntent.id,
@@ -951,7 +937,6 @@ app.post('/api/confirm-payment', async (req, res) => {
           });
         }
       } catch (confirmError) {
-        console.error('Error confirming payment intent:', confirmError);
         return res.status(500).json({ 
           error: confirmError.message || 'Failed to confirm payment',
           status: paymentIntent.status
@@ -967,7 +952,6 @@ app.post('/api/confirm-payment', async (req, res) => {
       requiresAction: paymentIntent.status === 'requires_action'
     });
   } catch (error) {
-    console.error('Error confirming payment:', error);
     res.status(500).json({ error: error.message || 'Failed to confirm payment' });
   }
 });
@@ -1009,7 +993,6 @@ app.post('/api/create-advertising-payment-intent', async (req, res) => {
       paymentIntentId: paymentIntent.id
     });
   } catch (error) {
-    console.error('Error creating advertising payment intent:', error);
     res.status(500).json({ error: error.message || 'Failed to create advertising payment intent' });
   }
 });
@@ -1063,7 +1046,6 @@ app.post('/api/create-stripe-account', async (req, res) => {
       throw stripeError;
     }
   } catch (error) {
-    console.error('Error creating Stripe account:', error);
     res.status(500).json({ 
       error: error.message || 'Failed to create Stripe account',
       details: error.type || 'Unknown error'
@@ -1100,7 +1082,6 @@ app.post('/api/create-account-link', async (req, res) => {
       expiresAt: accountLink.expires_at
     });
   } catch (error) {
-    console.error('Error creating account link:', error);
     res.status(500).json({ 
       error: error.message || 'Failed to create account link'
     });
@@ -1133,7 +1114,6 @@ app.get('/api/stripe-account-status/:accountId', async (req, res) => {
       country: account.country
     });
   } catch (error) {
-    console.error('Error retrieving account status:', error);
     res.status(500).json({ 
       error: error.message || 'Failed to retrieve account status'
     });
@@ -1177,10 +1157,8 @@ app.post('/api/process-payout', async (req, res) => {
             type: 'creator_payout'
           }
         });
-        transactionId = transfer.id;
-        console.log('Stripe transfer created:', transfer.id);
+        transactionId = transfer.id;  
       } catch (transferError) {
-        console.error('Error creating Stripe transfer:', transferError);
         return res.status(500).json({ 
           error: `Failed to create Stripe transfer: ${transferError.message}`,
           details: 'Creator may need to connect their Stripe account'
@@ -1205,8 +1183,7 @@ app.post('/api/process-payout', async (req, res) => {
       amount: amount,
       status: 'completed'
     });
-  } catch (error) {
-    console.error('Error processing payout:', error);
+  } catch (error) { 
     res.status(500).json({ 
       error: error.message || 'Failed to process payout',
       details: error.type || 'Unknown error'
@@ -1227,8 +1204,7 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
 
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
+  } catch (err) { 
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
@@ -1236,54 +1212,40 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
   switch (event.type) {
     case 'payment_intent.succeeded':
       const paymentIntent = event.data.object;
-      console.log('PaymentIntent succeeded:', paymentIntent.id);
       // Here you can update your database, send notifications, etc.
       // Check if it's an advertising payment or donation
       if (paymentIntent.metadata?.type === 'advertising') {
-        console.log('Advertising payment succeeded:', paymentIntent.id);
       } else if (paymentIntent.metadata?.type === 'donation') {
-        console.log('Donation payment succeeded:', paymentIntent.id);
       }
       break;
     case 'payment_intent.payment_failed':
       const failedPayment = event.data.object;
-      console.log('PaymentIntent failed:', failedPayment.id);
       break;
     case 'transfer.created':
       const transferCreated = event.data.object;
-      console.log('Transfer created:', transferCreated.id);
       if (transferCreated.metadata?.payoutId) {
-        console.log('Payout transfer created:', transferCreated.metadata.payoutId);
       }
       break;
     case 'transfer.paid':
       const transferPaid = event.data.object;
-      console.log('Transfer paid:', transferPaid.id);
       if (transferPaid.metadata?.payoutId) {
-        console.log('Payout transfer completed:', transferPaid.metadata.payoutId);
         // Here you could update the payout status to confirmed
         // Note: You'll need to import your Appwrite functions or make an API call
       }
       break;
     case 'transfer.failed':
       const transferFailed = event.data.object;
-      console.log('Transfer failed:', transferFailed.id);
       if (transferFailed.metadata?.payoutId) {
-        console.log('Payout transfer failed:', transferFailed.metadata.payoutId);
         // Here you could update the payout status to failed
       }
       break;
     default:
-      console.log(`Unhandled event type ${event.type}`);
   }
 
   res.json({ received: true });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Video/Photo Processing Server running on port ${PORT}`);
-  console.log(`📁 Uploads directory: ${uploadsDir}`);
-  console.log(`📁 Processed directory: ${processedDir}`);
   if (process.env.STRIPE_SECRET_KEY) {
     console.log(`💳 Stripe payment processing enabled`);
   } else {
@@ -1293,7 +1255,6 @@ app.listen(PORT, () => {
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
   process.exit(0);
 });
 

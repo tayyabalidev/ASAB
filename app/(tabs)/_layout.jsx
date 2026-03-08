@@ -52,13 +52,21 @@ const TabLayout = () => {
           tabBarActiveTintColor: theme.tabActive,
           tabBarInactiveTintColor: theme.tabInactive,
           tabBarShowLabel: false,
+          headerShown: false, // Ensure headers are hidden
+          headerTitle: '', // Empty header title
+          title: '', // Empty title
           tabBarStyle: {
-
             backgroundColor: theme.tabBar,
             height: 80,
             borderTopWidth: 0,
-            paddingBottom: 0,
-            paddingTop: 18,
+            paddingBottom: 10,
+            paddingTop: 10,
+            elevation: 10, // Android shadow
+            shadowColor: '#000', // iOS shadow
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 4,
+            position: 'relative', // Ensure tab bar is positioned correctly
           },
           tabBarItemStyle: {
             paddingHorizontal: 35,
@@ -71,6 +79,7 @@ const TabLayout = () => {
           options={{
             title: tabLabels.home,
             headerShown: false,
+            headerTitle: '',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon
                 iconName="home"

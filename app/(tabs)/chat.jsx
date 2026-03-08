@@ -17,6 +17,7 @@ import * as Location from 'expo-location';
 import { Video } from 'expo-av';
 // ZegoCloud calling functionality has been removed
 import CallInterface from '../../components/CallInterface';
+import CallButton from '../../components/CallButton';
 import { useTranslation } from "react-i18next";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { images } from "../../constants";
@@ -232,8 +233,7 @@ const Chat = () => {
   useEffect(() => {
     // Only log if selectedUser is cleared while we're in a chat (has messages)
     if (!selectedUser && messages.length > 0 && !sending) {
-      console.warn('selectedUser was cleared unexpectedly while in chat');
-    }
+    }       
   }, [selectedUser, messages.length, sending]);
 
   // 1. Robust polling for allMessages every 2 seconds
@@ -342,11 +342,6 @@ const Chat = () => {
     const currentSelectedUser = selectedUser;
     
     if (sending || !currentSelectedUser || !currentSelectedUser.$id || !currentUser) {
-      console.warn('Cannot send message: missing required data', { 
-        sending, 
-        hasSelectedUser: !!currentSelectedUser, 
-        hasCurrentUser: !!currentUser 
-      });
       return;
     }
     
@@ -417,7 +412,6 @@ const Chat = () => {
           await createNotification('message', currentUser.$id, messageData.receiverId, null);
         } catch (notifError) {
           // Don't fail message send if notification fails
-          console.error('Failed to create message notification:', notifError);
         }
       }
       
@@ -429,7 +423,6 @@ const Chat = () => {
       // Trigger a refresh to ensure both users see the message
       // The polling will handle this, but we can also trigger manually if needed
     } catch (e) {
-      console.error('Error sending message:', e);
       Alert.alert(t('error'), e.message || t('chat.generalError'));
       // Remove optimistic message if sending fails
       setMessages(prev => prev.filter(m => !m.optimistic || m.$id !== tempId));
@@ -469,7 +462,6 @@ const Chat = () => {
       }
 
       if (!result.assets || !Array.isArray(result.assets) || result.assets.length === 0) {
-        console.warn('No assets captured from camera');
         return;
       }
 
@@ -518,7 +510,6 @@ const Chat = () => {
       }
 
       if (!result.assets || !Array.isArray(result.assets) || result.assets.length === 0) {
-        console.warn('No video captured');
         return;
       }
 
@@ -550,8 +541,7 @@ const Chat = () => {
         content: '',
       });
       setShowAttachmentOptions(false);
-    } catch (e) {
-      console.error('Video error:', e);
+    } catch (e) {   
       Alert.alert(t('error'), e.message || t('chat.generalError'));
       // Ensure selectedUser is preserved on error
       if (selectedUser) {
@@ -613,13 +603,11 @@ const Chat = () => {
       }
 
       if (!result.assets || !Array.isArray(result.assets) || result.assets.length === 0) {
-        console.warn('No assets selected from gallery');
         return;
       }
 
       for (const asset of result.assets) {
         if (!asset || !asset.uri) {
-          console.warn('Invalid asset, skipping:', asset);
           continue;
         }
 
@@ -652,13 +640,11 @@ const Chat = () => {
             content: '',
           });
         } catch (assetError) {
-          console.error('Error processing asset:', assetError);
           Alert.alert(t('error'), `Failed to process ${asset.type || 'file'}: ${assetError.message || t('chat.generalError')}`);
         }
       }
       setShowAttachmentOptions(false);
     } catch (e) {
-      console.error('Gallery error:', e);
       Alert.alert(t('error'), e.message || t('chat.generalError'));
       // Ensure selectedUser is preserved on error
       if (selectedUser) {
@@ -694,7 +680,6 @@ const Chat = () => {
       });
       setShowAttachmentOptions(false);
     } catch (e) {
-      console.error('Location error:', e);
       Alert.alert(t('error'), e.message || t('chat.generalError'));
       // Ensure selectedUser is preserved on error
       if (selectedUser) {
@@ -717,7 +702,6 @@ const Chat = () => {
       }
 
       if (!result.assets || !Array.isArray(result.assets) || result.assets.length === 0) {
-        console.warn('No document selected');
         return;
       }
 
@@ -1077,12 +1061,9 @@ const Chat = () => {
           
           if (downloadResult.uri) {
             finalAudioUri = downloadResult.uri;
-            console.log('Audio file downloaded to cache:', finalAudioUri);
           } else {
-            console.warn('Download completed but no URI returned, using original URL');
           }
         } catch (downloadError) {
-          console.warn('Failed to download audio file, using original URL:', downloadError);
           // Continue with original URL if download fails
         }
       }
@@ -1124,7 +1105,6 @@ const Chat = () => {
       
       await sound.playAsync();
     } catch (err) {
-      console.error('Audio playback error:', err);
       Alert.alert(
         t('error'), 
         t('chat.audioPlaybackError', { message: err.message || 'Failed to play audio. Please try again.' })
@@ -1146,27 +1126,22 @@ const Chat = () => {
     }
   };
 
-  // Call interface functions
+  // Call interface functions - use unified /call screen
   const handleAudioCall = async () => {
     try {
       if (!selectedUser || !selectedUser.$id) {
         Alert.alert(t('error'), t('chat.noUserSelected'));
         return;
       }
-      
-      
-      // Add a small delay to ensure UI is ready
-      setTimeout(() => {
-        try {
-          startCall();
-        } catch (callError) {
-         
-          Alert.alert(t('error'), t('chat.callError'));
-        }
-      }, 100);
-      
+
+      router.push({
+        pathname: '/call',
+        params: {
+          receiverId: selectedUser.$id,
+          callType: 'audio',
+        },
+      });
     } catch (error) {
-     
       Alert.alert(t('error'), t('chat.audioCallError', { message: error.message || '' }));
     }
   };
@@ -1177,14 +1152,15 @@ const Chat = () => {
         Alert.alert(t('error'), t('chat.noUserSelected'));
         return;
       }
-      
 
-      
-      // Video calling functionality has been removed
-      Alert.alert(t('info'), t('chat.videoCallUnavailable'));
-      
+      router.push({
+        pathname: '/call',
+        params: {
+          receiverId: selectedUser.$id,
+          callType: 'video',
+        },
+      });
     } catch (error) {
-      
       Alert.alert(t('error'), t('chat.videoCallError', { message: error.message || '' }));
     }
   };
@@ -1193,7 +1169,6 @@ const Chat = () => {
     // try {
     //   await callManager.endCall();
     // } catch (error) {
-    //   console.error('Error ending call:', error);
     // }
     
     // setCallStatus('ended');
@@ -1241,8 +1216,7 @@ const Chat = () => {
   const handleRejectCall = async () => {
     // try {
     //   await callManager.rejectCall();
-    // } catch (error) {
-    //   console.error('Error rejecting call:', error);
+    // } catch (error) {  
     // }
     
     // setCallStatus('ended');
@@ -1259,7 +1233,6 @@ const Chat = () => {
     //   const muted = await callManager.toggleMute();
     //   setIsMuted(muted);
     // } catch (error) {
-    //   console.error('Error toggling mute:', error);
     // }
   };
 
@@ -1343,7 +1316,6 @@ const Chat = () => {
             msg.$id
           );
         } catch (e) {
-          console.error('Error deleting message:', e);
         }
       }
       
@@ -1372,7 +1344,6 @@ const Chat = () => {
   // Debug function to check ZEGO status
   const checkZegoStatus = () => {
     // const status = getZegoStatus();
-    // console.log('ZEGO Status:', status);
     // Alert.alert(
     //   'ZEGO Status',
     //   `ZegoExpressEngine: ${status.zegoExpressEngine}\nZIM: ${status.zim}\nUser: ${status.currentUser ? 'Set' : 'Not Set'}\nLogged In: ${status.isLoggedIn}\nFallback Mode: ${status.useFallback ? 'Yes' : 'No'}`,
@@ -1805,20 +1776,22 @@ const Chat = () => {
               </TouchableOpacity>
             )}
             {/* Audio and Video Call Icons in Header */}
-            {selectedUser?.type !== 'group' && (
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <TouchableOpacity 
-                  onPress={handleVideoCall}
-                  style={{ marginRight: 8, padding: 8 }}
-                >
-                  <MaterialCommunityIcons name="video" size={24} color={theme.textPrimary} />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={handleAudioCall}
-                  style={{ padding: 8 }}
-                >
-                  <MaterialCommunityIcons name="phone" size={24} color={theme.textPrimary} />
-                </TouchableOpacity>
+            {selectedUser?.type !== 'group' && selectedUser?.$id && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <CallButton 
+                  receiverId={selectedUser.$id}
+                  receiverName={selectedUser.username || selectedUser.name}
+                  callType="video"
+                  style={{ padding: 8, backgroundColor: 'transparent' }}
+                  iconSize={24}
+                />
+                <CallButton 
+                  receiverId={selectedUser.$id}
+                  receiverName={selectedUser.username || selectedUser.name}
+                  callType="audio"
+                  style={{ padding: 8, backgroundColor: 'transparent' }}
+                  iconSize={24}
+                />
               </View>
             )}
           </View>
@@ -1995,7 +1968,6 @@ const Chat = () => {
                         try { 
                           loc = JSON.parse(item.content || item.fileUrl || '{}'); 
                         } catch (e) {
-                          console.warn('Failed to parse location:', e);
                         }
                         const coords = loc ? `${loc.latitude?.toFixed(5)}, ${loc.longitude?.toFixed(5)}` : '';
                         
@@ -2050,8 +2022,7 @@ const Chat = () => {
                                 
                                 Alert.alert(t('error'), 'Unable to open maps. Please install a maps application.');
                               } catch (e) {
-                                console.error('Error opening location:', e);
-                                // Try fallback URL if primary fails
+                                    // Try fallback URL if primary fails
                                 if (fallbackUrl) {
                                   try {
                                     await Linking.openURL(fallbackUrl);

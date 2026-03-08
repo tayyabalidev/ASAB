@@ -66,7 +66,6 @@ const DonationPage = () => {
         // In production, fetch creator data by creatorId
         setCreatorData(user);
       } catch (error) {
-        console.error('Error loading creator data:', error);
       }
     };
 
@@ -194,7 +193,6 @@ const DonationPage = () => {
         Alert.alert(t("common.error"), "Payment failed. Please try again.");
       }
     } catch (error) {
-      console.error('Donation error:', error);
       Alert.alert(
         t("common.error"), 
         error.message || t("donation.errors.processFailed")

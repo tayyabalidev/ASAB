@@ -23,11 +23,9 @@ useEffect(() => {
       const isAvailable = await checkProcessingServer();
       setUseProcessing(isAvailable);
       if (isAvailable) {
-        console.log('✅ Processing server is available');
       } else {
       }
     } catch (error) {
-      console.log('Processing server check failed');
       setUseProcessing(false);
     }
   };
@@ -48,7 +46,6 @@ try {
       setProcessingMedia(true);
       setProcessingProgress(10);
       
-      console.log('Processing video with filter:', form.filter);
       
       // Process video
       const processedResult = await processVideo({
@@ -76,13 +73,11 @@ try {
           size: form.video.size
         };
         
-        console.log('✅ Video processed successfully');
       }
       
       setProcessingProgress(100);
       setProcessingMedia(false);
     } catch (processError) {
-      console.log('⚠️ Processing failed, using original video:', processError);
       setProcessingMedia(false);
       // Continue with original video
     }
@@ -119,7 +114,6 @@ try {
       setProcessingMedia(true);
       setProcessingProgress(10);
       
-      console.log('Processing photo with filter:', photoForm.filter);
       
       // Process photo
       const processedResult = await processPhoto({
@@ -147,13 +141,11 @@ try {
           size: photoForm.photo.size
         };
         
-        console.log('✅ Photo processed successfully');
       }
       
       setProcessingProgress(100);
       setProcessingMedia(false);
     } catch (processError) {
-      console.log('⚠️ Processing failed, using original photo:', processError);
       setProcessingMedia(false);
       // Continue with original photo
     }
