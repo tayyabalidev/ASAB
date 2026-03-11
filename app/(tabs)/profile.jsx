@@ -1178,42 +1178,40 @@ const Profile = () => {
 
   // Comments logic for modal
   useEffect(() => {
-    if (commentsModalVisible && modalVideo) {
-      setLoadingComments(true);
-      getComments(modalVideo.$id)
-        .then((res) => setComments(res))
-        .catch(() => setComments([]))
-        .finally(() => setLoadingComments(false));
-    }
+    if (!commentsModalVisible || !modalVideo) return;
+    let isMounted = true;
+    setLoadingComments(true);
+    getComments(modalVideo.$id)
+      .then((res) => { if (isMounted) setComments(res); })
+      .catch(() => { if (isMounted) setComments([]); })
+      .finally(() => { if (isMounted) setLoadingComments(false); });
+    return () => { isMounted = false; };
   }, [commentsModalVisible, modalVideo]);
 
 
   // Check bookmark status and share count when modal video changes
   useEffect(() => {
-    if (modalVideo && user?.$id) {
-      // Check bookmark status
-      const checkBookmarkStatus = async () => {
-        try {
-          const isBookmarked = await isVideoBookmarked(user.$id, modalVideo.$id);
-          setBookmarked(isBookmarked);
-        } catch (error) {
-          
-        }
-      };
+    if (!modalVideo || !user?.$id) return;
+    let isMounted = true;
 
-      // Get share count
-      const fetchShareCount = async () => {
-        try {
-          const shares = await getShareCount(modalVideo.$id);
-          setShareCount(shares);
-        } catch (error) {
-          
-        }
-      };
+    const checkBookmarkStatus = async () => {
+      try {
+        const bookmarked = await isVideoBookmarked(user.$id, modalVideo.$id);
+        if (isMounted) setBookmarked(bookmarked);
+      } catch (error) {
+      }
+    };
+    const fetchShareCount = async () => {
+      try {
+        const shares = await getShareCount(modalVideo.$id);
+        if (isMounted) setShareCount(shares);
+      } catch (error) {
+      }
+    };
 
-      checkBookmarkStatus();
-      fetchShareCount();
-    }
+    checkBookmarkStatus();
+    fetchShareCount();
+    return () => { isMounted = false; };
   }, [modalVideo, user?.$id]);
 
   // Track loaded thumbnails to prevent reloading
@@ -1221,11 +1219,13 @@ const Profile = () => {
 
   // Fetch unread notification count
   useEffect(() => {
+    let isMounted = true;
+
     const fetchNotificationCount = async () => {
       if (!user?.$id) return;
-      
       try {
         const notifications = await getNotifications(user.$id);
+        if (!isMounted) return;
         const unreadCount = notifications.filter(n => !n.isRead || n.isRead === false).length;
         setUnreadNotificationCount(unreadCount);
       } catch (error) {
@@ -1233,11 +1233,12 @@ const Profile = () => {
     };
 
     fetchNotificationCount();
-    
-    // Poll for new notifications every 3 seconds
     const intervalId = setInterval(fetchNotificationCount, 3000);
-    
-    return () => clearInterval(intervalId);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
   }, [user?.$id]);
 
   // Handle following/followers modal

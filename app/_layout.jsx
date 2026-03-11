@@ -333,7 +333,49 @@ function OAuthHandler() {
   return null;
 }
 
+// Prevent app crashes from unhandled promise rejections and global errors
+function useGlobalErrorHandling() {
+  useEffect(() => {
+    const globalErrorHandler = (error, isFatal) => {
+      console.error('[Global Error]', isFatal ? 'Fatal' : 'Non-fatal', error?.message || error);
+    };
+    const rejectionHandler = (reason, promise) => {
+      console.warn('[Unhandled Rejection]', reason);
+    };
+
+    const prev = global.ErrorUtils?.getGlobalHandler?.();
+    if (global.ErrorUtils?.setGlobalHandler) {
+      global.ErrorUtils.setGlobalHandler((error, isFatal) => {
+        globalErrorHandler(error, isFatal);
+        try {
+          if (prev) prev(error, isFatal);
+        } catch (e) {
+          console.error('Error in previous handler:', e);
+        }
+      });
+    }
+    if (typeof global.addEventListener === 'function') {
+      try {
+        global.addEventListener('unhandledrejection', rejectionHandler);
+      } catch (_) {}
+    }
+
+    return () => {
+      if (global.ErrorUtils?.setGlobalHandler && prev) {
+        global.ErrorUtils.setGlobalHandler(prev);
+      }
+      if (typeof global.removeEventListener === 'function') {
+        try {
+          global.removeEventListener('unhandledrejection', rejectionHandler);
+        } catch (_) {}
+      }
+    };
+  }, []);
+}
+
 export default function RootLayout() {
+  useGlobalErrorHandling();
+
   // Try to load fonts, but don't fail if they don't load
   const [loaded, error] = useFonts({
     'Poppins-Regular': require('../assets/fonts/Poppins-Regular.ttf'),

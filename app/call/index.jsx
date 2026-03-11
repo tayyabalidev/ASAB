@@ -226,18 +226,31 @@ const CallScreen = () => {
   };
 
   const handleCallEnd = () => {
-    // Clean up subscriptions
-    if (unsubscribeRef.current) {
-      unsubscribeRef.current();
-      unsubscribeRef.current = null;
+    try {
+      if (unsubscribeRef.current) {
+        try {
+          unsubscribeRef.current();
+        } catch (e) {
+          console.warn('Error unsubscribing from call updates:', e);
+        }
+        unsubscribeRef.current = null;
+      }
+      setCallState('ended');
+      const delay = 300;
+      setTimeout(() => {
+        try {
+          if (router?.back) router.back();
+        } catch (e) {
+          console.warn('Error navigating back:', e);
+        }
+      }, delay);
+    } catch (e) {
+      console.error('Error in handleCallEnd:', e);
+      setCallState('ended');
+      try {
+        if (router?.back) router.back();
+      } catch (_) {}
     }
-    
-    setCallState('ended');
-    
-    // Navigate back after a short delay
-    setTimeout(() => {
-      router.back();
-    }, 300);
   };
 
   const handleCallError = (error) => {

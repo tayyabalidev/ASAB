@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { View, Image, FlatList, TouchableOpacity, Text, Alert, TextInput, Platform } from "react-native";
@@ -52,9 +52,10 @@ const Inbox = () => {
   const [notifications, setNotifications] = useState([]);
   const [recentMessages, setRecentMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [followingStates, setFollowingStates] = useState({}); // Track follow states for notifications
+  const [followingStates, setFollowingStates] = useState({});
   const [searchActive, setSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const mountedRef = useRef(true);
 
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -62,16 +63,17 @@ const Inbox = () => {
   );
 
   useEffect(() => {
+    mountedRef.current = true;
     fetchNotifications();
     fetchRecentMessages();
-
-    // Add polling for real-time updates
     const intervalId = setInterval(() => {
       fetchNotifications();
       fetchRecentMessages();
-    }, 2000); // every 2 seconds
-
-    return () => clearInterval(intervalId);
+    }, 2000);
+    return () => {
+      mountedRef.current = false;
+      clearInterval(intervalId);
+    };
   }, [currentUser]);
 
   // Initialize follow states from notifications
@@ -91,36 +93,34 @@ const Inbox = () => {
   }, [notifications, currentUser, followStatus]);
 
   const fetchNotifications = async () => {
+    if (!currentUser?.$id) return;
     try {
       const notificationsData = await getNotifications(currentUser.$id);
+      if (!mountedRef.current) return;
       setNotifications(notificationsData);
-      
-      // Auto-mark notifications as read when user views the notification page
+
       const unreadNotifications = notificationsData.filter(n => !n.isRead || n.isRead === false);
       if (unreadNotifications.length > 0) {
-        // Mark all unread notifications as read in parallel
         Promise.all(
           unreadNotifications.map(async (notification) => {
             try {
               await markNotificationAsRead(notification.$id);
               return notification.$id;
             } catch (error) {
-              // Silent fail - don't interrupt user experience
               return null;
             }
           })
         ).then((readIds) => {
-          // Update local state for all successfully marked notifications
+          if (!mountedRef.current) return;
           const successfulIds = readIds.filter(id => id !== null);
           if (successfulIds.length > 0) {
-            setNotifications(prev => 
+            setNotifications(prev =>
               prev.map(n => successfulIds.includes(n.$id) ? { ...n, isRead: true } : n)
             );
           }
         });
       }
     } catch (error) {
-     
     }
   };
 
@@ -132,6 +132,7 @@ const Inbox = () => {
   };
 
   const fetchRecentMessages = async () => {
+    if (!currentUser?.$id) return;
     try {
       const messagesQuery = Query.equal('participants', currentUser.$id);
       const messagesResponse = await databases.listDocuments(
@@ -140,7 +141,6 @@ const Inbox = () => {
         [messagesQuery]
       );
 
-      // For each chat, fetch its messages
       const chatsWithMessages = await Promise.all(
         messagesResponse.documents.map(async (chat) => {
           const chatMessagesRes = await databases.listDocuments(
@@ -152,11 +152,11 @@ const Inbox = () => {
         })
       );
 
+      if (!mountedRef.current) return;
       setRecentMessages(chatsWithMessages);
     } catch (error) {
-      
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
     

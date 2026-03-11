@@ -85,101 +85,98 @@ const UserProfile = () => {
   }, [id]);
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchProfileUser = async () => {
       try {
-        setLoading(true);
-        
-        // Validate required data
+        if (isMounted) setLoading(true);
+
         if (!id) {
           Alert.alert(t('common.error'), 'User ID is required');
-          router.back(); // Go back instead of redirecting to home
+          router.back();
           return;
         }
-        
-        // Get the profile user's data
+
         const userResponse = await databases.getDocument(
           appwriteConfig.databaseId,
           appwriteConfig.userCollectionId,
           id
         );
-        
+
+        if (!isMounted) return;
         if (!userResponse) {
           Alert.alert(t('common.error'), 'User not found');
-          router.back(); // Go back instead of redirecting to home
+          router.back();
           return;
         }
-        
+
         setProfileUser(userResponse);
-        
-        // Re-enable privacy logic
         const isProfilePrivate = userResponse.isPrivate || false;
         setIsPrivate(isProfilePrivate);
-        
-        // Re-enable access control logic - with null checks
+
         if (currentUser && currentUser.$id === id) {
-          // User viewing their own profile
           setCanView(true);
         } else if (isProfilePrivate) {
-          // Check if current user is in the allowed viewers list
           const allowedViewers = userResponse.allowedViewers || [];
           setCanView(currentUser ? allowedViewers.includes(currentUser.$id) : false);
         } else {
-          // Public profile
           setCanView(true);
         }
-        
-        // Fetch followers for follow/unfollow button - with null checks
+
         if (currentUser && currentUser.$id !== id) {
           const followers = userResponse.followers || [];
           const isFollowingUser = followers.includes(currentUser.$id);
           setIsFollowing(isFollowingUser);
           setFollowersCount(followers.length);
-          // Update global state
           updateFollowStatus(id, isFollowingUser);
         } else {
           setFollowersCount(userResponse.followers ? userResponse.followers.length : 0);
         }
-        // Fetch likes count for this user
+
         const totalLikes = await getUserLikesCount(id);
-        setLikesCount(totalLikes);
-        
+        if (isMounted) setLikesCount(totalLikes);
       } catch (error) {
         console.error('Error fetching profile user:', error);
-        Alert.alert(t('common.error'), error.message || t('profile.alerts.loadProfileError'));
-        router.back(); // Go back instead of redirecting to home
+        if (isMounted) {
+          Alert.alert(t('common.error'), error.message || t('profile.alerts.loadProfileError'));
+          router.back();
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     if (id) {
       fetchProfileUser();
     } else {
-      // If no id, go back to previous screen
       router.back();
     }
+
+    return () => { isMounted = false; };
   }, [id, currentUser]);
 
   // Fetch earnings data when viewing own profile
   useEffect(() => {
+    let isMounted = true;
+
     const fetchEarningsData = async () => {
-      if (currentUser?.$id !== id) return; // Only fetch for own profile
-      
+      if (currentUser?.$id !== id) return;
+
       try {
-        setLoadingEarnings(true);
+        if (isMounted) setLoadingEarnings(true);
         const [total, pending, donationsList, payoutsList] = await Promise.all([
           getCreatorTotalDonations(id),
           getPendingPayoutAmount(id),
           getCreatorDonations(id),
           getCreatorPayouts(id)
         ]);
-        
+
+        if (!isMounted) return;
         setTotalEarnings(total || 0);
         setPendingPayout(pending || 0);
         setDonations(donationsList || []);
         setPayouts(payoutsList || []);
-        
-        // Fetch donor details for donations
+
         const donationsWithDonorInfo = await Promise.all(
           (donationsList || []).map(async (donation) => {
             try {
@@ -194,25 +191,23 @@ const UserProfile = () => {
                 donorAvatar: donor.avatar || ''
               };
             } catch (error) {
-              return {
-                ...donation,
-                donorName: 'Anonymous',
-                donorAvatar: ''
-              };
+              return { ...donation, donorName: 'Anonymous', donorAvatar: '' };
             }
           })
         );
-        
-        setDonationsWithDonors(donationsWithDonorInfo);
+
+        if (isMounted) setDonationsWithDonors(donationsWithDonorInfo);
       } catch (error) {
       } finally {
-        setLoadingEarnings(false);
+        if (isMounted) setLoadingEarnings(false);
       }
     };
 
     if (id && currentUser?.$id === id) {
       fetchEarningsData();
     }
+
+    return () => { isMounted = false; };
   }, [id, currentUser]);
 
   // When modalVideo changes, set up comment state
@@ -224,13 +219,14 @@ const UserProfile = () => {
 
   // Comments logic for modal
   useEffect(() => {
-    if (commentsModalVisible && modalVideo) {
-      setLoadingComments(true);
-      getComments(modalVideo.$id)
-        .then((res) => setComments(res))
-        .catch(() => setComments([]))
-        .finally(() => setLoadingComments(false));
-    }
+    if (!commentsModalVisible || !modalVideo) return;
+    let isMounted = true;
+    setLoadingComments(true);
+    getComments(modalVideo.$id)
+      .then((res) => { if (isMounted) setComments(res); })
+      .catch(() => { if (isMounted) setComments([]); })
+      .finally(() => { if (isMounted) setLoadingComments(false); });
+    return () => { isMounted = false; };
   }, [commentsModalVisible, modalVideo]);
 
 

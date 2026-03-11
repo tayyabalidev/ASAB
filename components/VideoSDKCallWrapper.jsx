@@ -1,36 +1,59 @@
 /**
  * VideoSDK Call Wrapper Component
- * 
- * Safely loads VideoSDKCall component
- * Falls back to placeholder if VideoSDK is not available
+ *
+ * Safely loads VideoSDKCall component.
+ * Falls back to placeholder if VideoSDK is not available or if the native module crashes.
+ * Includes Error Boundary so the app does not crash when the SDK fails at runtime.
  */
 
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
+/**
+ * Error Boundary to catch crashes when VideoSDK native module is not linked
+ * or fails during render (e.g. MeetingProvider / useMeeting touching native code).
+ * Prevents the app from closing and lets the wrapper show the fallback UI.
+ */
+class VideoSDKErrorBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('VideoSDK ErrorBoundary caught:', error, errorInfo);
+    this.props.onError?.();
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return null;
+    }
+    return this.props.children;
+  }
+}
+
 const VideoSDKCallWrapper = (props) => {
   const [VideoSDKCall, setVideoSDKCall] = React.useState(null);
   const [error, setError] = React.useState(null);
+  const [sdkRenderError, setSdkRenderError] = React.useState(false);
 
   React.useEffect(() => {
     let isMounted = true;
-    
+
     const loadVideoSDKCall = async () => {
       try {
-        // Check if @videosdk.live/react-native-sdk is available
         const videosdkPackage = require('@videosdk.live/react-native-sdk');
-        
-        // Try to actually use the native module to verify it's linked
+
         if (videosdkPackage && videosdkPackage.MeetingProvider) {
-          // Native module is available, load the component
           const callComponent = require('./VideoSDKCall').default;
           if (isMounted && callComponent) {
             setVideoSDKCall(() => callComponent);
             return;
           }
         }
-        
-        // If we get here, package exists but native module not linked
+
         if (isMounted) {
           setError('VideoSDK native module not linked. Please rebuild the app.');
         }
@@ -38,13 +61,16 @@ const VideoSDKCallWrapper = (props) => {
         if (isMounted) {
           const errorMessage = err.message || 'VideoSDK SDK not available';
           console.error('VideoSDKCallWrapper error:', errorMessage);
-          
-          // Check for specific error types
-          if (errorMessage.includes('Native module') || 
-              errorMessage.includes('doesn\'t seem to be linked') ||
-              errorMessage.includes('null is not an object') ||
-              errorMessage.includes('Cannot find module')) {
-            setError('VideoSDK native module not linked. Please rebuild with: npx expo run:android');
+
+          if (
+            errorMessage.includes('Native module') ||
+            errorMessage.includes("doesn't seem to be linked") ||
+            errorMessage.includes('null is not an object') ||
+            errorMessage.includes('Cannot find module')
+          ) {
+            setError(
+              'VideoSDK native module not linked. Please rebuild with: npx expo run:android (or npx expo run:ios)'
+            );
           } else {
             setError(errorMessage);
           }
@@ -52,7 +78,6 @@ const VideoSDKCallWrapper = (props) => {
       }
     };
 
-    // Use setTimeout to ensure this runs after initial render
     const timer = setTimeout(loadVideoSDKCall, 0);
 
     return () => {
@@ -61,14 +86,29 @@ const VideoSDKCallWrapper = (props) => {
     };
   }, []);
 
-  // Show fallback UI if VideoSDK is not available
-  if (error || !VideoSDKCall) {
-    const isLinkingError = error?.includes("doesn't seem to be linked") || 
-                          error?.includes("pod install") ||
-                          error?.includes("Expo Go") ||
-                          error?.includes("Native module") ||
-                          error?.includes("Cannot find module");
-    
+  const handleEndCallPress = React.useCallback(() => {
+    try {
+      props.onCallEnd?.();
+    } catch (e) {
+      console.error('Error in End Call handler:', e);
+      try {
+        props.onCallEnd?.();
+      } catch (_) {}
+    }
+  }, [props.onCallEnd]);
+
+  const showFallback = error || !VideoSDKCall || sdkRenderError;
+  const isLoading = !VideoSDKCall && !error && !sdkRenderError;
+
+  if (showFallback) {
+    const isLinkingError =
+      error?.includes("doesn't seem to be linked") ||
+      error?.includes('pod install') ||
+      error?.includes('Expo Go') ||
+      error?.includes('Native module') ||
+      error?.includes('Cannot find module') ||
+      sdkRenderError;
+
     return (
       <View style={styles.container}>
         <View style={styles.fallbackContainer}>
@@ -76,10 +116,10 @@ const VideoSDKCallWrapper = (props) => {
             {props.callType === 'video' ? '📹 Video Call' : '📞 Audio Call'}
           </Text>
           <Text style={styles.fallbackSubtext}>
-            Call in progress...
+            {isLoading ? 'Loading...' : 'Call in progress...'}
           </Text>
-          
-          {isLinkingError ? (
+
+          {!isLoading && (isLinkingError ? (
             <>
               <Text style={styles.fallbackWarning}>
                 ⚠️ VideoSDK Not Available
@@ -104,26 +144,28 @@ const VideoSDKCallWrapper = (props) => {
                 ⚠️ VideoSDK not available
               </Text>
               <Text style={styles.fallbackInstruction}>
-                Install @videosdk.live/react-native-sdk to enable calls
+                Install @videosdk.live/react-native-sdk and rebuild the app to enable calls.
               </Text>
             </>
-          )}
-          
-          {props.onCallEnd && (
-            <TouchableOpacity
-              style={styles.endButton}
-              onPress={props.onCallEnd}
-            >
-              <Text style={styles.endButtonText}>End Call</Text>
-            </TouchableOpacity>
-          )}
+          ))}
+
+          <TouchableOpacity
+            style={styles.endButton}
+            onPress={handleEndCallPress}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.endButtonText}>End Call</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  // Render the real VideoSDKCall component
-  return <VideoSDKCall {...props} />;
+  return (
+    <VideoSDKErrorBoundary onError={() => setSdkRenderError(true)}>
+      <VideoSDKCall {...props} />
+    </VideoSDKErrorBoundary>
+  );
 };
 
 const styles = StyleSheet.create({

@@ -122,23 +122,26 @@ const VideoSDKCallInner = ({
   }, [meetingId, join]);
 
   const handleCallEnd = async () => {
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
     try {
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-        durationIntervalRef.current = null;
-      }
-
       if (callIdRef.current) {
         await endCall(callIdRef.current, currentUserId);
       }
-
+    } catch (e) {
+      console.warn('Error updating call status:', e);
+    }
+    try {
       await leave();
-      
+    } catch (e) {
+      console.warn('Error leaving meeting:', e);
+    }
+    try {
       if (onCallEnd) onCallEnd();
-    } catch (error) {
-      console.error('Error ending call:', error);
-      await leave();
-      if (onCallEnd) onCallEnd();
+    } catch (e) {
+      console.warn('Error in onCallEnd:', e);
     }
   };
 

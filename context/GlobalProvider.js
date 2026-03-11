@@ -128,14 +128,15 @@ const GlobalProvider = ({ children }) => {
   );
 
   useEffect(() => {
-    // Check if getCurrentUser is available
     if (typeof getCurrentUser !== 'function') {
       setLoading(false);
       return;
     }
 
+    let isMounted = true;
     getCurrentUser()
       .then((res) => {
+        if (!isMounted) return;
         if (res) {
           setIsLogged(true);
           setUser(res);
@@ -144,13 +145,17 @@ const GlobalProvider = ({ children }) => {
           setUser(null);
         }
       })
-      .catch((error) => {
-        setIsLogged(false);
-        setUser(null);
+      .catch(() => {
+        if (isMounted) {
+          setIsLogged(false);
+          setUser(null);
+        }
       })
       .finally(() => {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       });
+
+    return () => { isMounted = false; };
   }, [changeLanguage]);
 
   useEffect(() => {

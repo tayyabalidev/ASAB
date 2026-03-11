@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Image, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -86,30 +86,33 @@ const LiveStreams = () => {
   const [streams, setStreams] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
 
-  const loadStreams = async () => {
+  const loadStreams = useCallback(async () => {
     try {
       const activeStreams = await getActiveLiveStreams();
+      if (!mountedRef.current) return;
       setStreams(activeStreams);
     } catch (error) {
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     loadStreams();
-    
-    // Auto-refresh every 30 seconds
     const interval = setInterval(loadStreams, 30000);
-    
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      mountedRef.current = false;
+      clearInterval(interval);
+    };
+  }, [loadStreams]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadStreams();
-    setRefreshing(false);
+    if (mountedRef.current) setRefreshing(false);
   };
 
   const handleStreamPress = (stream) => {

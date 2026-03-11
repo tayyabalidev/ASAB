@@ -239,6 +239,7 @@ const Chat = () => {
   // 1. Robust polling for allMessages every 2 seconds
   useEffect(() => {
     if (!currentUser) return;
+    let isMounted = true;
     let intervalId = null;
     const pollAllMessages = async () => {
       try {
@@ -254,6 +255,7 @@ const Chat = () => {
             ])
           ]
         );
+        if (!isMounted) return;
         setAllMessages(prev => {
           const optimistic = prev.filter(m => m.optimistic);
           const confirmed = res.documents;
@@ -273,6 +275,7 @@ const Chat = () => {
     pollAllMessages();
     intervalId = setInterval(pollAllMessages, 2000);
     return () => {
+      isMounted = false;
       if (intervalId) clearInterval(intervalId);
     };
   }, [currentUser, groups]);
@@ -280,58 +283,63 @@ const Chat = () => {
   // Replace polling for open chat with logic that fetches and sets only that chat's messages, and marks unread as read
   useEffect(() => {
     if (!selectedUser || !selectedUser.$id || !currentUser || !selectedUser.type) return;
+    let isMounted = true;
     let intervalId = null;
     const fetchAndMarkRead = async () => {
       let newMessages = [];
-      if (selectedUser.type === 'group') {
-        const res = await databases.listDocuments(
-          appwriteConfig.databaseId,
-          appwriteConfig.messagesCollectionId,
-          [Query.equal('chatId', [selectedUser.$id]), Query.orderDesc('$createdAt')]
-        );
-        newMessages = res.documents.reverse();
-      } else {
-        const res = await databases.listDocuments(
-          appwriteConfig.databaseId,
-          appwriteConfig.messagesCollectionId,
-          [
-            Query.or([
-              Query.and([
-                Query.equal('senderId', [currentUser.$id]),
-                Query.equal('receiverId', [selectedUser.$id])
-              ]),
-              Query.and([
-                Query.equal('senderId', [selectedUser.$id]),
-                Query.equal('receiverId', [currentUser.$id])
-              ])
-            ]),
-            Query.orderDesc('$createdAt')
-          ]
-        );
-        newMessages = res.documents.reverse();
-      }
-      setMessages(newMessages); // Replace, not append
-      // Mark all unread messages as read
-      const unread = newMessages.filter(m => m.receiverId === currentUser.$id && m.is_read === false);
-      for (const msg of unread) {
-        try {
-          await databases.updateDocument(
+      try {
+        if (selectedUser.type === 'group') {
+          const res = await databases.listDocuments(
             appwriteConfig.databaseId,
             appwriteConfig.messagesCollectionId,
-            msg.$id,
-            { is_read: true }
+            [Query.equal('chatId', [selectedUser.$id]), Query.orderDesc('$createdAt')]
           );
-          setAllMessages(prev =>
-            prev.map(m =>
-              m.$id === msg.$id ? { ...m, is_read: true } : m
-            )
+          newMessages = res.documents.reverse();
+        } else {
+          const res = await databases.listDocuments(
+            appwriteConfig.databaseId,
+            appwriteConfig.messagesCollectionId,
+            [
+              Query.or([
+                Query.and([
+                  Query.equal('senderId', [currentUser.$id]),
+                  Query.equal('receiverId', [selectedUser.$id])
+                ]),
+                Query.and([
+                  Query.equal('senderId', [selectedUser.$id]),
+                  Query.equal('receiverId', [currentUser.$id])
+                ])
+              ]),
+              Query.orderDesc('$createdAt')
+            ]
           );
-        } catch (e) {}
-      }
+          newMessages = res.documents.reverse();
+        }
+        if (!isMounted) return;
+        setMessages(newMessages);
+        const unread = newMessages.filter(m => m.receiverId === currentUser.$id && m.is_read === false);
+        for (const msg of unread) {
+          try {
+            await databases.updateDocument(
+              appwriteConfig.databaseId,
+              appwriteConfig.messagesCollectionId,
+              msg.$id,
+              { is_read: true }
+            );
+            if (!isMounted) return;
+            setAllMessages(prev =>
+              prev.map(m =>
+                m.$id === msg.$id ? { ...m, is_read: true } : m
+              )
+            );
+          } catch (e) {}
+        }
+      } catch (e) {}
     };
-    fetchAndMarkRead(); // Initial fetch and mark
+    fetchAndMarkRead();
     intervalId = setInterval(fetchAndMarkRead, 3000);
     return () => {
+      isMounted = false;
       if (intervalId) clearInterval(intervalId);
     };
   }, [selectedUser, currentUser]);
