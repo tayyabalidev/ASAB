@@ -28,6 +28,7 @@ import {
 import { databases, appwriteConfig } from "../../lib/appwrite";
 import { images, icons } from "../../constants";
 import VideoProgressBar from "../../components/VideoProgressBar";
+import { isVideoMedia } from "../../lib/mediaType";
 
 const PostDetails = () => {
   const { id } = useLocalSearchParams();
@@ -320,7 +321,7 @@ const PostDetails = () => {
             contentContainerStyle={{ paddingBottom: 120 }}
           >
             <View style={{ width: "100%", height: 400, backgroundColor: "#000", position: 'relative' }}>
-              {post.video ? (
+              {isVideoMedia(post?.video, post?.postType) ? (
                 <>
                   <Video
                     ref={videoRef}
@@ -392,6 +393,12 @@ const PostDetails = () => {
                     </Text>
                   </TouchableOpacity>
                 </>
+              ) : post?.video ? (
+                <Image
+                  source={{ uri: post.video }}
+                  style={{ width: "100%", height: "100%" }}
+                  resizeMode="cover"
+                />
               ) : (
                 <View
                   style={{
@@ -401,7 +408,7 @@ const PostDetails = () => {
                     backgroundColor: "#111",
                   }}
                 >
-                  <Text style={{ color: "#fff" }}>Video unavailable</Text>
+                  <Text style={{ color: "#fff" }}>Media unavailable</Text>
                 </View>
               )}
             </View>

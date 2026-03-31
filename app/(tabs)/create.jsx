@@ -49,6 +49,8 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
+const BASE64_ENCODING = FileSystem?.EncodingType?.Base64 || "base64";
+
 const FILTERS = [
   { id: "none", name: "Original" },
   { id: "wavy", name: "Wavy" },
@@ -585,7 +587,10 @@ const Create = () => {
         }
 
         if (selectType === "video") {
-          
+          setForm({
+            ...form,
+            video: file,
+          });
           setIsMediaEdited(false); // Reset edit flag when new video is selected
           // Reset all video editing states
           setVideoTrimStart(0);
@@ -888,7 +893,7 @@ const Create = () => {
             processedUri,
             processedResult.base64,
             {
-              encoding: FileSystem.EncodingType.Base64,
+              encoding: BASE64_ENCODING,
             }
           );
           
@@ -953,7 +958,7 @@ const Create = () => {
             processedUri,
             processedResult.base64,
             {
-              encoding: FileSystem.EncodingType.Base64,
+              encoding: BASE64_ENCODING,
             }
           );
           
@@ -1754,7 +1759,7 @@ const Create = () => {
                 processedUri,
                 processedResult.base64,
                 {
-                  encoding: FileSystem.EncodingType.Base64,
+                  encoding: BASE64_ENCODING,
                 }
               );
 
@@ -1885,7 +1890,7 @@ const Create = () => {
               }captured_photo_${Date.now()}.jpg`;
 
               await FileSystem.writeAsStringAsync(capturedUri, base64Data, {
-                encoding: FileSystem.EncodingType.Base64,
+                encoding: BASE64_ENCODING,
               });
 
               const fileInfo = await FileSystem.getInfoAsync(capturedUri);
@@ -1952,7 +1957,7 @@ const Create = () => {
                     processedUri,
                     processedResult.base64,
                     {
-                      encoding: FileSystem.EncodingType.Base64,
+                      encoding: BASE64_ENCODING,
                     }
                   );
                   processedPhoto = {
@@ -3493,9 +3498,7 @@ const Create = () => {
                                               await FileSystem.readAsStringAsync(
                                                 selectedAsset.uri,
                                                 {
-                                                  encoding:
-                                                    FileSystem.EncodingType
-                                                      .Base64,
+                                                  encoding: BASE64_ENCODING,
                                                 }
                                               );
 
@@ -7632,7 +7635,7 @@ const Create = () => {
                               const base64 = await FileSystem.readAsStringAsync(
                                 selectedAsset.uri,
                                 {
-                                  encoding: FileSystem.EncodingType.Base64,
+                                  encoding: BASE64_ENCODING,
                                 }
                               );
 
@@ -7821,7 +7824,7 @@ const Create = () => {
                       const base64 = await FileSystem.readAsStringAsync(
                         editedFile.uri,
                         {
-                          encoding: FileSystem.EncodingType.Base64,
+                          encoding: BASE64_ENCODING,
                         }
                       );
                       editedBase64 = `data:image/jpeg;base64,${base64}`;

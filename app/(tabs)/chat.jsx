@@ -815,6 +815,40 @@ const Chat = () => {
     }
   };
 
+  // Be defensive: some older messages may have an incorrect `type` persisted.
+  // Infer from URL/filename when possible so images don't render video controls.
+  const normalizeMediaUrl = (url) => {
+    if (!url || typeof url !== 'string') return '';
+    return url.split('?')[0].split('#')[0].trim().toLowerCase();
+  };
+
+  const inferMediaKindFromUrl = (url) => {
+    const u = normalizeMediaUrl(url);
+    if (!u) return null;
+
+    // Video extensions
+    if (/\.(mp4|mov|m4v|webm|mkv|3gp)$/.test(u)) return 'video';
+
+    // Image extensions
+    if (/\.(jpg|jpeg|png|gif|webp|heic|heif|bmp)$/.test(u)) return 'image';
+
+    return null;
+  };
+
+  const isVideoMessage = (item) => {
+    const url = item?.fileUrl || item?.content || '';
+    const inferred = inferMediaKindFromUrl(url);
+    if (inferred) return inferred === 'video';
+    return item?.type === 'video';
+  };
+
+  const isImageMessage = (item) => {
+    const url = item?.fileUrl || item?.content || '';
+    const inferred = inferMediaKindFromUrl(url);
+    if (inferred) return inferred === 'image';
+    return item?.type === 'image';
+  };
+
   displayedChats.sort((a, b) => {
     const aLast = getLastMessage(a)?.$createdAt
       ? new Date(getLastMessage(a).$createdAt)
@@ -1937,7 +1971,7 @@ const Chat = () => {
                             {audioPlaybackStatus.durationMillis ? `${Math.floor((audioPlaybackStatus.durationMillis/1000) % 60)}s` : 'Audio message'}
                           </Text>
                         </View>
-                      ) : item.type === 'video' ? (
+                      ) : isVideoMessage(item) ? (
                         <Video
                           source={{ uri: item.fileUrl || item.content }}
                           style={{ width: 220, height: 180, borderRadius: 12, marginBottom: 6, backgroundColor: '#000' }}
@@ -1946,7 +1980,7 @@ const Chat = () => {
                           shouldPlay={false}
                           isLooping={false}
                         />
-                      ) : item.type === 'image' ? (
+                      ) : isImageMessage(item) ? (
                         <TouchableOpacity onPress={() => {
                           setModalImageUrl(item.fileUrl || item.content);
                           setImageModalVisible(true);

@@ -15,6 +15,8 @@ import {
   PermissionsAndroid,
   Platform,
 } from 'react-native';
+import { Audio, InterruptionModeIOS } from 'expo-av';
+import { Camera } from 'expo-camera';
 // VideoSDK React Native SDK imports
 // Note: Install @videosdk.live/react-native-sdk package
 import {
@@ -29,6 +31,43 @@ import { updateCallStatus, endCall } from '../lib/calls';
 import { CallState } from '../lib/callHelper';
 
 const { width, height } = Dimensions.get('window');
+
+async function ensureCallMediaPermissions(callType) {
+  if (Platform.OS === 'android') {
+    const permissions = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
+    if (callType === 'video') {
+      permissions.push(PermissionsAndroid.PERMISSIONS.CAMERA);
+    }
+    const granted = await PermissionsAndroid.requestMultiple(permissions);
+    const audioGranted =
+      granted['android.permission.RECORD_AUDIO'] === PermissionsAndroid.RESULTS.GRANTED;
+    const cameraGranted =
+      callType === 'video'
+        ? granted['android.permission.CAMERA'] === PermissionsAndroid.RESULTS.GRANTED
+        : true;
+    return audioGranted && cameraGranted;
+  }
+
+  try {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    });
+  } catch (e) {
+    console.warn('VideoSDK: setAudioModeAsync', e);
+  }
+
+  const mic = await Audio.requestPermissionsAsync();
+  if (!mic.granted) {
+    return false;
+  }
+  if (callType !== 'video') {
+    return true;
+  }
+  const cam = await Camera.requestCameraPermissionsAsync();
+  return Boolean(cam.granted);
+}
 
 // Inner component that uses VideoSDK hooks
 const VideoSDKCallInner = ({
@@ -45,8 +84,9 @@ const VideoSDKCallInner = ({
   
   const durationIntervalRef = useRef(null);
   const callIdRef = useRef(callId);
+  const participantsRef = useRef(new Map());
 
-  const { join, leave, toggleMic, toggleWebcam, participants } = useMeeting({
+  const { join, leave, toggleMic, toggleWebcam, participants, localParticipant } = useMeeting({
     onMeetingJoined: () => {
       console.log('✅ Joined VideoSDK meeting successfully');
       updateCallStatus(callIdRef.current, CallState.CONNECTED).catch(console.error);
@@ -65,12 +105,15 @@ const VideoSDKCallInner = ({
     },
     onParticipantLeft: (participant) => {
       console.log('👋 Participant left:', participant.id);
-      // If all participants left, end call
-      if (participants.size === 0) {
-        handleCallEnd();
-      }
+      setTimeout(() => {
+        if (participantsRef.current.size === 0) {
+          handleCallEnd();
+        }
+      }, 400);
     },
   });
+
+  participantsRef.current = participants;
 
   useEffect(() => {
     // Start call duration timer
@@ -89,27 +132,16 @@ const VideoSDKCallInner = ({
     // Join meeting when component mounts
     const joinMeeting = async () => {
       try {
-        // Request permissions first
-        if (Platform.OS === 'android') {
-          const permissions = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
-          if (callType === 'video') {
-            permissions.push(PermissionsAndroid.PERMISSIONS.CAMERA);
-          }
-          const granted = await PermissionsAndroid.requestMultiple(permissions);
-          
-          const audioGranted = granted['android.permission.RECORD_AUDIO'] === PermissionsAndroid.RESULTS.GRANTED;
-          const cameraGranted = callType === 'video' 
-            ? granted['android.permission.CAMERA'] === PermissionsAndroid.RESULTS.GRANTED
-            : true;
-
-          if (!audioGranted || !cameraGranted) {
-            Alert.alert('Permissions Required', 'Microphone and camera permissions are required for calls.');
-            if (onError) onError('PERMISSION_DENIED');
-            return;
-          }
+        const allowed = await ensureCallMediaPermissions(callType);
+        if (!allowed) {
+          Alert.alert(
+            'Permissions Required',
+            'Microphone and camera access are required for calls. You can enable them in Settings.'
+          );
+          if (onError) onError('PERMISSION_DENIED');
+          return;
         }
 
-        // Join the meeting
         await join();
       } catch (error) {
         console.error('Error joining VideoSDK meeting:', error);
@@ -171,10 +203,11 @@ const VideoSDKCallInner = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Get remote participants
-  const remoteParticipants = Array.from(participants.values()).filter(
-    p => p.id !== currentUserId
-  );
+  // VideoSDK participant ids are not Appwrite user ids — exclude local by SDK localParticipant
+  const localId = localParticipant?.id;
+  const remoteParticipants = localId
+    ? Array.from(participants.values()).filter((p) => p.id !== localId)
+    : Array.from(participants.values());
 
   return (
     <View style={styles.container}>
@@ -348,6 +381,7 @@ const VideoSDKCall = ({
     <MeetingProvider
       config={{
         meetingId: meetingId,
+        participantId: currentUserId || undefined,
         micEnabled: VIDEOSDK_CONFIG.meetingSettings.micEnabled,
         webcamEnabled: callType === 'video' && VIDEOSDK_CONFIG.meetingSettings.webcamEnabled,
         name: currentUserId || 'User',

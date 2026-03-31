@@ -17,6 +17,7 @@ import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
 import { appwriteConfig } from "../../lib/appwrite";
+import { isVideoMedia } from "../../lib/mediaType";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -391,7 +392,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     if (isVisible && isHomeFocused) {
       setPlay(true);
       // Show progress bar briefly when video starts
-      if (item.video && item.postType !== 'photo') {
+      if (isVideoMedia(item?.video, item?.postType)) {
         setShowProgressBar(true);
         if (progressBarTimeoutRef.current) {
           clearTimeout(progressBarTimeoutRef.current);
@@ -417,7 +418,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
 
   const handleVideoPress = () => {
     // Only show progress bar when video is tapped, don't pause/play
-    if (item.video && item.postType !== 'photo') {
+    if (isVideoMedia(item?.video, item?.postType)) {
       setShowProgressBar(true);
       // Hide progress bar after 3 seconds
       if (progressBarTimeoutRef.current) {
@@ -1060,7 +1061,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               />
             );
           })()
-        ) : item.video ? (
+        ) : isVideoMedia(item?.video, item?.postType) ? (
           (() => {
             // Get filter and video adjustments from item
             const filterId = item.filter || 'none';
@@ -1158,6 +1159,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 isLooping={true}
                 isMuted={false}
                 useNativeControls={false}
+                progressUpdateIntervalMillis={250}
                 onError={(error) => {
                 }}
                 onLoad={(status) => {
@@ -1177,7 +1179,9 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 {...(Platform.OS === 'ios' && {
                   allowsExternalPlayback: false,
                   playInSilentModeIOS: true,
-                  ignoreSilentSwitch: 'ignore'
+                  ignoreSilentSwitch: 'ignore',
+                  automaticallyWaitsToMinimizeStalling: false,
+                  preferredForwardBufferDuration: 0,
                 })}
               />
             );
@@ -1195,32 +1199,34 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t("home.noVideoAvailable")}</Text>
           </View>
         )}
-        {/* Play/Pause Button */}
-        <TouchableOpacity
-          onPress={handlePausePlay}
-          style={{ 
-            position: 'absolute', 
-            top: '50%', 
-            left: '50%', 
-            transform: [{ translateX: -25 }, { translateY: -25 }],
-            width: 50,
-            height: 50,
-            borderRadius: 25,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            zIndex: 20
-          }}
-          activeOpacity={0.7}
-        >
-          <Text style={{ color: '#fff', fontSize: 24 }}>
-            {play ? '❚❚' : '▶'}
-          </Text>
-        </TouchableOpacity>
+        {/* Play/Pause Button - videos only */}
+        {isVideoMedia(item?.video, item?.postType) && (
+          <TouchableOpacity
+            onPress={handlePausePlay}
+            style={{ 
+              position: 'absolute', 
+              top: '50%', 
+              left: '50%', 
+              transform: [{ translateX: -25 }, { translateY: -25 }],
+              width: 50,
+              height: 50,
+              borderRadius: 25,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 20
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: '#fff', fontSize: 24 }}>
+              {play ? '❚❚' : '▶'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </TouchableOpacity>
 
       {/* Progress Bar - Only show for native Video component (not WebView) - Outside TouchableOpacity to receive touches */}
-      {showProgressBar && item.video && item.postType !== 'photo' && playbackDuration > 0 && isVideoReady && (
+      {showProgressBar && isVideoMedia(item?.video, item?.postType) && playbackDuration > 0 && isVideoReady && (
         <View
           style={{
             position: 'absolute',
@@ -2796,7 +2802,7 @@ const Home = () => {
                   />
                 );
               })()
-            ) : item.video ? (
+            ) : isVideoMedia(item?.video, item?.postType) ? (
               <Video
                 source={{
                   uri: getIOSCompatibleVideoUrl(item.video) || item.video,
@@ -2835,7 +2841,7 @@ const Home = () => {
             )}
 
             {/* Play Icon Overlay - Only for videos */}
-            {item.video && item.postType !== 'photo' && (
+            {isVideoMedia(item?.video, item?.postType) && (
               <View style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -24 }, { translateY: -24 }] }}>
                 <Image source={icons.play} style={{ width: 48, height: 48 }} resizeMode="contain" />
               </View>
@@ -3543,7 +3549,7 @@ const Home = () => {
                       />
                     );
                   })()
-                ) : trendingModalVideo.video ? (
+                ) : isVideoMedia(trendingModalVideo?.video, trendingModalVideo?.postType) ? (
                   <>
                     <Video
                       ref={trendingVideoRef}
@@ -3556,11 +3562,14 @@ const Home = () => {
                       isMuted={false}
                       isLooping={true}
                       useNativeControls={false}
+                      progressUpdateIntervalMillis={250}
                       posterSource={trendingModalVideo.thumbnail ? { uri: trendingModalVideo.thumbnail } : undefined}
                       {...(Platform.OS === 'ios' && {
                         allowsExternalPlayback: false,
                         playInSilentModeIOS: true,
-                        ignoreSilentSwitch: 'ignore'
+                        ignoreSilentSwitch: 'ignore',
+                        automaticallyWaitsToMinimizeStalling: false,
+                        preferredForwardBufferDuration: 0,
                       })}
                       onError={(error) => {
                       }}

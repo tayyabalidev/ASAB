@@ -14,6 +14,7 @@ import { useGlobalContext } from "../../context/GlobalProvider";
 const SignUp = () => {
   const { setUser, setIsLogged, isDarkMode, user, isRTL } = useGlobalContext();
   const { t } = useTranslation();
+  const SHOW_SOCIAL_AUTH = false; // temporarily hide Google/Facebook buttons
 
   const [isSubmitting, setSubmitting] = useState(false);
   const [isGoogleSubmitting, setGoogleSubmitting] = useState(false);
@@ -300,41 +301,45 @@ const SignUp = () => {
             isLoading={isSubmitting}
           />
 
-          {/* Divider */}
-          <View className="flex-row items-center mt-6">
-            <View className={`flex-1 h-px ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-            <Text className={`mx-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              {t('auth.orDivider')}
-            </Text>
-            <View className={`flex-1 h-px ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-          </View>
+          {SHOW_SOCIAL_AUTH && (
+            <>
+              {/* Divider */}
+              <View className="flex-row items-center mt-6">
+                <View className={`flex-1 h-px ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+                <Text className={`mx-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  {t('auth.orDivider')}
+                </Text>
+                <View className={`flex-1 h-px ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+              </View>
 
-          {/* Google Sign Up Button */}
-          <GoogleSignInButton
-            onPress={handleGoogleSignIn}
-            containerStyles="mt-6"
-            isLoading={isGoogleSubmitting}
-            loadingLabel={t('auth.signingUp')}
-          />
+              {/* Google Sign Up Button */}
+              <GoogleSignInButton
+                onPress={handleGoogleSignIn}
+                containerStyles="mt-6"
+                isLoading={isGoogleSubmitting}
+                loadingLabel={t('auth.signingUp')}
+              />
 
-          {/* Facebook Sign Up Button */}
-          <TouchableOpacity
-            onPress={handleFacebookSignUp}
-            disabled={isFacebookLoading}
-            className={`mt-4 flex-row items-center justify-center py-4 px-6 rounded-xl ${
-              isDarkMode ? 'bg-[#1877F2]' : 'bg-[#1877F2]'
-            } ${isFacebookLoading ? 'opacity-50' : ''}`}
-            style={{ flexDirection: isRTL ? 'row-reverse' : 'row' }}
-          >
-            <Image
-              source={{ uri: 'https://cdn-icons-png.flaticon.com/512/124/124010.png' }}
-              className={`w-6 h-6 ${isRTL ? 'ml-3' : 'mr-3'}`}
-              resizeMode="contain"
-            />
-            <Text className="text-white font-semibold text-base" style={{ textAlign: 'center' }}>
-              {isFacebookLoading ? t('auth.signingUp') : t('auth.signUpWithFacebook')}
-            </Text>
-          </TouchableOpacity>
+              {/* Facebook Sign Up Button */}
+              <TouchableOpacity
+                onPress={handleFacebookSignUp}
+                disabled={isFacebookLoading}
+                className={`mt-4 flex-row items-center justify-center py-4 px-6 rounded-xl ${
+                  isDarkMode ? 'bg-[#1877F2]' : 'bg-[#1877F2]'
+                } ${isFacebookLoading ? 'opacity-50' : ''}`}
+                style={{ flexDirection: isRTL ? 'row-reverse' : 'row' }}
+              >
+                <Image
+                  source={{ uri: 'https://cdn-icons-png.flaticon.com/512/124/124010.png' }}
+                  className={`w-6 h-6 ${isRTL ? 'ml-3' : 'mr-3'}`}
+                  resizeMode="contain"
+                />
+                <Text className="text-white font-semibold text-base" style={{ textAlign: 'center' }}>
+                  {isFacebookLoading ? t('auth.signingUp') : t('auth.signUpWithFacebook')}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
 
           <View className="flex justify-center pt-5 items-center">
             <Text className={isDarkMode ? "text-gray-300" : "text-gray-600"}>{t('auth.haveAccount')} </Text>

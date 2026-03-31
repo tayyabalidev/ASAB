@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ResizeMode, Video } from "expo-av";
 import * as Animatable from "react-native-animatable";
 import {
@@ -9,6 +9,7 @@ import {
 } from "react-native";
 
 import { icons } from "../constants";
+import { isVideoMedia } from "../lib/mediaType";
 
 const zoomIn = {
   0: {
@@ -30,6 +31,17 @@ const zoomOut = {
 
 const TrendingItem = ({ activeItem, item }) => {
   const [play, setPlay] = useState(false);
+  const isVideo = isVideoMedia(item?.video, item?.postType || "video");
+  const isActive = activeItem === item.$id;
+
+  useEffect(() => {
+    // Autoplay active trending item for instant preview.
+    if (isVideo) {
+      setPlay(isActive);
+    } else {
+      setPlay(false);
+    }
+  }, [isActive, isVideo]);
 
   return (
     <Animatable.View
@@ -37,16 +49,18 @@ const TrendingItem = ({ activeItem, item }) => {
       animation={activeItem === item.$id ? zoomIn : zoomOut}
       duration={500}
     >
-      {play ? (
+      {play && isVideo ? (
         <Video
           source={{ uri: item.video }}
           className="w-52 h-72 rounded-[33px] mt-3 bg-white/10"
           resizeMode={ResizeMode.CONTAIN}
           useNativeControls
           shouldPlay
+          isLooping
+          progressUpdateIntervalMillis={250}
           onPlaybackStatusUpdate={(status) => {
             if (status.didJustFinish) {
-              setPlay(false);
+              setPlay(true);
             }
           }}
         />
@@ -54,7 +68,9 @@ const TrendingItem = ({ activeItem, item }) => {
         <TouchableOpacity
           className="relative flex justify-center items-center"
           activeOpacity={0.7}
-          onPress={() => setPlay(true)}
+          onPress={() => {
+            if (isVideo) setPlay(true);
+          }}
         >
           <ImageBackground
             source={{
@@ -64,11 +80,13 @@ const TrendingItem = ({ activeItem, item }) => {
             resizeMode="cover"
           />
 
-          <Image
-            source={icons.play}
-            className="w-12 h-12 absolute"
-            resizeMode="contain"
-          />
+          {isVideo && (
+            <Image
+              source={icons.play}
+              className="w-12 h-12 absolute"
+              resizeMode="contain"
+            />
+          )}
         </TouchableOpacity>
       )}
     </Animatable.View>

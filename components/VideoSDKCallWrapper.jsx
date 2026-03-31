@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 
 /**
  * Error Boundary to catch crashes when VideoSDK native module is not linked
@@ -23,7 +24,7 @@ class VideoSDKErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('VideoSDK ErrorBoundary caught:', error, errorInfo);
-    this.props.onError?.();
+    this.props.onError?.(error);
   }
 
   render() {
@@ -38,11 +39,23 @@ const VideoSDKCallWrapper = (props) => {
   const [VideoSDKCall, setVideoSDKCall] = React.useState(null);
   const [error, setError] = React.useState(null);
   const [sdkRenderError, setSdkRenderError] = React.useState(false);
+  const [sdkCrashMessage, setSdkCrashMessage] = React.useState(null);
+  /** Expo Go: StoreClient. App Store / TestFlight / EAS standalone: Standalone (or Bare in some setups). */
+  const isExpoGo =
+    Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
+    Constants.appOwnership === 'expo';
 
   React.useEffect(() => {
     let isMounted = true;
 
     const loadVideoSDKCall = async () => {
+      if (isExpoGo) {
+        if (isMounted) {
+          setError('VideoSDK is not supported in Expo Go. Please use a development build.');
+        }
+        return;
+      }
+
       try {
         const videosdkPackage = require('@videosdk.live/react-native-sdk');
 
@@ -84,7 +97,7 @@ const VideoSDKCallWrapper = (props) => {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, []);
+  }, [isExpoGo]);
 
   const handleEndCallPress = React.useCallback(() => {
     try {
@@ -101,13 +114,15 @@ const VideoSDKCallWrapper = (props) => {
   const isLoading = !VideoSDKCall && !error && !sdkRenderError;
 
   if (showFallback) {
-    const isLinkingError =
-      error?.includes("doesn't seem to be linked") ||
-      error?.includes('pod install') ||
-      error?.includes('Expo Go') ||
-      error?.includes('Native module') ||
-      error?.includes('Cannot find module') ||
-      sdkRenderError;
+    const isExpoGoOnlyError = Boolean(error && error.includes('Expo Go'));
+    const isNativeOrInstallError =
+      Boolean(error) &&
+      (error.includes("doesn't seem to be linked") ||
+        error.includes('pod install') ||
+        error.includes('Native module') ||
+        error.includes('Cannot find module') ||
+        error.includes('rebuild'));
+    const needsDevNativeRebuild = isExpoGoOnlyError || isNativeOrInstallError;
 
     return (
       <View style={styles.container}>
@@ -119,35 +134,65 @@ const VideoSDKCallWrapper = (props) => {
             {isLoading ? 'Loading...' : 'Call in progress...'}
           </Text>
 
-          {!isLoading && (isLinkingError ? (
-            <>
-              <Text style={styles.fallbackWarning}>
-                ⚠️ VideoSDK Not Available
-              </Text>
-              <Text style={styles.fallbackInstruction}>
-                This feature requires a development build.{'\n\n'}
-                To enable calls:{'\n\n'}
-                <Text style={styles.codeText}>
-                  For Android:{'\n'}
-                  npx expo run:android{'\n\n'}
-                  For iOS:{'\n'}
-                  npx expo run:ios
+          {!isLoading &&
+            (sdkRenderError ? (
+              <>
+                <Text style={styles.fallbackWarning}>⚠️ Call UI failed to load</Text>
+                <Text style={styles.fallbackInstruction}>
+                  The call screen crashed while starting. This often means camera/microphone access,
+                  an invalid meeting token, or a VideoSDK native error — not that you are using
+                  Expo Go.
+                  {sdkCrashMessage ? (
+                    <Text style={styles.fallbackNote}>
+                      {'\n\n'}
+                      Details: {sdkCrashMessage}
+                    </Text>
+                  ) : null}
                 </Text>
-              </Text>
-              <Text style={styles.fallbackNote}>
-                Note: Cannot use Expo Go. Use development build or EAS Build.
-              </Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.fallbackWarning}>
-                ⚠️ VideoSDK not available
-              </Text>
-              <Text style={styles.fallbackInstruction}>
-                Install @videosdk.live/react-native-sdk and rebuild the app to enable calls.
-              </Text>
-            </>
-          ))}
+                <Text style={styles.fallbackNote}>
+                  If this is a released app, connect the device to Xcode → Devices and open the
+                  device console while reproducing, or check VideoSDK dashboard / token generation.
+                </Text>
+              </>
+            ) : needsDevNativeRebuild ? (
+              <>
+                <Text style={styles.fallbackWarning}>
+                  ⚠️ VideoSDK Not Available
+                </Text>
+                <Text style={styles.fallbackInstruction}>
+                  {isExpoGoOnlyError
+                    ? 'VideoSDK does not run inside the Expo Go app. Install a release build (TestFlight, App Store, or EAS development/production build).'
+                    : 'Native VideoSDK modules are missing or failed to load. Rebuild a native app (not Expo Go):'}
+                  {!isExpoGoOnlyError ? (
+                    <>
+                      {'\n\n'}
+                      <Text style={styles.codeText}>
+                        For Android:{'\n'}
+                        npx expo run:android{'\n\n'}
+                        For iOS:{'\n'}
+                        npx expo run:ios{'\n\n'}
+                        Or: eas build --platform ios --profile production
+                      </Text>
+                    </>
+                  ) : null}
+                </Text>
+                {isExpoGoOnlyError ? (
+                  <Text style={styles.fallbackNote}>
+                    App Store and TestFlight builds are valid; they are not Expo Go.
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={styles.fallbackWarning}>
+                  ⚠️ VideoSDK not available
+                </Text>
+                <Text style={styles.fallbackInstruction}>
+                  {error ||
+                    'Install @videosdk.live/react-native-sdk and rebuild the app to enable calls.'}
+                </Text>
+              </>
+            ))}
 
           <TouchableOpacity
             style={styles.endButton}
@@ -162,7 +207,13 @@ const VideoSDKCallWrapper = (props) => {
   }
 
   return (
-    <VideoSDKErrorBoundary onError={() => setSdkRenderError(true)}>
+    <VideoSDKErrorBoundary
+      onError={(e) => {
+        setSdkRenderError(true);
+        const msg = e?.message ?? (typeof e === 'string' ? e : null);
+        setSdkCrashMessage(msg || null);
+      }}
+    >
       <VideoSDKCall {...props} />
     </VideoSDKErrorBoundary>
   );

@@ -17,6 +17,7 @@ import Slider from '@react-native-community/slider';
 import { Feather } from '@expo/vector-icons';
 import { useGlobalContext } from '../context/GlobalProvider';
 import * as FileSystem from 'expo-file-system/legacy';
+const BASE64_ENCODING = FileSystem?.EncodingType?.Base64 || 'base64';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -72,7 +73,7 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
     try {
       setProcessing(true);
       const base64 = await FileSystem.readAsStringAsync(imageUri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: BASE64_ENCODING,
       });
       setImageBase64(base64);
     } catch (error) {
@@ -718,7 +719,7 @@ const PhotoEditor = ({ visible, onClose, imageUri, onSave }) => {
         const base64Data = message.data.replace('data:image/jpeg;base64,', '');
         const fileUri = FileSystem.cacheDirectory + `edited_${Date.now()}.jpg`;
         FileSystem.writeAsStringAsync(fileUri, base64Data, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: BASE64_ENCODING,
         }).then(() => {
           setProcessing(false);
           const editedFile = {

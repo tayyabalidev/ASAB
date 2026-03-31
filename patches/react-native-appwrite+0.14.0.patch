@@ -1,0 +1,58 @@
+diff --git a/node_modules/react-native-appwrite/dist/cjs/sdk.js b/node_modules/react-native-appwrite/dist/cjs/sdk.js
+index 8794d0e..f0678aa 100644
+--- a/node_modules/react-native-appwrite/dist/cjs/sdk.js
++++ b/node_modules/react-native-appwrite/dist/cjs/sdk.js
+@@ -1,7 +1,7 @@
+ 'use strict';
+ 
+ var reactNative = require('react-native');
+-var FileSystem = require('expo-file-system');
++var FileSystem = require('expo-file-system/legacy');
+ 
+ function _interopNamespace(e) {
+     if (e && e.__esModule) return e;
+@@ -3116,14 +3116,14 @@ class Storage extends Service {
+                     apiHeaders['x-appwrite-id'] = response.$id;
+                 }
+                 let chunk = yield FileSystem__namespace.readAsStringAsync(file.uri, {
+-                    encoding: FileSystem__namespace.EncodingType.Base64,
++                    encoding: 'base64',
+                     position: offset,
+                     length: Service.CHUNK_SIZE
+                 });
+                 var path = `data:${file.type};base64,${chunk}`;
+                 if (reactNative.Platform.OS.toLowerCase() === 'android') {
+                     path = FileSystem__namespace.cacheDirectory + '/tmp_chunk_' + timestamp;
+-                    yield FileSystem__namespace.writeAsStringAsync(path, chunk, { encoding: FileSystem__namespace.EncodingType.Base64 });
++                    yield FileSystem__namespace.writeAsStringAsync(path, chunk, { encoding: 'base64' });
+                 }
+                 payload['file'] = { uri: path, name: file.name, type: file.type };
+                 response = yield this.client.call('post', uri, apiHeaders, payload);
+diff --git a/node_modules/react-native-appwrite/dist/esm/sdk.js b/node_modules/react-native-appwrite/dist/esm/sdk.js
+index dbb19d4..2b8a4a2 100644
+--- a/node_modules/react-native-appwrite/dist/esm/sdk.js
++++ b/node_modules/react-native-appwrite/dist/esm/sdk.js
+@@ -1,5 +1,5 @@
+ import { Platform } from 'react-native';
+-import * as FileSystem from 'expo-file-system';
++import * as FileSystem from 'expo-file-system/legacy';
+ 
+ /******************************************************************************
+ Copyright (c) Microsoft Corporation.
+@@ -3094,14 +3094,14 @@ class Storage extends Service {
+                     apiHeaders['x-appwrite-id'] = response.$id;
+                 }
+                 let chunk = yield FileSystem.readAsStringAsync(file.uri, {
+-                    encoding: FileSystem.EncodingType.Base64,
++                    encoding: 'base64',
+                     position: offset,
+                     length: Service.CHUNK_SIZE
+                 });
+                 var path = `data:${file.type};base64,${chunk}`;
+                 if (Platform.OS.toLowerCase() === 'android') {
+                     path = FileSystem.cacheDirectory + '/tmp_chunk_' + timestamp;
+-                    yield FileSystem.writeAsStringAsync(path, chunk, { encoding: FileSystem.EncodingType.Base64 });
++                    yield FileSystem.writeAsStringAsync(path, chunk, { encoding: 'base64' });
+                 }
+                 payload['file'] = { uri: path, name: file.name, type: file.type };
+                 response = yield this.client.call('post', uri, apiHeaders, payload);

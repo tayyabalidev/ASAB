@@ -12,12 +12,13 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar } from "../../components";
 import { images } from "../../constants";
 import { useTranslation } from "react-i18next";
 import { isAdminUser } from "../../lib/admin";
+import { isVideoMedia } from "../../lib/mediaType";
 
 // Get CSS filter string based on filter type and adjustments (same as in create.jsx and home.jsx)
 const getFilterCSS = (filterId, adjustmentsData = null) => {
@@ -358,6 +359,8 @@ const Profile = () => {
   
   // Modal interaction states
   const [bookmarked, setBookmarked] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
   const [commentsCount, setCommentsCount] = useState(0);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
   const [comments, setComments] = useState([]);
@@ -1208,11 +1211,49 @@ const Profile = () => {
       } catch (error) {
       }
     };
+    const checkLikeStatus = async () => {
+      try {
+        const isLiked = await isPostLiked(user.$id, modalVideo.$id);
+        if (isMounted) setLiked(isLiked);
+      } catch (error) {
+      }
+    };
+    const fetchLikeCount = async () => {
+      try {
+        const likes = await getLikeCount(modalVideo.$id);
+        if (isMounted) setLikeCount(likes);
+      } catch (error) {
+      }
+    };
 
     checkBookmarkStatus();
     fetchShareCount();
+    checkLikeStatus();
+    fetchLikeCount();
     return () => { isMounted = false; };
   }, [modalVideo, user?.$id]);
+
+  const handleLike = async () => {
+    if (!user?.$id || !modalVideo?.$id) {
+      Alert.alert(t("common.error"), t("auth.signInRequired") || "Please login to like posts");
+      return;
+    }
+
+    const nextLiked = !liked;
+    setLiked(nextLiked);
+    setLikeCount((prev) => (nextLiked ? prev + 1 : Math.max(0, prev - 1)));
+
+    try {
+      const newLikeStatus = await toggleLike(user.$id, modalVideo.$id);
+      setLiked(newLikeStatus);
+      const updatedLikeCount = await getLikeCount(modalVideo.$id);
+      setLikeCount(updatedLikeCount);
+    } catch (error) {
+      // Revert optimistic update on error
+      setLiked(!nextLiked);
+      setLikeCount((prev) => (!nextLiked ? prev + 1 : Math.max(0, prev - 1)));
+    }
+  };
 
   // Track loaded thumbnails to prevent reloading
   const loadedThumbnailsRef = useRef(new Set());
@@ -2040,23 +2081,15 @@ const Profile = () => {
                         onPress={() => openVideoModal(post, index)}
                       >
                         <View style={{ width: '100%', height: '100%' }}>
-                          {post.video ? (
-                            <Video
-                              source={{ uri: post.video }}
-                              style={{ width: '100%', height: '100%' }}
-                              resizeMode="cover"
-                              shouldPlay={false}
-                              isMuted={true}
-                              useNativeControls={false}
-                              posterSource={post.thumbnail && !post.thumbnail.includes('placeholder') ? { uri: post.thumbnail } : undefined}
-                            />
-                          ) : (
-                            <Image
-                              source={{ uri: post.thumbnail || 'https://via.placeholder.com/300x300' }}
-                              style={{ width: '100%', height: '100%' }}
-                              resizeMode="cover"
-                            />
-                          )}
+                          <Image
+                            source={{
+                              uri: isVideoMedia(post?.video, post?.postType)
+                                ? (post.thumbnail || post.photo || post.video || 'https://via.placeholder.com/300x300')
+                                : (post.thumbnail || post.photo || post.video || 'https://via.placeholder.com/300x300'),
+                            }}
+                            style={{ width: '100%', height: '100%' }}
+                            resizeMode="cover"
+                          />
                           {/* Play Icon */}
                         </View>
                       </TouchableOpacity>
@@ -2518,23 +2551,15 @@ const Profile = () => {
                             })()
                           ) : (
                             <>
-                              {post.video ? (
-                                <Video
-                                  source={{ uri: post.video }}
-                                  style={{ width: '100%', height: '100%' }}
-                                  resizeMode="cover"
-                                  shouldPlay={false}
-                                  isMuted={true}
-                                  useNativeControls={false}
-                                  posterSource={post.thumbnail && !post.thumbnail.includes('placeholder') ? { uri: post.thumbnail } : undefined}
-                                />
-                              ) : (
-                                <Image
-                                  source={{ uri: post.thumbnail || 'https://via.placeholder.com/300x300' }}
-                                  style={{ width: '100%', height: '100%' }}
-                                  resizeMode="cover"
-                                />
-                              )}
+                              <Image
+                                source={{
+                                  uri: isVideoMedia(post?.video, post?.postType)
+                                    ? (post.thumbnail || post.photo || post.video || 'https://via.placeholder.com/300x300')
+                                    : (post.thumbnail || post.photo || post.video || 'https://via.placeholder.com/300x300'),
+                                }}
+                                style={{ width: '100%', height: '100%' }}
+                                resizeMode="cover"
+                              />
                             </>
                           )}
                         </View>
@@ -2621,104 +2646,124 @@ const Profile = () => {
                     <Text style={{ color: theme.textPrimary, fontSize: 28 }}>×</Text>
                   </TouchableOpacity>
                   
-                  {/* Video */}
+                  {/* Media */}
                   <View style={{ flex: 1, backgroundColor: theme.background, position: 'relative' }}>
-                    <Video
-                      ref={modalVideoRef}
-                      source={{ uri: modalVideo.video }}
-                      style={{ flex: 1, width: '100%', height: '100%' }}
-                      resizeMode={ResizeMode.CONTAIN}
-                      shouldPlay={isVideoPlaying}
-                      isLooping={true}
-                      isMuted={false}
-                      useNativeControls={false}
-                      posterSource={modalVideo.thumbnail && !modalVideo.thumbnail.includes('placeholder') ? { uri: modalVideo.thumbnail } : undefined}
-                      onLoad={(status) => {
-                        if (status.isLoaded) {
-                          setPlaybackDuration(status.durationMillis || 0);
-                          setIsVideoReady(true);
-                        }
-                      }}
-                      onPlaybackStatusUpdate={status => {
-                        if (status.isLoaded) {
-                          setPlaybackPosition(status.positionMillis || 0);
-                          if (status.durationMillis) {
-                            setPlaybackDuration(status.durationMillis);
-                          }
-                        }
-                      }}
-                      onError={(error) => {
-                       
-                      }}
-                      onLoadStart={() => {
-                       
-                      }}
-                      onReadyForDisplay={() => {
-                       
-                      }}
-                    />
+                    {isVideoMedia(modalVideo?.video, modalVideo?.postType) ? (
+                      <>
+                        <Video
+                          ref={modalVideoRef}
+                          source={{ uri: modalVideo.video }}
+                          style={{ flex: 1, width: '100%', height: '100%' }}
+                          resizeMode={ResizeMode.CONTAIN}
+                          shouldPlay={isVideoPlaying}
+                          isLooping={true}
+                          isMuted={false}
+                          useNativeControls={false}
+                          progressUpdateIntervalMillis={250}
+                          posterSource={modalVideo.thumbnail && !modalVideo.thumbnail.includes('placeholder') ? { uri: modalVideo.thumbnail } : undefined}
+                          onLoad={(status) => {
+                            if (status.isLoaded) {
+                              setPlaybackDuration(status.durationMillis || 0);
+                              setIsVideoReady(true);
+                            }
+                          }}
+                          onPlaybackStatusUpdate={status => {
+                            if (status.isLoaded) {
+                              setPlaybackPosition(status.positionMillis || 0);
+                              if (status.durationMillis) {
+                                setPlaybackDuration(status.durationMillis);
+                              }
+                            }
+                          }}
+                          onError={(error) => {
+                           
+                          }}
+                          onLoadStart={() => {
+                           
+                          }}
+                          onReadyForDisplay={() => {
+                            if (isVideoPlaying) {
+                              modalVideoRef.current?.playAsync?.();
+                            }
+                          }}
+                          {...(Platform.OS === 'ios' && {
+                            allowsExternalPlayback: false,
+                            playInSilentModeIOS: true,
+                            ignoreSilentSwitch: 'ignore',
+                            automaticallyWaitsToMinimizeStalling: false,
+                            preferredForwardBufferDuration: 0,
+                          })}
+                        />
+                        
+                        {/* Video Control Overlay - Only shows progress bar, doesn't pause/play */}
+                        <TouchableOpacity
+                          onPress={() => {
+                            setShowProgressBar(true);
+                          }}
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                            opacity: 0
+                          }}
+                          activeOpacity={1}
+                        />
+                        {/* Progress Bar */}
+                        <VideoProgressBar
+                          videoRef={modalVideoRef}
+                          playbackPosition={playbackPosition}
+                          playbackDuration={playbackDuration}
+                          isVideoReady={isVideoReady}
+                          showProgressBar={showProgressBar}
+                          onShowProgressBar={setShowProgressBar}
+                          bottomOffset={20}
+                        />
+                        
+                        {/* Play/Pause Button */}
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (isVideoPlaying) {
+                              modalVideoRef.current?.pauseAsync();
+                              setIsVideoPlaying(false);
+                            } else {
+                              modalVideoRef.current?.playAsync();
+                              setIsVideoPlaying(true);
+                            }
+                          }}
+                          style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: [{ translateX: -25 }, { translateY: -25 }],
+                            width: 50,
+                            height: 50,
+                            borderRadius: 25,
+                            backgroundColor: themedColor('rgba(255, 255, 255, 0.2)', 'rgba(15,23,42,0.2)'),
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            zIndex: 5
+                          }}
+                        >
+                          <Text style={{ color: theme.textPrimary, fontSize: 24 }}>
+                            {isVideoPlaying ? '❚❚' : '▶'}
+                          </Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <Image
+                        source={{ uri: modalVideo?.photo || modalVideo?.thumbnail || modalVideo?.video }}
+                        style={{ flex: 1, width: '100%', height: '100%' }}
+                        resizeMode="contain"
+                      />
+                    )}
                     
-                    {/* Video Control Overlay - Only shows progress bar, doesn't pause/play */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        setShowProgressBar(true);
-                      }}
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                        opacity: 0
-                      }}
-                      activeOpacity={1}
-                    />
-                    {/* Progress Bar */}
-                    <VideoProgressBar
-                      videoRef={modalVideoRef}
-                      playbackPosition={playbackPosition}
-                      playbackDuration={playbackDuration}
-                      isVideoReady={isVideoReady}
-                      showProgressBar={showProgressBar}
-                      onShowProgressBar={setShowProgressBar}
-                      bottomOffset={20}
-                    />
-                    
-                    {/* Play/Pause Button */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        if (isVideoPlaying) {
-                          modalVideoRef.current?.pauseAsync();
-                          setIsVideoPlaying(false);
-                        } else {
-                          modalVideoRef.current?.playAsync();
-                          setIsVideoPlaying(true);
-                        }
-                      }}
-                      style={{
-                        position: 'absolute',
-                        top: '50%',
-                        left: '50%',
-                        transform: [{ translateX: -25 }, { translateY: -25 }],
-                        width: 50,
-                        height: 50,
-                        borderRadius: 25,
-                        backgroundColor: themedColor('rgba(255, 255, 255, 0.2)', 'rgba(15,23,42,0.2)'),
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        zIndex: 5
-                      }}
-                    >
-                      <Text style={{ color: theme.textPrimary, fontSize: 24 }}>
-                        {isVideoPlaying ? '❚❚' : '▶'}
-                      </Text>
-                    </TouchableOpacity>
-                    
-                    {/* Fallback thumbnail if video doesn't load - only show if video fails to load */}
-                    {modalVideo.thumbnail && (
+                    {/* Fallback thumbnail if video doesn't load - only show for videos */}
+                    {isVideoMedia(modalVideo?.video, modalVideo?.postType) && modalVideo.thumbnail && (
                       <Image
                         source={{ uri: modalVideo.thumbnail }}
                         style={{ 
@@ -2766,6 +2811,27 @@ const Profile = () => {
                           <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>+</Text>
                         </View>
                       </View>
+                    </TouchableOpacity>
+
+                    {/* Like Button */}
+                    <TouchableOpacity onPress={handleLike} style={{ marginBottom: 20, alignItems: 'center' }}>
+                      <View style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 20,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        marginBottom: 5
+                      }}>
+                        <Image 
+                          source={liked ? icons.heartCheck : icons.heartUncheck} 
+                          style={{ width: 60, height: 60 }} 
+                          resizeMode="contain" 
+                        />
+                      </View>
+                      <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                        {formatCount(likeCount)}
+                      </Text>
                     </TouchableOpacity>
 
                     {/* Comments Button */}
