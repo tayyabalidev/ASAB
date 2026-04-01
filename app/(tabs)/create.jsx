@@ -466,7 +466,7 @@ const Create = () => {
           selectType === "image"
             ? ImagePicker.MediaTypeOptions.Images
             : ImagePicker.MediaTypeOptions.Videos,
-        quality: 0.7,
+        quality: selectType === "video" ? 0.6 : 0.7,
         exif: false, // Don't include EXIF data
       };
 
@@ -476,7 +476,7 @@ const Create = () => {
         pickerOptions.aspect = [16, 9];
       } else if (selectType === "video") {
         pickerOptions.allowsEditing = false; // Disable editing for videos (we handle trimming separately)
-        pickerOptions.videoMaxDuration = 60; // Limit to 60 seconds
+        pickerOptions.videoMaxDuration = 360; // Support up to 6 minutes
       }
 
       const result = await ImagePicker.launchImageLibraryAsync(pickerOptions);
@@ -517,23 +517,42 @@ const Create = () => {
         selectedAsset.uri.split("/").pop() ||
         `file_${Date.now()}`;
 
-      // Ensure proper file extension for Appwrite compatibility
+      // Ensure proper file extension for image uploads.
+      // For videos, preserve original extension/container to avoid codec mismatch.
       if (selectType === "video") {
-        // Force .mp4 extension for videos to ensure Appwrite compatibility
-        const baseName = fileName.split(".")[0];
-        fileName = `${baseName}.mp4`;
+        if (!/\.[a-zA-Z0-9]+$/.test(fileName)) {
+          const uriExt = selectedAsset.uri?.split(".").pop()?.split("?")[0];
+          if (uriExt) {
+            fileName = `${fileName}.${uriExt}`;
+          }
+        }
       } else if (selectType === "image") {
         // Force .jpg extension for images
         const baseName = fileName.split(".")[0];
         fileName = `${baseName}.jpg`;
       }
 
+      const guessedFromExt = (() => {
+        const lower = (fileName || "").toLowerCase();
+        if (lower.endsWith(".mov") || lower.endsWith(".qt")) return "video/quicktime";
+        if (lower.endsWith(".m4v")) return "video/x-m4v";
+        if (lower.endsWith(".3gp")) return "video/3gpp";
+        if (lower.endsWith(".webm")) return "video/webm";
+        if (lower.endsWith(".mp4")) return "video/mp4";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".png")) return "image/png";
+        return null;
+      })();
+
       const fileType =
-        selectedAsset.type === "image"
+        selectedAsset.mimeType ||
+        (selectedAsset.type === "image"
           ? "image/jpeg"
           : selectedAsset.type === "video"
-          ? "video/mp4"
-          : selectedAsset.type;
+          ? guessedFromExt || "video/mp4"
+          : selectedAsset.type) ||
+        guessedFromExt ||
+        (selectType === "video" ? "video/mp4" : "image/jpeg");
       const fileSize = selectedAsset.fileSize || selectedAsset.size;
 
       // For videos, copy the trimmed video to a permanent location
@@ -3843,16 +3862,7 @@ const Create = () => {
                       ),
                     }}
                   >
-                    <Text
-                      style={{
-                        color: theme.textSecondary,
-                        fontSize: 12,
-                        textAlign: "center",
-                      }}
-                    >
-                      ℹ️ Processing server not available. Filters will be
-                      applied as metadata only.
-                    </Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 14 }}></Text>
                   </View>
                 )}
               </ScrollView>

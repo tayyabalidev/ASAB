@@ -233,9 +233,7 @@ try {
     borderWidth: 1,
     borderColor: themedColor("rgba(255,193,7,0.3)", "rgba(255,193,7,0.3)"),
   }}>
-    <Text style={{ color: theme.textSecondary, fontSize: 12, textAlign: 'center' }}>
-      ℹ️ Processing server not available. Filters saved as metadata.
-    </Text>
+    
   </View>
 )}
 

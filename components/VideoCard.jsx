@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { ResizeMode, Video } from "expo-av";
-import { View, Text, TouchableOpacity, Image, Alert, Share } from "react-native";
+import { View, Text, TouchableOpacity, Image, Alert, Share, Platform } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
@@ -8,6 +8,14 @@ import { icons } from "../constants";
 import { addBookmark, isVideoBookmarked, incrementShareCount } from "../lib/appwrite";
 import { useGlobalContext } from "../context/GlobalProvider";
 import VideoProgressBar from "./VideoProgressBar";
+
+const getPlaybackCandidates = (url) => {
+  if (!url) return [];
+  if (!url.includes("/storage/buckets/") || !url.includes("/files/")) return [url];
+  const viewUrl = url.replace("/download", "/view");
+  const downloadUrl = url.replace("/view", "/download");
+  return [...new Set([viewUrl, downloadUrl, url])];
+};
 
 const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, creatorId }) => {
   const [play, setPlay] = useState(false);
@@ -17,8 +25,15 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [showProgressBar, setShowProgressBar] = useState(false);
   const [isVideoReady, setIsVideoReady] = useState(false);
+  const [videoSourceIndex, setVideoSourceIndex] = useState(0);
   const videoRef = useRef(null);
+  const videoPlaybackCandidates = getPlaybackCandidates(video);
+  const activeVideoUri = videoPlaybackCandidates[videoSourceIndex] || video;
   const { user } = useGlobalContext();
+
+  useEffect(() => {
+    setVideoSourceIndex(0);
+  }, [videoId, video]);
 
   const shareVideo = async () => {
     try {
@@ -181,17 +196,33 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
         >
           <Video
             ref={videoRef}
-            source={{ uri: video }}
+            source={{ uri: activeVideoUri }}
             className="w-full h-full rounded-xl"
             resizeMode={ResizeMode.CONTAIN}
             useNativeControls={false}
             shouldPlay={play}
             isLooping={true}
             isMuted={isMuted}
+            progressUpdateIntervalMillis={500}
+            posterSource={thumbnail ? { uri: thumbnail } : undefined}
+            usePoster={!isVideoReady}
+            {...(Platform.OS === "ios" && {
+              allowsExternalPlayback: false,
+              playInSilentModeIOS: true,
+              ignoreSilentSwitch: "ignore",
+              automaticallyWaitsToMinimizeStalling: false,
+              preferredForwardBufferDuration: 1,
+            })}
             onLoad={(status) => {
               if (status.isLoaded) {
                 setPlaybackDuration(status.durationMillis || 0);
                 setIsVideoReady(true);
+              }
+            }}
+            onError={() => {
+              if (videoSourceIndex < videoPlaybackCandidates.length - 1) {
+                setVideoSourceIndex((prev) => prev + 1);
+                setIsVideoReady(false);
               }
             }}
             onPlaybackStatusUpdate={(status) => {

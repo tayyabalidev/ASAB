@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getLatestPosts, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
+import { getAllPosts, getLatestPosts, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
 import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
@@ -201,7 +201,16 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekPosition, setSeekPosition] = useState(0);
   const [isVideoReady, setIsVideoReady] = useState(false);
+  const [videoSourceIndex, setVideoSourceIndex] = useState(0);
   const progressBarTimeoutRef = useRef(null);
+  const videoPlaybackCandidates = useMemo(
+    () => getVideoPlaybackUrls(item?.video),
+    [item?.video]
+  );
+  const activeVideoUrl =
+    videoPlaybackCandidates[videoSourceIndex] ||
+    getIOSCompatibleVideoUrl(item?.video) ||
+    item?.video;
   
   // Fetch creator data if creator is a string ID
   // Use a ref to track the creator ID we've already processed to prevent infinite loops
@@ -385,6 +394,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     setPlaybackPosition(0);
     setPlaybackDuration(0);
     setSeekPosition(0);
+    setVideoSourceIndex(0);
   }, [item.$id]);
 
   // Handle visibility changes and home focus
@@ -1080,7 +1090,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             }
             
             const videoFilterCSS = getVideoFilterCSS(filterId, videoAdjustments);
-            const videoUrl = getIOSCompatibleVideoUrl(item.video) || item.video;
+            const videoUrl = activeVideoUrl;
             
            
             
@@ -1159,8 +1169,14 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 isLooping={true}
                 isMuted={false}
                 useNativeControls={false}
-                progressUpdateIntervalMillis={250}
+                progressUpdateIntervalMillis={500}
+                posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
+                usePoster={!isVideoReady}
                 onError={(error) => {
+                  if (videoSourceIndex < videoPlaybackCandidates.length - 1) {
+                    setVideoSourceIndex((prev) => prev + 1);
+                    setIsVideoReady(false);
+                  }
                 }}
                 onLoad={(status) => {
                   if (status.isLoaded) {
@@ -1181,7 +1197,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                   playInSilentModeIOS: true,
                   ignoreSilentSwitch: 'ignore',
                   automaticallyWaitsToMinimizeStalling: false,
-                  preferredForwardBufferDuration: 0,
+                  preferredForwardBufferDuration: 1,
                 })}
               />
             );
@@ -2550,6 +2566,11 @@ const Home = () => {
       }
     };
 
+    const trendingPosterUri =
+      (item?.thumbnail ? getPhotoUrl(item.thumbnail) : null) ||
+      (typeof item?.thumbnail === "string" ? item.thumbnail : null) ||
+      null;
+
     return (
       <View
         key={item.$id}
@@ -2805,7 +2826,7 @@ const Home = () => {
             ) : isVideoMedia(item?.video, item?.postType) ? (
               <Video
                 source={{
-                  uri: getIOSCompatibleVideoUrl(item.video) || item.video,
+                  uri: item.video,
                 }}
                 style={{ width: '100%', height: '100%' }}
                 resizeMode="contain"
@@ -2813,7 +2834,8 @@ const Home = () => {
                 isMuted={true}
                 isLooping={false}
                 useNativeControls={false}
-                posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
+                posterSource={trendingPosterUri ? { uri: trendingPosterUri } : undefined}
+                usePoster={Boolean(trendingPosterUri)}
                 onError={(error) => {
                 }}
                 onLoad={() => {
@@ -3554,7 +3576,7 @@ const Home = () => {
                     <Video
                       ref={trendingVideoRef}
                       source={{ 
-                        uri: getIOSCompatibleVideoUrl(trendingModalVideo.video) || trendingModalVideo.video
+                        uri: trendingModalVideo.video
                       }}
                       style={{ flex: 1, width: '100%', height: '100%' }}
                       resizeMode={ResizeMode.CONTAIN}
@@ -3562,14 +3584,19 @@ const Home = () => {
                       isMuted={false}
                       isLooping={true}
                       useNativeControls={false}
-                      progressUpdateIntervalMillis={250}
-                      posterSource={trendingModalVideo.thumbnail ? { uri: trendingModalVideo.thumbnail } : undefined}
+                      progressUpdateIntervalMillis={500}
+                      posterSource={
+                        trendingModalVideo?.thumbnail
+                          ? { uri: getPhotoUrl(trendingModalVideo.thumbnail) || trendingModalVideo.thumbnail }
+                          : undefined
+                      }
+                      usePoster={Boolean(trendingModalVideo?.thumbnail)}
                       {...(Platform.OS === 'ios' && {
                         allowsExternalPlayback: false,
                         playInSilentModeIOS: true,
                         ignoreSilentSwitch: 'ignore',
                         automaticallyWaitsToMinimizeStalling: false,
-                        preferredForwardBufferDuration: 0,
+                        preferredForwardBufferDuration: 1,
                       })}
                       onError={(error) => {
                       }}

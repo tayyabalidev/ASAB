@@ -2,11 +2,12 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/asab.png",
     "userInterfaceStyle": "dark",
     "splash": {
+      
       "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
