@@ -1,0 +1,9 @@
+{
+  "name": "videosdk-token",
+  "version": "1.0.0",
+  "description": "Mint VideoSDK JWT for React Native app (GET ?meetingId=&participantId=)",
+  "main": "index.js",
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2"
+  }
+}

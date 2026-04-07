@@ -12,11 +12,11 @@ import {
   StyleSheet,
   Alert,
   Dimensions,
-  PermissionsAndroid,
-  Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { Audio, InterruptionModeIOS } from 'expo-av';
-import { Camera } from 'expo-camera';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
 // VideoSDK React Native SDK imports
 // Note: Install @videosdk.live/react-native-sdk package
 import {
@@ -27,47 +27,20 @@ import {
 } from '@videosdk.live/react-native-sdk';
 import { VIDEOSDK_CONFIG } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
+import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { updateCallStatus, endCall } from '../lib/calls';
 import { CallState } from '../lib/callHelper';
 
 const { width, height } = Dimensions.get('window');
 
-async function ensureCallMediaPermissions(callType) {
-  if (Platform.OS === 'android') {
-    const permissions = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
-    if (callType === 'video') {
-      permissions.push(PermissionsAndroid.PERMISSIONS.CAMERA);
-    }
-    const granted = await PermissionsAndroid.requestMultiple(permissions);
-    const audioGranted =
-      granted['android.permission.RECORD_AUDIO'] === PermissionsAndroid.RESULTS.GRANTED;
-    const cameraGranted =
-      callType === 'video'
-        ? granted['android.permission.CAMERA'] === PermissionsAndroid.RESULTS.GRANTED
-        : true;
-    return audioGranted && cameraGranted;
-  }
-
-  try {
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-    });
-  } catch (e) {
-    console.warn('VideoSDK: setAudioModeAsync', e);
-  }
-
-  const mic = await Audio.requestPermissionsAsync();
-  if (!mic.granted) {
-    return false;
-  }
-  if (callType !== 'video') {
-    return true;
-  }
-  const cam = await Camera.requestCameraPermissionsAsync();
-  return Boolean(cam.granted);
-}
+const UI = {
+  text: '#f8fafc',
+  muted: '#94a3b8',
+  danger: '#ef4444',
+  surface: 'rgba(255,255,255,0.12)',
+  accent: '#34d399',
+  accentVoice: '#818cf8',
+};
 
 // Inner component that uses VideoSDK hooks
 const VideoSDKCallInner = ({
@@ -77,7 +50,9 @@ const VideoSDKCallInner = ({
   callId = null,
   onCallEnd,
   onError,
+  peerDisplayName = 'Participant',
 }) => {
+  const insets = useSafeAreaInsets();
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(callType === 'video');
   const [callDuration, setCallDuration] = useState(0);
@@ -85,6 +60,10 @@ const VideoSDKCallInner = ({
   const durationIntervalRef = useRef(null);
   const callIdRef = useRef(callId);
   const participantsRef = useRef(new Map());
+
+  useEffect(() => {
+    callIdRef.current = callId;
+  }, [callId]);
 
   const { join, leave, toggleMic, toggleWebcam, participants, localParticipant } = useMeeting({
     onMeetingJoined: () => {
@@ -136,7 +115,9 @@ const VideoSDKCallInner = ({
         if (!allowed) {
           Alert.alert(
             'Permissions Required',
-            'Microphone and camera access are required for calls. You can enable them in Settings.'
+            callType === 'video'
+              ? 'Microphone and camera access are required for video calls. You can enable them in Settings.'
+              : 'Microphone access is required for audio calls. You can enable it in Settings.'
           );
           if (onError) onError('PERMISSION_DENIED');
           return;
@@ -209,84 +190,105 @@ const VideoSDKCallInner = ({
     ? Array.from(participants.values()).filter((p) => p.id !== localId)
     : Array.from(participants.values());
 
+  const remoteConnected = remoteParticipants.length > 0;
+  const remoteLabel =
+    remoteParticipants[0]?.displayName || peerDisplayName || 'Participant';
+  const remoteInitial = (remoteLabel.charAt(0) || 'P').toUpperCase();
+  const voiceAccent = callType === 'audio' ? UI.accentVoice : UI.accent;
+
+  const controlsBottom = Math.max(insets.bottom, 20) + 16;
+
   return (
     <View style={styles.container}>
-      {/* Remote Video Views */}
-      {callType === 'video' && remoteParticipants.length > 0 && (
-        <View style={styles.remoteVideoContainer}>
-          {remoteParticipants.map((participant) => (
-            <RemoteParticipantView
-              key={participant.id}
-              participant={participant}
-            />
-          ))}
-        </View>
-      )}
-
-      {/* Local Video View (Picture-in-Picture) */}
-      {callType === 'video' && isVideoEnabled && (
-        <View style={styles.localVideoContainer}>
-          <LocalParticipantView />
-        </View>
-      )}
-
-      {/* Audio Call UI */}
-      {callType === 'audio' && (
-        <View style={styles.audioCallContainer}>
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {remoteParticipants[0]?.displayName?.charAt(0)?.toUpperCase() || 'U'}
-              </Text>
+      {callType === 'video' && (
+        <>
+          {remoteConnected ? (
+            <View style={styles.remoteVideoContainer}>
+              {remoteParticipants.map((participant) => (
+                <RemoteParticipantView
+                  key={participant.id}
+                  participant={participant}
+                />
+              ))}
             </View>
-          </View>
-          <Text style={styles.userName}>
-            {remoteParticipants[0]?.displayName || 'User'}
-          </Text>
-          {remoteParticipants.length > 0 && (
-            <Text style={styles.callStatus}>Connected</Text>
+          ) : (
+            <LinearGradient
+              colors={['#0c1222', '#1a2238', '#0f172a']}
+              style={styles.videoWaitingLayer}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+            >
+              <View style={[styles.waitingAvatar, { borderColor: voiceAccent + '88' }]}>
+                <Text style={styles.waitingAvatarText}>{remoteInitial}</Text>
+              </View>
+              <ActivityIndicator size="small" color={voiceAccent} style={{ marginTop: 20 }} />
+              <Text style={styles.waitingTitle}>Connecting</Text>
+              <Text style={styles.waitingSubtitle} numberOfLines={2}>
+                Waiting for {peerDisplayName}
+              </Text>
+            </LinearGradient>
           )}
-          {remoteParticipants.length === 0 && (
-            <Text style={styles.callStatus}>Connecting...</Text>
+          {isVideoEnabled && (
+            <View style={[styles.localVideoContainer, { top: insets.top + 12 }]}>
+              <LocalParticipantView />
+            </View>
           )}
-        </View>
+        </>
       )}
 
-      {/* Call Info Overlay */}
-      <View style={styles.infoOverlay}>
-        <Text style={styles.durationText}>{formatDuration(callDuration)}</Text>
+      {callType === 'audio' && (
+        <LinearGradient
+          colors={['#0c1222', '#1e1b4b', '#0f172a']}
+          style={styles.audioCallContainer}
+          start={{ x: 0.2, y: 0 }}
+          end={{ x: 0.8, y: 1 }}
+        >
+          <View style={[styles.audioAvatarRing, { borderColor: UI.accentVoice + '66' }]}>
+            <LinearGradient colors={['#312e81', '#1e1b4b']} style={styles.audioAvatarInner}>
+              <Text style={styles.audioAvatarText}>{remoteInitial}</Text>
+            </LinearGradient>
+          </View>
+          <Text style={styles.audioName}>{remoteLabel}</Text>
+          <View style={styles.audioStatusRow}>
+            <View style={[styles.statusDot, remoteConnected && styles.statusDotLive]} />
+            <Text style={styles.callStatus}>
+              {remoteConnected ? 'Connected' : 'Connecting…'}
+            </Text>
+          </View>
+        </LinearGradient>
+      )}
+
+      <View style={[styles.infoOverlay, { top: insets.top + 12 }]}>
+        <View style={styles.durationPill}>
+          <Text style={styles.durationText}>{formatDuration(callDuration)}</Text>
+        </View>
       </View>
 
-      {/* Call Controls */}
-      <View style={styles.controlsContainer}>
-        {/* Mute Button */}
+      <View style={[styles.controlsContainer, { paddingBottom: controlsBottom }]}>
         <TouchableOpacity
-          style={[styles.controlButton, isMuted && styles.controlButtonActive]}
+          style={[styles.controlCircle, isMuted && styles.controlCircleMuted]}
           onPress={toggleMute}
+          activeOpacity={0.85}
         >
-          <Text style={styles.controlButtonText}>
-            {isMuted ? '🔇' : '🎤'}
-          </Text>
+          <Feather name={isMuted ? 'mic-off' : 'mic'} size={24} color={UI.text} />
         </TouchableOpacity>
 
-        {/* Video Toggle (Video calls only) */}
         {callType === 'video' && (
           <TouchableOpacity
-            style={[styles.controlButton, !isVideoEnabled && styles.controlButtonActive]}
+            style={[styles.controlCircle, !isVideoEnabled && styles.controlCircleMuted]}
             onPress={toggleVideo}
+            activeOpacity={0.85}
           >
-            <Text style={styles.controlButtonText}>
-              {isVideoEnabled ? '📹' : '📵'}
-            </Text>
+            <Feather name={isVideoEnabled ? 'video' : 'video-off'} size={24} color={UI.text} />
           </TouchableOpacity>
         )}
 
-        {/* End Call Button */}
         <TouchableOpacity
-          style={[styles.controlButton, styles.endCallButton]}
+          style={styles.endCircle}
           onPress={handleCallEnd}
+          activeOpacity={0.88}
         >
-          <Text style={styles.controlButtonText}>📞</Text>
+          <Feather name="phone-off" size={26} color="#fff" />
         </TouchableOpacity>
       </View>
     </View>
@@ -344,34 +346,102 @@ const VideoSDKCall = ({
   currentUserId,
   callType = 'video',
   callId = null,
+  peerDisplayName,
   onCallEnd,
   onError,
 }) => {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [tokenError, setTokenError] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
+    setTokenError(null);
+    setToken(null);
+    setLoading(true);
+
     const fetchToken = async () => {
       try {
-        const meetingToken = await getVideoSDKToken(meetingId);
-        setToken(meetingToken);
+        const meetingToken = await getVideoSDKToken(meetingId, currentUserId);
+
+        if (cancelled) return;
+
+        if (meetingToken) {
+          setToken(meetingToken);
+          return;
+        }
+
+        // Dev-only: no token URL configured — VideoSDK may accept apiKey in some setups
+        if (__DEV__ && !VIDEOSDK_CONFIG.tokenServerUrl) {
+          console.warn(
+            '[VideoSDK] No JWT: tokenServerUrl empty. Using apiKey as token (dev only).'
+          );
+          setToken(null);
+          return;
+        }
+
+        throw new Error('No token returned from server.');
       } catch (error) {
+        if (cancelled) return;
+        const msg = error?.message || 'Failed to get call token';
         console.error('Error fetching token:', error);
-        // Continue without token (dev mode)
-        setToken(null);
+        setTokenError(msg);
+        if (onError) onError(error);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchToken();
-  }, [meetingId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingId, currentUserId]);
 
   if (loading) {
     return (
       <View style={styles.container}>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Connecting...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (tokenError) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={[styles.loadingText, { color: '#FF9800', marginBottom: 12 }]}>
+            Could not connect
+          </Text>
+          <Text style={[styles.loadingText, { fontSize: 14, color: '#999', textAlign: 'center', paddingHorizontal: 24 }]}>
+            {tokenError}
+          </Text>
+          <TouchableOpacity
+            style={[styles.endCallButton, { marginTop: 28, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 24 }]}
+            onPress={() => onCallEnd?.()}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600' }}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  const authToken = token || (__DEV__ && !VIDEOSDK_CONFIG.tokenServerUrl ? VIDEOSDK_CONFIG.apiKey : null);
+
+  if (!authToken) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Missing call token</Text>
+          <TouchableOpacity
+            style={[styles.endCallButton, { marginTop: 28, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 24 }]}
+            onPress={() => onCallEnd?.()}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600' }}>Close</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -390,13 +460,14 @@ const VideoSDKCall = ({
           message: 'You are in a call',
         },
       }}
-      token={token || VIDEOSDK_CONFIG.apiKey}
+      token={authToken}
     >
       <VideoSDKCallInner
         meetingId={meetingId}
         currentUserId={currentUserId}
         callType={callType}
         callId={callId}
+        peerDisplayName={peerDisplayName}
         onCallEnd={onCallEnd}
         onError={onError}
       />
@@ -412,6 +483,38 @@ const styles = StyleSheet.create({
   remoteVideoContainer: {
     flex: 1,
   },
+  videoWaitingLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  waitingAvatar: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    borderWidth: 2,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  waitingAvatarText: {
+    fontSize: 40,
+    fontWeight: '700',
+    color: UI.text,
+  },
+  waitingTitle: {
+    marginTop: 16,
+    fontSize: 20,
+    fontWeight: '700',
+    color: UI.text,
+  },
+  waitingSubtitle: {
+    marginTop: 8,
+    fontSize: 15,
+    color: UI.muted,
+    textAlign: 'center',
+  },
   remoteVideo: {
     flex: 1,
     width: width,
@@ -419,25 +522,25 @@ const styles = StyleSheet.create({
   },
   remoteVideoPlaceholder: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#131820',
     justifyContent: 'center',
     alignItems: 'center',
   },
   placeholderText: {
-    fontSize: 64,
-    color: '#fff',
-    fontWeight: 'bold',
+    fontSize: 56,
+    color: '#e2e8f0',
+    fontWeight: '700',
   },
   localVideoContainer: {
     position: 'absolute',
-    top: 50,
-    right: 20,
-    width: 120,
-    height: 160,
-    borderRadius: 10,
+    right: 16,
+    width: 112,
+    height: 150,
+    borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: '#000',
   },
   localVideo: {
     width: '100%',
@@ -447,70 +550,106 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 24,
   },
-  avatarContainer: {
-    marginBottom: 20,
+  audioAvatarRing: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    borderWidth: 3,
+    padding: 4,
+    marginBottom: 28,
   },
-  avatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#4CAF50',
+  audioAvatarInner: {
+    flex: 1,
+    borderRadius: 64,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  audioAvatarText: {
+    fontSize: 52,
+    fontWeight: '700',
+    color: UI.text,
+  },
+  audioName: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: UI.text,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  audioStatusRow: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  avatarText: {
-    fontSize: 48,
-    color: '#fff',
-    fontWeight: 'bold',
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    marginRight: 8,
   },
-  userName: {
-    fontSize: 24,
-    color: '#fff',
-    fontWeight: 'bold',
-    marginBottom: 10,
+  statusDotLive: {
+    backgroundColor: UI.accent,
   },
   callStatus: {
-    fontSize: 16,
-    color: '#999',
+    fontSize: 15,
+    color: UI.muted,
+    fontWeight: '500',
   },
   infoOverlay: {
     position: 'absolute',
-    top: 50,
-    left: 20,
+    left: 16,
+  },
+  durationPill: {
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   durationText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+    color: UI.text,
+    fontSize: 15,
+    fontWeight: '600',
   },
   controlsContainer: {
     position: 'absolute',
-    bottom: 40,
+    bottom: 0,
     left: 0,
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 20,
+    paddingTop: 16,
+    gap: 22,
+    backgroundColor: 'transparent',
   },
-  controlButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  controlCircle: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: UI.surface,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
-  controlButtonActive: {
-    backgroundColor: 'rgba(255, 0, 0, 0.5)',
+  controlCircleMuted: {
+    backgroundColor: 'rgba(239,68,68,0.35)',
+    borderColor: 'rgba(239,68,64,0.4)',
   },
-  endCallButton: {
-    backgroundColor: '#F44336',
-  },
-  controlButtonText: {
-    fontSize: 24,
+  endCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: UI.danger,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   loadingContainer: {
     flex: 1,
@@ -518,8 +657,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#fff',
+    color: UI.text,
     fontSize: 16,
+  },
+  endCallButton: {
+    backgroundColor: UI.danger,
   },
 });
 

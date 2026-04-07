@@ -93,14 +93,6 @@ const IncomingCallHandler = () => {
               }
             }
           );
-
-          // Navigate to call screen (will be handled by Accept button, but this ensures navigation)
-          router.push({
-            pathname: '/call',
-            params: {
-              callId: callId,
-            },
-          });
         } else {
           // If call status changed (not CALLING), remove from shown set
           if (incomingCall) {

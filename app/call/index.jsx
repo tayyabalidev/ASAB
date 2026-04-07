@@ -1,7 +1,5 @@
 /**
- * Call Screen
- * 
- * Handles incoming and outgoing calls
+ * Call Screen — incoming / outgoing ring UI and VideoSDK handoff
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -12,7 +10,14 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  Animated,
+  Easing,
+  StatusBar,
+  Platform,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useGlobalContext } from '../../context/GlobalProvider';
 import {
@@ -21,50 +26,115 @@ import {
   rejectCall,
   getCallById,
   subscribeCallUpdates,
-  updateCallStatus,
 } from '../../lib/calls';
-import { generateCallChannelName, CallState } from '../../lib/callHelper';
+import { CallState } from '../../lib/callHelper';
 import VideoSDKCallWrapper from '../../components/VideoSDKCallWrapper';
+
+const COLORS = {
+  bg0: '#0c1222',
+  bg1: '#151b2e',
+  bg2: '#1a2238',
+  accentVideo: '#34d399',
+  accentVoice: '#818cf8',
+  danger: '#ef4444',
+  success: '#22c55e',
+  text: '#f8fafc',
+  textMuted: '#94a3b8',
+  glass: 'rgba(255,255,255,0.08)',
+};
+
+function peerInitial(callData, isIncoming, userId) {
+  if (!callData) return '?';
+  if (isIncoming) {
+    const n = callData.callerUsername || callData.callerId || '';
+    return (n.charAt(0) || '?').toUpperCase();
+  }
+  const other = callData.receiverId === userId ? callData.callerId : callData.receiverId;
+  return (other?.charAt(0) || '?').toUpperCase();
+}
+
+function peerDisplayName(callData, isIncoming) {
+  if (!callData) return 'Contact';
+  if (isIncoming) {
+    return callData.callerUsername || 'Someone';
+  }
+  return callData.receiverUsername || callData.receiverName || 'Your contact';
+}
 
 const CallScreen = () => {
   const params = useLocalSearchParams();
   const { user } = useGlobalContext();
-  
+
   const [callState, setCallState] = useState('idle');
   const [callData, setCallData] = useState(null);
   const [callType, setCallType] = useState('video');
   const [isIncoming, setIsIncoming] = useState(false);
   const [error, setError] = useState(null);
-  
-  const unsubscribeRef = useRef(null);
-  const isInitializedRef = useRef(false); // Prevent multiple initializations
-  const paramsRef = useRef(params); // Track params to detect changes
 
-  // Update params ref when params change
+  const pulse = useRef(new Animated.Value(1)).current;
+  const ringOpacity = useRef(new Animated.Value(0.35)).current;
+
+  const unsubscribeRef = useRef(null);
+  const isInitializedRef = useRef(false);
+  const paramsRef = useRef(params);
+
   useEffect(() => {
     const paramsChanged = JSON.stringify(paramsRef.current) !== JSON.stringify(params);
     if (paramsChanged) {
       paramsRef.current = params;
-      isInitializedRef.current = false; // Reset initialization flag on param change
+      isInitializedRef.current = false;
     }
   }, [params]);
+
+  useEffect(() => {
+    if (callState !== 'calling' || isIncoming) return;
+    const scaleLoop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(pulse, {
+            toValue: 1.08,
+            duration: 1400,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity, {
+            toValue: 0.08,
+            duration: 1400,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(pulse, {
+            toValue: 1,
+            duration: 1400,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity, {
+            toValue: 0.35,
+            duration: 1400,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    );
+    scaleLoop.start();
+    return () => scaleLoop.stop();
+  }, [callState, isIncoming, pulse, ringOpacity]);
 
   useEffect(() => {
     if (!user || !user.$id) {
       return;
     }
-    
-    // Prevent multiple initializations
     if (isInitializedRef.current) {
       return;
     }
-
-    // Initialize call
     isInitializedRef.current = true;
     initializeCall();
-    
+
     return () => {
-      // Cleanup on unmount
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
@@ -76,17 +146,15 @@ const CallScreen = () => {
   const initializeCall = async () => {
     try {
       setError(null);
-      
+
       if (params.callId) {
-        // Incoming call - load call data
         const call = await getCallById(params.callId);
         if (call) {
           setCallData(call);
           setIsIncoming(true);
           setCallType(call.callType || 'video');
-          
+
           if (call.receiverId === user.$id) {
-            // Receiver - show ringing state
             if (call.status === CallState.CALLING) {
               setCallState('ringing');
             } else if (call.status === CallState.CONNECTING || call.status === CallState.CONNECTED) {
@@ -96,11 +164,8 @@ const CallScreen = () => {
               setTimeout(() => router.back(), 500);
               return;
             }
-            
-            // Subscribe to call updates
-            if (unsubscribeRef.current) {
-              unsubscribeRef.current();
-            }
+
+            if (unsubscribeRef.current) unsubscribeRef.current();
             unsubscribeRef.current = subscribeCallUpdates(call.$id, ({ payload }) => {
               if (payload.status === CallState.ENDED || payload.status === CallState.REJECTED) {
                 handleCallEnd();
@@ -109,7 +174,6 @@ const CallScreen = () => {
               }
             });
           } else {
-            // Caller - check status
             if (call.status === CallState.REJECTED || call.status === CallState.ENDED) {
               handleCallEnd();
               return;
@@ -118,21 +182,16 @@ const CallScreen = () => {
             } else {
               setCallState('calling');
             }
-            
-            // Subscribe to call updates for caller
-            if (unsubscribeRef.current) {
-              unsubscribeRef.current();
-            }
+
+            if (unsubscribeRef.current) unsubscribeRef.current();
             unsubscribeRef.current = subscribeCallUpdates(call.$id, ({ payload }) => {
               if (payload.status === CallState.REJECTED) {
-                Alert.alert('Call Rejected', 'The call was rejected');
+                Alert.alert('Call declined', 'The other person declined the call.');
                 handleCallEnd();
               } else if (payload.status === CallState.ENDED) {
                 handleCallEnd();
               } else if (payload.status === CallState.CONNECTING || payload.status === CallState.CONNECTED) {
-                // Receiver accepted - transition to connecting state
                 setCallState('connecting');
-                // Update call data
                 setCallData(payload);
               }
             });
@@ -141,19 +200,16 @@ const CallScreen = () => {
           setError('Call not found');
         }
       } else if (params.receiverId && params.callType) {
-        // Outgoing call
         setIsIncoming(false);
         setCallType(params.callType);
         setCallState('calling');
-        
-        // Initiate call
         await initiateCall(params.receiverId, params.callType);
       } else {
         setError('Invalid call parameters');
       }
-    } catch (error) {
-      console.error('Error initializing call:', error);
-      setError(error.message || 'Failed to initialize call');
+    } catch (err) {
+      console.error('Error initializing call:', err);
+      setError(err.message || 'Failed to initialize call');
     }
   };
 
@@ -161,14 +217,11 @@ const CallScreen = () => {
     try {
       const call = await createCall(user.$id, receiverId, type, user.username);
       setCallData(call);
-      
-      // Subscribe to call updates
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
+
+      if (unsubscribeRef.current) unsubscribeRef.current();
       unsubscribeRef.current = subscribeCallUpdates(call.$id, ({ payload }) => {
         if (payload.status === CallState.REJECTED) {
-          Alert.alert('Call Rejected', 'The call was rejected');
+          Alert.alert('Call declined', 'The other person declined the call.');
           handleCallEnd();
         } else if (payload.status === CallState.ENDED) {
           handleCallEnd();
@@ -176,9 +229,9 @@ const CallScreen = () => {
           setCallState('connecting');
         }
       });
-    } catch (error) {
-      console.error('Error initiating call:', error);
-      setError(error.message || 'Failed to initiate call');
+    } catch (err) {
+      console.error('Error initiating call:', err);
+      setError(err.message || 'Failed to start call');
       setCallState('idle');
     }
   };
@@ -186,19 +239,14 @@ const CallScreen = () => {
   const handleAcceptCall = async () => {
     try {
       if (!callData) return;
-      
       setCallState('connecting');
       await acceptCall(callData.$id, user.$id);
-      await updateCallStatus(callData.$id, CallState.CONNECTING);
-      
-      // Update local call data
       const updatedCall = await getCallById(callData.$id);
       setCallData(updatedCall);
-      
       setCallState('connecting');
-    } catch (error) {
-      console.error('Error accepting call:', error);
-      setError('Failed to accept call');
+    } catch (err) {
+      console.error('Error accepting call:', err);
+      setError('Could not accept the call');
       handleCallEnd();
     }
   };
@@ -206,21 +254,14 @@ const CallScreen = () => {
   const handleRejectCall = async () => {
     try {
       if (!callData) return;
-      
-      // Clean up subscriptions immediately
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
-      
-      // Reject the call
       await rejectCall(callData.$id, user.$id);
-      
-      // End call immediately
       handleCallEnd();
-    } catch (error) {
-      console.error('Error rejecting call:', error);
-      // Still end the call even if reject fails
+    } catch (err) {
+      console.error('Error rejecting call:', err);
       handleCallEnd();
     }
   };
@@ -231,121 +272,152 @@ const CallScreen = () => {
         try {
           unsubscribeRef.current();
         } catch (e) {
-          console.warn('Error unsubscribing from call updates:', e);
+          console.warn('Error unsubscribing:', e);
         }
         unsubscribeRef.current = null;
       }
       setCallState('ended');
-      const delay = 300;
       setTimeout(() => {
         try {
-          if (router?.back) router.back();
+          router?.back?.();
         } catch (e) {
-          console.warn('Error navigating back:', e);
+          console.warn('Navigate back failed:', e);
         }
-      }, delay);
+      }, 280);
     } catch (e) {
-      console.error('Error in handleCallEnd:', e);
-      setCallState('ended');
+      console.error('handleCallEnd:', e);
       try {
-        if (router?.back) router.back();
+        router?.back?.();
       } catch (_) {}
     }
   };
 
-  const handleCallError = (error) => {
+  const handleCallError = (err) => {
     try {
-      console.error('❌ Call error:', error);
-      
-      // More specific error messages
-      let errorMessage = 'An error occurred during the call';
-      
-      if (typeof error === 'string') {
-        if (error.includes('PERMISSION')) {
-          errorMessage = 'Microphone/Camera permission denied. Please enable in device settings.';
-        } else {
-          errorMessage = error;
-        }
-      } else if (error?.message) {
-        errorMessage = error.message;
+      let errorMessage = 'Something went wrong with the call';
+      if (typeof err === 'string') {
+        errorMessage = err.includes('PERMISSION')
+          ? 'Microphone or camera access is required. Enable it in Settings.'
+          : err;
+      } else if (err?.message) {
+        errorMessage = err.message;
       }
-      
       setError(errorMessage);
-    } catch (err) {
-      // Prevent crash if error handling itself fails
-      console.error('Error in handleCallError:', err);
+    } catch (_) {
+      setError('Call error');
     }
   };
 
-  // Show error state
+  const accent = callType === 'video' ? COLORS.accentVideo : COLORS.accentVoice;
+  const isVideo = callType === 'video';
+
+  const renderShell = (children) => (
+    <LinearGradient colors={[COLORS.bg0, COLORS.bg1, COLORS.bg2]} style={styles.gradient} start={{ x: 0.2, y: 0 }} end={{ x: 0.9, y: 1 }}>
+      <StatusBar barStyle="light-content" />
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        {children}
+      </SafeAreaView>
+    </LinearGradient>
+  );
+
   if (error) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={[styles.loadingText, { color: '#F44336', fontSize: 20, marginBottom: 20 }]}>⚠️ Error</Text>
-          <Text style={[styles.loadingText, { fontSize: 14, color: '#999', textAlign: 'center', paddingHorizontal: 20 }]}>{error}</Text>
-          <TouchableOpacity
-            style={[styles.button, styles.endButton, { marginTop: 30 }]}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.buttonText}>Go Back</Text>
-          </TouchableOpacity>
+    return renderShell(
+      <View style={styles.centerBlock}>
+        <View style={styles.errorIconWrap}>
+          <Feather name="alert-circle" size={40} color={COLORS.danger} />
         </View>
+        <Text style={styles.errorTitle}>Unable to continue</Text>
+        <Text style={styles.errorBody}>{error}</Text>
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => router.back()} activeOpacity={0.85}>
+          <Text style={styles.primaryBtnText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  // Show calling/ringing UI
   if (callState === 'calling' || callState === 'ringing') {
-    return (
-      <View style={styles.container}>
-        <View style={styles.callingContainer}>
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {isIncoming 
-                  ? callData?.callerId?.charAt(0)?.toUpperCase() || 'C'
-                  : callData?.receiverId?.charAt(0)?.toUpperCase() || 'R'}
-              </Text>
+    const title =
+      callState === 'ringing'
+        ? peerDisplayName(callData, true)
+        : 'Calling…';
+    const subtitle =
+      callState === 'ringing'
+        ? `Incoming ${isVideo ? 'video' : 'voice'} call`
+        : `Outgoing ${isVideo ? 'video' : 'voice'} call`;
+    const initial = peerInitial(callData, isIncoming, user?.$id);
+
+    return renderShell(
+      <View style={styles.ringRoot}>
+        <View style={styles.ringTopBar}>
+          <TouchableOpacity onPress={handleCallEnd} hitSlop={12} style={styles.iconHit}>
+            <Feather name="chevron-down" size={28} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.ringCenter}>
+          <View style={styles.avatarStage}>
+            <Animated.View
+              style={[
+                styles.pulseRing,
+                { backgroundColor: accent },
+                {
+                  opacity: ringOpacity,
+                  transform: [{ scale: pulse }],
+                },
+              ]}
+            />
+            <View style={[styles.avatarOuter, { borderColor: accent }]}>
+              <LinearGradient colors={['#2d3a52', '#1e293b']} style={styles.avatarInner}>
+                <Text style={styles.avatarLetter}>{initial}</Text>
+              </LinearGradient>
             </View>
           </View>
-          
-          <Text style={styles.userName}>
-            {isIncoming ? 'Incoming Call' : 'Calling...'}
-          </Text>
-          
-          <Text style={styles.callType}>
-            {callType === 'video' ? 'Video Call' : 'Audio Call'}
-          </Text>
 
-          {callState === 'calling' && (
-            <ActivityIndicator size="large" color="#4CAF50" style={styles.loader} />
+          <Text style={styles.ringTitle} numberOfLines={2}>
+            {title}
+          </Text>
+          <Text style={styles.ringSubtitle}>{subtitle}</Text>
+
+          <View style={[styles.modePill, { borderColor: accent + '55' }]}>
+            <Feather name={isVideo ? 'video' : 'phone'} size={16} color={accent} />
+            <Text style={[styles.modePillText, { color: accent }]}>
+              {isVideo ? 'Video' : 'Voice'}
+            </Text>
+          </View>
+
+          {callState === 'calling' && !isIncoming && (
+            <Text style={styles.hintMuted}>Ringing on their device…</Text>
           )}
 
           {isIncoming && callState === 'ringing' && (
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[styles.button, styles.rejectButton]}
-                onPress={handleRejectCall}
-              >
-                <Text style={styles.buttonText}>✕</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[styles.button, styles.acceptButton]}
-                onPress={handleAcceptCall}
-              >
-                <Text style={styles.buttonText}>✓</Text>
-              </TouchableOpacity>
+            <View style={styles.incomingActions}>
+              <View style={styles.actionCol}>
+                <TouchableOpacity
+                  style={[styles.roundAction, styles.roundDecline]}
+                  onPress={handleRejectCall}
+                  activeOpacity={0.88}
+                >
+                  <Feather name="phone-off" size={28} color="#fff" />
+                </TouchableOpacity>
+                <Text style={styles.actionLabel}>Decline</Text>
+              </View>
+              <View style={styles.actionCol}>
+                <TouchableOpacity
+                  style={[styles.roundAction, styles.roundAccept]}
+                  onPress={handleAcceptCall}
+                  activeOpacity={0.88}
+                >
+                  <Feather name="phone" size={28} color="#fff" />
+                </TouchableOpacity>
+                <Text style={styles.actionLabel}>Accept</Text>
+              </View>
             </View>
           )}
 
           {!isIncoming && callState === 'calling' && (
-            <TouchableOpacity
-              style={[styles.button, styles.endButton]}
-              onPress={handleCallEnd}
-            >
-              <Text style={styles.buttonText}>End Call</Text>
+            <TouchableOpacity style={styles.cancelCallBtn} onPress={handleCallEnd} activeOpacity={0.88}>
+              <Feather name="phone-off" size={22} color="#fff" />
+              <Text style={styles.cancelCallBtnText}>Cancel call</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -353,67 +425,46 @@ const CallScreen = () => {
     );
   }
 
-  // Show connected call UI
   if (callState === 'connected' || callState === 'connecting') {
     if (!callData) {
-      return (
-        <View style={styles.container}>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#4CAF50" />
-            <Text style={styles.loadingText}>Connecting...</Text>
-          </View>
+      return renderShell(
+        <View style={styles.centerBlock}>
+          <ActivityIndicator size="large" color={accent} />
+          <Text style={styles.connectingTitle}>Connecting</Text>
+          <Text style={styles.connectingHint}>Securing your line…</Text>
         </View>
       );
     }
 
-    // Use the stored channelName from call data (must be consistent for both users)
-    // If channelName is missing, this is an error - both users need the same channel
     if (!callData.channelName) {
-      console.error('Missing channelName in call data!', callData);
-      setError('Call configuration error: Missing channel name');
-      return (
-        <View style={styles.container}>
-          <View style={styles.loadingContainer}>
-            <Text style={[styles.loadingText, { color: '#F44336' }]}>Configuration Error</Text>
-            <Text style={[styles.loadingText, { fontSize: 14, color: '#999', marginTop: 10 }]}>
-              Missing channel name. Please try again.
-            </Text>
-            <TouchableOpacity
-              style={[styles.button, styles.endButton, { marginTop: 30 }]}
-              onPress={handleCallEnd}
-            >
-              <Text style={styles.buttonText}>End Call</Text>
-            </TouchableOpacity>
-          </View>
+      return renderShell(
+        <View style={styles.centerBlock}>
+          <Feather name="wifi-off" size={40} color={COLORS.textMuted} />
+          <Text style={styles.errorTitle}>Configuration issue</Text>
+          <Text style={styles.errorBody}>This call is missing channel data. Please try again.</Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={handleCallEnd}>
+            <Text style={styles.primaryBtnText}>Close</Text>
+          </TouchableOpacity>
         </View>
       );
     }
-    
-    // Use channelName as meetingId for VideoSDK
-    // VideoSDK uses meetingId instead of channelName
+
     const meetingId = callData.channelName || callData.meetingId;
     const receiverId = callData.receiverId === user.$id ? callData.callerId : callData.receiverId;
 
     if (!meetingId) {
-      console.error('Missing meetingId/channelName in call data!', callData);
-      setError('Call configuration error: Missing meeting ID');
-      return (
-        <View style={styles.container}>
-          <View style={styles.loadingContainer}>
-            <Text style={[styles.loadingText, { color: '#F44336' }]}>Configuration Error</Text>
-            <Text style={[styles.loadingText, { fontSize: 14, color: '#999', marginTop: 10 }]}>
-              Missing meeting ID. Please try again.
-            </Text>
-            <TouchableOpacity
-              style={[styles.button, styles.endButton, { marginTop: 30 }]}
-              onPress={handleCallEnd}
-            >
-              <Text style={styles.buttonText}>End Call</Text>
-            </TouchableOpacity>
-          </View>
+      return renderShell(
+        <View style={styles.centerBlock}>
+          <Text style={styles.errorTitle}>Missing meeting</Text>
+          <Text style={styles.errorBody}>Could not join this call. Please try again.</Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={handleCallEnd}>
+            <Text style={styles.primaryBtnText}>Close</Text>
+          </TouchableOpacity>
         </View>
       );
     }
+
+    const peerName = peerDisplayName(callData, isIncoming);
 
     return (
       <VideoSDKCallWrapper
@@ -423,166 +474,260 @@ const CallScreen = () => {
         currentUserId={user.$id}
         callType={callType}
         callId={callData.$id}
+        peerDisplayName={peerName}
         onCallEnd={handleCallEnd}
         onError={handleCallError}
       />
     );
   }
 
-  // Show loading state while user is not loaded
   if (!user || !user.$id) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4CAF50" />
-          <Text style={styles.loadingText}>Loading user...</Text>
-        </View>
+    return renderShell(
+      <View style={styles.centerBlock}>
+        <ActivityIndicator size="large" color={accent} />
+        <Text style={styles.connectingHint}>Preparing…</Text>
       </View>
     );
   }
 
-  // Show loading state for initial call setup
-  // If we have params but state is still idle, show calling UI immediately
   if (callState === 'idle') {
     if (params.receiverId && params.callType) {
-      // Outgoing call - show calling UI immediately
-      return (
-        <View style={styles.container}>
-          <View style={styles.callingContainer}>
-            <View style={styles.avatarContainer}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>R</Text>
-              </View>
-            </View>
-            <Text style={styles.userName}>Calling...</Text>
-            <Text style={styles.callType}>
-              {params.callType === 'video' ? 'Video Call' : 'Audio Call'}
+      const idleVideo = params.callType === 'video';
+      const idleAccent = idleVideo ? COLORS.accentVideo : COLORS.accentVoice;
+      return renderShell(
+        <View style={styles.ringRoot}>
+          <View style={styles.ringCenter}>
+            <ActivityIndicator size="large" color={idleAccent} style={{ marginBottom: 24 }} />
+            <Text style={styles.ringTitle}>Starting call…</Text>
+            <Text style={styles.ringSubtitle}>
+              {idleVideo ? 'Video' : 'Voice'} call
             </Text>
-            <ActivityIndicator size="large" color="#4CAF50" style={styles.loader} />
-            <TouchableOpacity
-              style={[styles.button, styles.endButton]}
-              onPress={handleCallEnd}
-            >
-              <Text style={styles.buttonText}>End Call</Text>
+            <TouchableOpacity style={styles.cancelCallBtn} onPress={handleCallEnd}>
+              <Feather name="x" size={22} color="#fff" />
+              <Text style={styles.cancelCallBtnText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
       );
-    } else if (params.callId) {
-      // Incoming call - show loading briefly
-      return (
-        <View style={styles.container}>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#4CAF50" />
-            <Text style={styles.loadingText}>Loading call...</Text>
-          </View>
+    }
+    if (params.callId) {
+      return renderShell(
+        <View style={styles.centerBlock}>
+          <ActivityIndicator size="large" color={COLORS.accentVideo} />
+          <Text style={styles.connectingHint}>Loading call…</Text>
         </View>
       );
     }
   }
 
-  // Fallback - should not reach here, but just in case
-  return (
-    <View style={styles.container}>
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>Loading...</Text>
-        <TouchableOpacity
-          style={[styles.button, styles.endButton, { marginTop: 30 }]}
-          onPress={() => router.back()}
-        >
-          <Text style={styles.buttonText}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
+  return renderShell(
+    <View style={styles.centerBlock}>
+      <ActivityIndicator size="large" color={COLORS.textMuted} />
+      <TouchableOpacity style={[styles.primaryBtn, { marginTop: 28 }]} onPress={() => router.back()}>
+        <Text style={styles.primaryBtnText}>Go back</Text>
+      </TouchableOpacity>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  gradient: {
     flex: 1,
-    backgroundColor: '#000000',
     width: '100%',
     height: '100%',
   },
-  callingContainer: {
+  safe: {
+    flex: 1,
+  },
+  centerBlock: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#000000',
+    paddingHorizontal: 32,
   },
-  avatarContainer: {
-    marginBottom: 30,
+  ringRoot: {
+    flex: 1,
   },
-  avatar: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: '#4CAF50',
-    justifyContent: 'center',
+  ringTopBar: {
+    paddingHorizontal: 8,
+    paddingTop: 4,
+  },
+  iconHit: {
+    padding: 8,
+    alignSelf: 'flex-start',
+  },
+  ringCenter: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    paddingBottom: 24,
   },
-  avatarText: {
-    fontSize: 64,
-    color: '#fff',
-    fontWeight: 'bold',
+  avatarStage: {
+    width: 200,
+    height: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 28,
   },
-  userName: {
-    fontSize: 28,
-    color: '#ffffff',
-    fontWeight: 'bold',
+  pulseRing: {
+    position: 'absolute',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+  },
+  avatarOuter: {
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    borderWidth: 3,
+    padding: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInner: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarLetter: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  ringTitle: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+    letterSpacing: -0.3,
+    marginBottom: 8,
+  },
+  ringSubtitle: {
+    fontSize: 16,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: COLORS.glass,
+    marginBottom: 16,
+  },
+  modePillText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  hintMuted: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    marginTop: 8,
+  },
+  incomingActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 48,
+    width: '100%',
+    maxWidth: 320,
+  },
+  actionCol: {
+    alignItems: 'center',
+    marginHorizontal: 36,
+  },
+  roundAction: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.35,
+        shadowRadius: 12,
+      },
+      android: { elevation: 10 },
+    }),
+  },
+  roundDecline: {
+    backgroundColor: COLORS.danger,
+  },
+  roundAccept: {
+    backgroundColor: COLORS.success,
+  },
+  actionLabel: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  cancelCallBtn: {
+    marginTop: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(239,68,68,0.2)',
+    paddingVertical: 16,
+    paddingHorizontal: 28,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.45)',
+  },
+  cancelCallBtnText: {
+    color: '#fecaca',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  connectingTitle: {
+    marginTop: 20,
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  connectingHint: {
+    marginTop: 8,
+    fontSize: 15,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+  },
+  errorIconWrap: {
+    marginBottom: 16,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
     marginBottom: 10,
   },
-  callType: {
-    fontSize: 18,
-    color: '#999999',
-    marginBottom: 40,
+  errorBody: {
+    fontSize: 15,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 28,
   },
-  loader: {
-    marginTop: 20,
+  primaryBtn: {
+    backgroundColor: COLORS.glass,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
-  buttonContainer: {
-    flexDirection: 'row',
-    gap: 40,
-    marginTop: 60,
-  },
-  button: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  acceptButton: {
-    backgroundColor: '#4CAF50',
-  },
-  rejectButton: {
-    backgroundColor: '#F44336',
-  },
-  endButton: {
-    backgroundColor: '#F44336',
-    width: 120,
-    height: 50,
-    borderRadius: 25,
-    marginTop: 40,
-  },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 32,
-    fontWeight: 'bold',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000000',
-    padding: 20,
-  },
-  loadingText: {
-    color: '#ffffff',
-    marginTop: 20,
+  primaryBtnText: {
+    color: COLORS.text,
     fontSize: 16,
+    fontWeight: '600',
   },
 });
 

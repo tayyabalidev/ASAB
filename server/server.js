@@ -15,11 +15,22 @@ const stripe = stripeSecretKey ? require('stripe')(stripeSecretKey) : null;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const muxHandlers = require('./mux');
+
+// Mux webhook must see raw body for signature verification (before express.json)
+app.post(
+  '/api/mux/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res) => muxHandlers.handleMuxWebhook(req, res)
+);
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Mux direct upload URL (JSON body)
+app.post('/api/mux/direct-upload', (req, res) => muxHandlers.handleDirectUploadRequest(req, res));
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -838,6 +849,45 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Video/Photo Processing Service is running' });
 });
 
+// ==================== VideoSDK (calls) — JWT must be minted server-side ====================
+const jwt = require('jsonwebtoken');
+
+/**
+ * GET /get-token?meetingId=...&participantId=...
+ * Returns { token } for @videosdk.live/react-native-sdk MeetingProvider.
+ * Set VIDEOSDK_API_KEY and VIDEOSDK_SECRET_KEY in server/.env (same values as VideoSDK dashboard).
+ */
+app.get('/get-token', (req, res) => {
+  const apiKey = (process.env.VIDEOSDK_API_KEY || '').trim();
+  const secretKey = (process.env.VIDEOSDK_SECRET_KEY || '').trim();
+  const meetingId = typeof req.query.meetingId === 'string' ? req.query.meetingId : '';
+  const participantId =
+    typeof req.query.participantId === 'string' ? req.query.participantId : '';
+
+  if (!apiKey || !secretKey) {
+    return res.status(503).json({
+      error: 'VideoSDK not configured',
+      message: 'Set VIDEOSDK_API_KEY and VIDEOSDK_SECRET_KEY in server environment',
+    });
+  }
+
+  const payload = {
+    apikey: apiKey,
+    permissions: ['allow_join'],
+    version: 2,
+    roles: ['rtc'],
+  };
+  if (meetingId) payload.roomId = meetingId;
+  if (participantId) payload.participantId = participantId;
+
+  try {
+    const token = jwt.sign(payload, secretKey, { expiresIn: '2h', algorithm: 'HS256' });
+    return res.json({ token });
+  } catch (e) {
+    return res.status(500).json({ error: 'Token generation failed', message: e.message });
+  }
+});
+
 // Start server
 // ==================== PAYMENT PROCESSING ENDPOINTS ====================
 
@@ -1250,6 +1300,11 @@ app.listen(PORT, () => {
     console.log(`💳 Stripe payment processing enabled`);
   } else {
     console.log(`⚠️  Stripe not configured - payment features disabled`);
+  }
+  if (process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET) {
+    console.log(`🎬 Mux direct upload + webhook routes enabled`);
+  } else {
+    console.log(`⚠️  Mux not configured - set MUX_TOKEN_ID / MUX_TOKEN_SECRET for video uploads`);
   }
 });
 

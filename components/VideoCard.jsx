@@ -1,23 +1,27 @@
 import { useState, useRef, useEffect } from "react";
 import { ResizeMode, Video } from "expo-av";
-import { View, Text, TouchableOpacity, Image, Alert, Share, Platform } from "react-native";
+import { View, Text, TouchableOpacity, Image, Alert, Share, Platform, ActivityIndicator } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
 import { icons } from "../constants";
-import { addBookmark, isVideoBookmarked, incrementShareCount } from "../lib/appwrite";
+import { addBookmark, isVideoBookmarked, incrementShareCount, getVideoPlaybackUrls } from "../lib/appwrite";
+import { getPlaybackUriForPost } from "../lib/muxPlayback";
+import { isMuxPlaceholderVideo } from "../lib/mediaType";
 import { useGlobalContext } from "../context/GlobalProvider";
 import VideoProgressBar from "./VideoProgressBar";
 
-const getPlaybackCandidates = (url) => {
-  if (!url) return [];
-  if (!url.includes("/storage/buckets/") || !url.includes("/files/")) return [url];
-  const viewUrl = url.replace("/download", "/view");
-  const downloadUrl = url.replace("/view", "/download");
-  return [...new Set([viewUrl, downloadUrl, url])];
-};
-
-const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, creatorId }) => {
+const VideoCard = ({
+  title,
+  creator,
+  avatar,
+  thumbnail,
+  video,
+  $id: videoId,
+  creatorId,
+  mux_playback_id,
+  muxPlaybackId,
+}) => {
   const [play, setPlay] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [playCount, setPlayCount] = useState(0);
@@ -27,13 +31,21 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [videoSourceIndex, setVideoSourceIndex] = useState(0);
   const videoRef = useRef(null);
-  const videoPlaybackCandidates = getPlaybackCandidates(video);
-  const activeVideoUri = videoPlaybackCandidates[videoSourceIndex] || video;
+  const resolvedStream =
+    getPlaybackUriForPost({ video, mux_playback_id, muxPlaybackId }) ||
+    (!isMuxPlaceholderVideo(video) ? video : null);
+  const videoPlaybackCandidates = resolvedStream
+    ? getVideoPlaybackUrls(resolvedStream)
+    : [];
+  const activeVideoUri =
+    videoPlaybackCandidates[videoSourceIndex] ||
+    resolvedStream ||
+    "";
   const { user } = useGlobalContext();
 
   useEffect(() => {
     setVideoSourceIndex(0);
-  }, [videoId, video]);
+  }, [videoId, video, mux_playback_id, muxPlaybackId]);
 
   const shareVideo = async () => {
     try {
@@ -188,7 +200,7 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
         </TouchableOpacity>
       </View>
 
-      {play ? (
+      {play && activeVideoUri ? (
         <TouchableOpacity
           activeOpacity={1}
           onPress={handleVideoPress}
@@ -210,8 +222,8 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
               allowsExternalPlayback: false,
               playInSilentModeIOS: true,
               ignoreSilentSwitch: "ignore",
-              automaticallyWaitsToMinimizeStalling: false,
-              preferredForwardBufferDuration: 1,
+              automaticallyWaitsToMinimizeStalling: true,
+              preferredForwardBufferDuration: 12,
             })}
             onLoad={(status) => {
               if (status.isLoaded) {
@@ -279,6 +291,11 @@ const VideoCard = ({ title, creator, avatar, thumbnail, video, $id: videoId, cre
             </Text>
           </TouchableOpacity>
         </TouchableOpacity>
+      ) : play ? (
+        <View className="w-full h-60 rounded-xl mt-3 bg-black/80 justify-center items-center">
+          <ActivityIndicator color="#fff" size="large" />
+          <Text className="text-white text-xs mt-2">Preparing video…</Text>
+        </View>
       ) : (
         <TouchableOpacity
           activeOpacity={0.7}

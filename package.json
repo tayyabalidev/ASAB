@@ -10,7 +10,7 @@
     "prebuild": "expo prebuild --clean",
     "prebuild:ios": "expo prebuild --platform ios",
     "prebuild:android": "expo prebuild --platform android",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package && node scripts/remove-nested-react.cjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -75,7 +75,18 @@
     "tailwindcss": "3.3.2"
   },
   "overrides": {
-    "expo-file-system": "~19.0.21"
+    "expo-file-system": "~19.0.21",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "@videosdk.live/react-native-sdk": {
+      "react": "19.1.0",
+      "@videosdk.live/react-sdk": {
+        "react": "19.1.0"
+      }
+    },
+    "@videosdk.live/react-sdk": {
+      "react": "19.1.0"
+    }
   },
   "private": true
 }

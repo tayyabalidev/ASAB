@@ -214,7 +214,7 @@ const VideoSDKCallWrapper = (props) => {
         setSdkCrashMessage(msg || null);
       }}
     >
-      <VideoSDKCall {...props} />
+      <VideoSDKCall {...props} peerDisplayName={props.peerDisplayName} />
     </VideoSDKErrorBoundary>
   );
 };

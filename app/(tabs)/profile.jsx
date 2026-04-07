@@ -12,13 +12,14 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri } from "../../lib/appwrite";
+import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar } from "../../components";
 import { images } from "../../constants";
 import { useTranslation } from "react-i18next";
 import { isAdminUser } from "../../lib/admin";
-import { isVideoMedia } from "../../lib/mediaType";
+import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
 
 // Get CSS filter string based on filter type and adjustments (same as in create.jsx and home.jsx)
 const getFilterCSS = (filterId, adjustmentsData = null) => {
@@ -2649,10 +2650,29 @@ const Profile = () => {
                   {/* Media */}
                   <View style={{ flex: 1, backgroundColor: theme.background, position: 'relative' }}>
                     {isVideoMedia(modalVideo?.video, modalVideo?.postType) ? (
+                      (() => {
+                        const profilePosterUri =
+                          modalVideo.thumbnail && !String(modalVideo.thumbnail).includes("placeholder")
+                            ? getVideoPosterUri(modalVideo.thumbnail, modalVideo.video)
+                            : undefined;
+                        const profileStreamUri =
+                          getPlaybackUriForPost(modalVideo) ||
+                          (!isMuxPlaceholderVideo(modalVideo?.video)
+                            ? getIOSCompatibleVideoUrl(modalVideo.video) || modalVideo.video
+                            : null);
+                        if (!profileStreamUri) {
+                          return (
+                            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+                              <ActivityIndicator color="#fff" size="large" />
+                              <Text style={{ color: theme.textPrimary, marginTop: 12 }}>Preparing video…</Text>
+                            </View>
+                          );
+                        }
+                        return (
                       <>
                         <Video
                           ref={modalVideoRef}
-                          source={{ uri: modalVideo.video }}
+                          source={{ uri: profileStreamUri }}
                           style={{ flex: 1, width: '100%', height: '100%' }}
                           resizeMode={ResizeMode.CONTAIN}
                           shouldPlay={isVideoPlaying}
@@ -2660,7 +2680,8 @@ const Profile = () => {
                           isMuted={false}
                           useNativeControls={false}
                           progressUpdateIntervalMillis={250}
-                          posterSource={modalVideo.thumbnail && !modalVideo.thumbnail.includes('placeholder') ? { uri: modalVideo.thumbnail } : undefined}
+                          posterSource={profilePosterUri ? { uri: profilePosterUri } : undefined}
+                          usePoster={Boolean(profilePosterUri) && !isVideoReady}
                           onLoad={(status) => {
                             if (status.isLoaded) {
                               setPlaybackDuration(status.durationMillis || 0);
@@ -2690,8 +2711,8 @@ const Profile = () => {
                             allowsExternalPlayback: false,
                             playInSilentModeIOS: true,
                             ignoreSilentSwitch: 'ignore',
-                            automaticallyWaitsToMinimizeStalling: false,
-                            preferredForwardBufferDuration: 0,
+                            automaticallyWaitsToMinimizeStalling: true,
+                            preferredForwardBufferDuration: 12,
                           })}
                         />
                         
@@ -2754,6 +2775,8 @@ const Profile = () => {
                           </Text>
                         </TouchableOpacity>
                       </>
+                        );
+                      })()
                     ) : (
                       <Image
                         source={{ uri: modalVideo?.photo || modalVideo?.thumbnail || modalVideo?.video }}

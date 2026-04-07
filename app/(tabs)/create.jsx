@@ -31,6 +31,8 @@ import { captureRef } from "react-native-view-shot";
 
 import { icons, images } from "../../constants";
 import { createVideoPost, createPhotoPost } from "../../lib/appwrite";
+import { isMuxUploadEnabled } from "../../lib/muxConfig";
+import { publishVideoWithMux } from "../../lib/muxClient";
 import {
   processVideo,
   processPhoto,
@@ -1810,32 +1812,46 @@ const Create = () => {
         setProcessingProgress(0);
 
         try {
-          await createVideoPost({
-            ...form,
-            video: processedVideo,
-            userId: user.$id,
-          });
+          if (isMuxUploadEnabled()) {
+            await publishVideoWithMux(
+              { ...form, userId: user.$id },
+              processedVideo
+            );
+          } else {
+            await createVideoPost({
+              ...form,
+              video: processedVideo,
+              userId: user.$id,
+            });
+          }
 
           Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
-          
-          // Stay on create page - user can navigate manually if they want
-          // The home screen will auto-refresh when user navigates to it
+          router.push("/(tabs)/home");
         } catch (uploadError) {
           throw uploadError; // Re-throw to be caught by outer catch
         }
       } catch (error) {
-        // Check for network-related errors and show user-friendly messages
         const errorMessage = error.message || error.toString();
         let userMessage = errorMessage;
 
+        // Do not replace Mux/Appwrite/upload diagnostics with a generic "network" alert:
+        // many SDK messages contain the word "network" while the real cause is elsewhere.
+        const preserveDetailedError =
+          errorMessage.includes("\n") ||
+          errorMessage.length > 220 ||
+          /mux|appwrite|createMux|video post|uploadUrl|execution|Invalid document|document structure|direct\.upload|Functions?/i.test(
+            errorMessage
+          );
+
         if (
-          errorMessage.includes("Network") ||
-          errorMessage.includes("network") ||
-          errorMessage.includes("timeout") ||
-          errorMessage.includes("Check your internet connection") ||
-          errorMessage.includes("503") ||
-          errorMessage.includes("client read error") ||
-          errorMessage.includes("Service Unavailable")
+          !preserveDetailedError &&
+          (errorMessage.includes("Network") ||
+            errorMessage.includes("network") ||
+            errorMessage.includes("timeout") ||
+            errorMessage.includes("Check your internet connection") ||
+            errorMessage.includes("503") ||
+            errorMessage.includes("client read error") ||
+            errorMessage.includes("Service Unavailable"))
         ) {
           userMessage =
             "Network Error!\n\nPlease check your internet connection and try again.";
@@ -2115,18 +2131,25 @@ const Create = () => {
         Alert.alert(t("common.success"), "Photo uploaded successfully!");
         // Stay on create page - user can navigate manually if they want
       } catch (error) {
-        // Check for network-related errors and show user-friendly messages
         const errorMessage = error.message || error.toString();
         let userMessage = errorMessage;
 
+        const preserveDetailedError =
+          errorMessage.includes("\n") ||
+          errorMessage.length > 220 ||
+          /mux|appwrite|photo post|Invalid document|document structure|Functions?/i.test(
+            errorMessage
+          );
+
         if (
-          errorMessage.includes("Network") ||
-          errorMessage.includes("network") ||
-          errorMessage.includes("timeout") ||
-          errorMessage.includes("Network request failed") ||
-          errorMessage.includes("503") ||
-          errorMessage.includes("client read error") ||
-          errorMessage.includes("Service Unavailable")
+          !preserveDetailedError &&
+          (errorMessage.includes("Network") ||
+            errorMessage.includes("network") ||
+            errorMessage.includes("timeout") ||
+            errorMessage.includes("Network request failed") ||
+            errorMessage.includes("503") ||
+            errorMessage.includes("client read error") ||
+            errorMessage.includes("Service Unavailable"))
         ) {
           userMessage =
             "Network Error!\n\nPlease check your internet connection and try again.";
@@ -5635,21 +5658,8 @@ const Create = () => {
                     Select Cover
                   </Text>
                   <TouchableOpacity
-                    onPress={async () => {
-                      // Capture frame at current time as thumbnail
-                      if (form.video && videoRef.current) {
-                        try {
-                          // This would need video frame extraction - for now just save the time
-                          setForm({
-                            ...form,
-                            thumbnail: { time: videoCoverTime },
-                          });
-                          setShowCoverModal(false);
-                          Alert.alert("Success", "Cover frame selected");
-                        } catch (error) {
-                          Alert.alert("Error", "Failed to set cover frame");
-                        }
-                      }
+                    onPress={() => {
+                      setShowCoverModal(false);
                     }}
                   >
                     <Text

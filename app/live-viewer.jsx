@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { LiveStreamPlayer, LiveChatPanel, LiveReactions } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
-import { getLiveStreamById } from '../lib/livestream';
+import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/livestream';
 import { useTranslation } from 'react-i18next';
 
 const { width, height } = Dimensions.get('window');
@@ -45,6 +45,14 @@ const LiveViewer = () => {
 
     loadStream();
   }, [streamId]);
+
+  useEffect(() => {
+    if (!streamId || !user?.$id) return;
+    joinLiveStream(streamId, user.$id).catch(() => {});
+    return () => {
+      leaveLiveStream(streamId, user.$id).catch(() => {});
+    };
+  }, [streamId, user?.$id]);
 
   const handleClose = () => {
     router.replace('/home');

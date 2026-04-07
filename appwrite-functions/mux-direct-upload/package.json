@@ -1,0 +1,9 @@
+{
+  "name": "appwrite-function-mux-direct-upload",
+  "version": "1.0.0",
+  "description": "Mux direct upload URL for ASAB (Appwrite Functions runtime — not Express)",
+  "main": "index.js",
+  "dependencies": {
+    "axios": "^1.7.9"
+  }
+}

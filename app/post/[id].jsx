@@ -24,11 +24,14 @@ import {
   addComment,
   toggleLikeComment,
   getCommentLikes,
+  getIOSCompatibleVideoUrl,
+  getVideoPosterUri,
 } from "../../lib/appwrite";
 import { databases, appwriteConfig } from "../../lib/appwrite";
 import { images, icons } from "../../constants";
 import VideoProgressBar from "../../components/VideoProgressBar";
-import { isVideoMedia } from "../../lib/mediaType";
+import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
+import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 
 const PostDetails = () => {
   const { id } = useLocalSearchParams();
@@ -322,15 +325,33 @@ const PostDetails = () => {
           >
             <View style={{ width: "100%", height: 400, backgroundColor: "#000", position: 'relative' }}>
               {isVideoMedia(post?.video, post?.postType) ? (
+                (() => {
+                  const detailPosterUri = getVideoPosterUri(post.thumbnail, post.video);
+                  const detailStream =
+                    getPlaybackUriForPost(post) ||
+                    (!isMuxPlaceholderVideo(post?.video)
+                      ? getIOSCompatibleVideoUrl(post.video) || post.video
+                      : null);
+                  if (!detailStream) {
+                    return (
+                      <View style={{ width: "100%", height: "100%", justifyContent: "center", alignItems: "center" }}>
+                        <ActivityIndicator color="#fff" size="large" />
+                        <Text style={{ color: "#fff", marginTop: 12 }}>Preparing video…</Text>
+                      </View>
+                    );
+                  }
+                  return (
                 <>
                   <Video
                     ref={videoRef}
-                    source={{ uri: post.video }}
+                    source={{ uri: detailStream }}
                     style={{ width: "100%", height: "100%" }}
                     resizeMode={ResizeMode.COVER}
                     useNativeControls={false}
                     shouldPlay={isPlaying}
                     isLooping={true}
+                    posterSource={detailPosterUri ? { uri: detailPosterUri } : undefined}
+                    usePoster={Boolean(detailPosterUri) && !isVideoReady}
                     onLoad={(status) => {
                       if (status.isLoaded) {
                         setPlaybackDuration(status.durationMillis || 0);
@@ -346,6 +367,13 @@ const PostDetails = () => {
                         }
                       }
                     }}
+                    {...(Platform.OS === "ios" && {
+                      allowsExternalPlayback: false,
+                      playInSilentModeIOS: true,
+                      ignoreSilentSwitch: "ignore",
+                      automaticallyWaitsToMinimizeStalling: true,
+                      preferredForwardBufferDuration: 12,
+                    })}
                   />
                   <TouchableOpacity
                     activeOpacity={1}
@@ -393,6 +421,8 @@ const PostDetails = () => {
                     </Text>
                   </TouchableOpacity>
                 </>
+                  );
+                })()
               ) : post?.video ? (
                 <Image
                   source={{ uri: post.video }}

@@ -30,6 +30,9 @@ const Search = () => {
             creator={item.creator.username}
             avatar={item.creator.avatar}
             creatorId={item.creator.$id}
+            $id={item.$id}
+            mux_playback_id={item.mux_playback_id}
+            muxPlaybackId={item.muxPlaybackId}
           />
         )}
         ListHeaderComponent={() => (

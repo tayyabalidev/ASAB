@@ -1,143 +1,131 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image, Alert } from 'react-native';
+import React, { useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  Dimensions,
+} from 'react-native';
 import { useGlobalContext } from '../context/GlobalProvider';
-import { subscribeLiveStreamUpdates, followStreamer, unfollowStreamer, isFollowing, getFollowerCount } from '../lib/livestream';
+import { isExpoGoOrStoreClient } from '../lib/videosdkNativeGate';
+import { images } from '../constants';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
-const LiveStreamPlayer = ({ stream, onClose }) => {
+function FallbackPlayer({ stream, onClose }) {
   const { user } = useGlobalContext();
-  const [viewerCount, setViewerCount] = useState(stream?.viewerCount || 0);
-  const [isFollowingUser, setIsFollowingUser] = useState(false);
-  const [followerCount, setFollowerCount] = useState(0);
-
-  useEffect(() => {
-    let unsubscribe;
-
-    // Check follow status
-    if (stream?.hostId && user?.$id && user.$id !== stream.hostId) {
-      isFollowing(user.$id, stream.hostId)
-        .then(setIsFollowingUser)
-        .catch(console.error);
-      
-      getFollowerCount(stream.hostId)
-        .then(setFollowerCount)
-        .catch(console.error);
-    }
-
-    // Subscribe to stream updates
-    if (stream?.$id) {
-      unsubscribe = subscribeLiveStreamUpdates(stream.$id, (response) => {
-        if (response.payload) {
-          setViewerCount(response.payload.viewerCount || 0);
-          
-          // Check if stream ended
-          if (response.payload.isLive === false) {
-            if (onClose) onClose();
-          }
-        }
-      });
-    }
-
-    return () => {
-      if (unsubscribe && typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, [stream?.$id, user?.$id]);
-
-  const handleFollowToggle = async () => {
-    if (!user?.$id) {
-      Alert.alert('Error', 'Please login to follow streamers');
-      return;
-    }
-
-    if (!stream?.hostId) {
-      Alert.alert('Error', 'Invalid stream host');
-      return;
-    }
-
-    try {
-      if (isFollowingUser) {
-        await unfollowStreamer(user.$id, stream.hostId);
-        setIsFollowingUser(false);
-        setFollowerCount(prev => Math.max(0, prev - 1));
-        Alert.alert('Success', `Unfollowed ${stream.hostUsername}`);
-      } else {
-        await followStreamer(user.$id, stream.hostId, stream.hostUsername);
-        setIsFollowingUser(true);
-        setFollowerCount(prev => prev + 1);
-        Alert.alert('Success', `Following ${stream.hostUsername}`);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update follow status');
-    }
-  };
 
   if (!stream || !user?.$id) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Stream not found</Text>
+        <Text style={styles.errorText}>Sign in to watch live streams</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      {/* TODO: Integrate your new live streaming SDK here */}
-      <View style={styles.placeholderContainer}>
-        <Text style={styles.placeholderText}>📺 Live Stream</Text>
-        <Text style={styles.placeholderSubtext}>
-          Live streaming feature needs to be integrated with your new SDK.
-        </Text>
-        <Text style={styles.placeholderSubtext}>
-          Stream: {stream.title}
+      <View style={[styles.videoArea, styles.fallbackVideo]}>
+        <Text style={styles.fallbackTitle}>Live video unavailable</Text>
+        <Text style={styles.fallbackSub}>
+          Open this app from a development or production build (not Expo Go) to watch VideoSDK
+          streams.
         </Text>
         {onClose && (
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>Close</Text>
+          <TouchableOpacity style={styles.closeFabAlt} onPress={onClose}>
+            <Text style={styles.closeFabText}>✕</Text>
           </TouchableOpacity>
         )}
       </View>
-      
-      {/* Bottom Overlay - Stream Details */}
+
       <View style={styles.bottomOverlay}>
         <View style={styles.hostInfoContainer}>
           <View style={styles.hostInfo}>
-            <Image 
-              source={{ uri: stream.hostAvatar }} 
+            <Image
+              source={stream.hostAvatar ? { uri: stream.hostAvatar } : images.profile}
               style={styles.hostAvatarSmall}
             />
             <View style={styles.hostDetails}>
               <Text style={styles.hostName}>{stream.hostUsername}</Text>
-              <Text style={styles.followerCountText}>
-                {followerCount} {followerCount === 1 ? 'follower' : 'followers'}
+              <Text style={styles.streamTitle} numberOfLines={2}>
+                {stream.title}
               </Text>
-              <Text style={styles.streamTitle} numberOfLines={2}>{stream.title}</Text>
             </View>
           </View>
-
-          {/* Follow Button */}
-          {stream.hostId && user.$id !== stream.hostId && (
-            <TouchableOpacity 
-              style={[styles.followButton, isFollowingUser && styles.followingButton]}
-              onPress={handleFollowToggle}
-            >
-              <Text style={[styles.followButtonText, isFollowingUser && styles.followingButtonText]}>
-                {isFollowingUser ? '✓ Following' : '+ Follow'}
-              </Text>
-            </TouchableOpacity>
-          )}
         </View>
       </View>
     </View>
   );
-};
+}
+
+/**
+ * Lazy-loads VideoSDK + HLS viewer only outside Expo Go (safe for components barrel imports).
+ */
+export default function LiveStreamPlayer(props) {
+  const Inner = useMemo(() => {
+    if (isExpoGoOrStoreClient()) {
+      return null;
+    }
+    try {
+      return require('./LiveStreamPlayerImpl').default;
+    } catch (e) {
+      console.warn('LiveStreamPlayer: failed to load VideoSDK implementation', e);
+      return null;
+    }
+  }, []);
+
+  if (!Inner) {
+    return <FallbackPlayer stream={props.stream} onClose={props.onClose} />;
+  }
+
+  return <Inner {...props} />;
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  videoArea: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  fallbackVideo: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    minHeight: height * 0.45,
+  },
+  fallbackTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  fallbackSub: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 22,
+    maxWidth: 320,
+  },
+  closeFabAlt: {
+    marginTop: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  closeFabText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
   },
   bottomOverlay: {
     position: 'absolute',
@@ -165,6 +153,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     marginRight: 10,
+    backgroundColor: '#222',
   },
   hostDetails: {
     flex: 1,
@@ -175,34 +164,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 2,
   },
-  followerCountText: {
-    color: '#aaa',
-    fontSize: 11,
-    marginBottom: 4,
-  },
   streamTitle: {
     color: '#ddd',
     fontSize: 12,
-  },
-  followButton: {
-    backgroundColor: '#a77df8',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginLeft: 10,
-  },
-  followingButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderWidth: 1,
-    borderColor: '#a77df8',
-  },
-  followButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  followingButtonText: {
-    color: '#a77df8',
   },
   errorText: {
     color: '#fff',
@@ -210,38 +174,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 50,
   },
-  placeholderContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000',
-    padding: 20,
-  },
-  placeholderText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  placeholderSubtext: {
-    color: '#999',
-    fontSize: 14,
-    textAlign: 'center',
-    marginTop: 10,
-  },
-  closeButton: {
-    backgroundColor: '#F44336',
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 25,
-    marginTop: 30,
-  },
-  closeButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
 });
-
-export default LiveStreamPlayer;
-

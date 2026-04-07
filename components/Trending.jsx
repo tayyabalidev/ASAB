@@ -6,10 +6,13 @@ import {
   Image,
   ImageBackground,
   TouchableOpacity,
+  View,
 } from "react-native";
 
 import { icons } from "../constants";
-import { isVideoMedia } from "../lib/mediaType";
+import { isVideoMedia, isMuxPlaceholderVideo } from "../lib/mediaType";
+import { getIOSCompatibleVideoUrl, getVideoPosterUri, getVideoPlaybackUrls } from "../lib/appwrite";
+import { getPlaybackUriForPost } from "../lib/muxPlayback";
 
 const getPlaybackCandidates = (url) => {
   if (!url) return [];
@@ -41,9 +44,30 @@ const TrendingItem = ({ activeItem, item }) => {
   const [play, setPlay] = useState(false);
   const [sourceIndex, setSourceIndex] = useState(0);
   const isVideo = isVideoMedia(item?.video, item?.postType || "video");
-  const thumbUri = item?.thumbnail || item?.photo || item?.video || null;
-  const videoCandidates = useMemo(() => getPlaybackCandidates(item?.video), [item?.video]);
-  const activeVideoUri = videoCandidates[sourceIndex] || item?.video;
+  const videoPosterUri = useMemo(
+    () => getVideoPosterUri(item?.thumbnail, item?.video),
+    [item?.thumbnail, item?.video]
+  );
+  const thumbUri = isVideo
+    ? videoPosterUri || item?.photo || null
+    : item?.photo || item?.thumbnail || null;
+  const resolvedStream = useMemo(
+    () =>
+      getPlaybackUriForPost(item) ||
+      (!isMuxPlaceholderVideo(item?.video)
+        ? item?.video
+        : null),
+    [item?.video, item?.mux_playback_id, item?.muxPlaybackId]
+  );
+  const videoCandidates = useMemo(() => {
+    if (!resolvedStream) return [];
+    return getVideoPlaybackUrls(resolvedStream);
+  }, [resolvedStream]);
+  const activeVideoUri =
+    videoCandidates[sourceIndex] ||
+    (resolvedStream
+      ? getIOSCompatibleVideoUrl(resolvedStream) || resolvedStream
+      : null);
   const isActive = activeItem === item.$id;
 
   useEffect(() => {
@@ -65,7 +89,7 @@ const TrendingItem = ({ activeItem, item }) => {
       animation={activeItem === item.$id ? zoomIn : zoomOut}
       duration={500}
     >
-      {play && isVideo ? (
+      {play && isVideo && activeVideoUri ? (
         <Video
           source={{ uri: activeVideoUri }}
           className="w-52 h-72 rounded-[33px] mt-3 bg-white/10"
@@ -74,7 +98,7 @@ const TrendingItem = ({ activeItem, item }) => {
           shouldPlay
           isLooping
           progressUpdateIntervalMillis={500}
-          posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
+          posterSource={videoPosterUri ? { uri: videoPosterUri } : undefined}
           usePoster={false}
           onPlaybackStatusUpdate={(status) => {
             if (status.didJustFinish) {
@@ -95,6 +119,7 @@ const TrendingItem = ({ activeItem, item }) => {
             if (isVideo) setPlay(true);
           }}
         >
+          {thumbUri ? (
           <ImageBackground
             source={{
               uri: thumbUri,
@@ -102,6 +127,9 @@ const TrendingItem = ({ activeItem, item }) => {
             className="w-52 h-72 rounded-[33px] my-5 overflow-hidden shadow-lg shadow-black/40"
             resizeMode="cover"
           />
+          ) : (
+            <View className="w-52 h-72 rounded-[33px] my-5 bg-black/40" />
+          )}
 
           {isVideo && (
             <Image
@@ -117,11 +145,11 @@ const TrendingItem = ({ activeItem, item }) => {
 };
 
 const Trending = ({ posts }) => {
-  const [activeItem, setActiveItem] = useState(posts[0]);
+  const [activeItem, setActiveItem] = useState(posts?.[0]?.$id ?? null);
 
   const viewableItemsChanged = ({ viewableItems }) => {
-    if (viewableItems.length > 0) {
-      setActiveItem(viewableItems[0].key);
+    if (viewableItems.length > 0 && viewableItems[0].item?.$id) {
+      setActiveItem(viewableItems[0].item.$id);
     }
   };
 

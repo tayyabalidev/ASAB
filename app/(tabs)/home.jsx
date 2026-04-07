@@ -12,12 +12,13 @@ import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getLatestPosts, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
+import { getAllPosts, getLatestPosts, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, getVideoPosterUri, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
 import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
 import { appwriteConfig } from "../../lib/appwrite";
-import { isVideoMedia } from "../../lib/mediaType";
+import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
+import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -203,14 +204,22 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [videoSourceIndex, setVideoSourceIndex] = useState(0);
   const progressBarTimeoutRef = useRef(null);
+  const resolvedStreamUri = useMemo(
+    () => getPlaybackUriForPost(item),
+    [item?.video, item?.mux_playback_id, item?.muxPlaybackId]
+  );
   const videoPlaybackCandidates = useMemo(
-    () => getVideoPlaybackUrls(item?.video),
-    [item?.video]
+    () => getVideoPlaybackUrls(resolvedStreamUri || ""),
+    [resolvedStreamUri]
   );
   const activeVideoUrl =
     videoPlaybackCandidates[videoSourceIndex] ||
-    getIOSCompatibleVideoUrl(item?.video) ||
-    item?.video;
+    (resolvedStreamUri
+      ? getIOSCompatibleVideoUrl(resolvedStreamUri) || resolvedStreamUri
+      : null);
+  const isMuxEncoding = Boolean(
+    isMuxPlaceholderVideo(item?.video) && !resolvedStreamUri
+  );
   
   // Fetch creator data if creator is a string ID
   // Use a ref to track the creator ID we've already processed to prevent infinite loops
@@ -1091,8 +1100,46 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             
             const videoFilterCSS = getVideoFilterCSS(filterId, videoAdjustments);
             const videoUrl = activeVideoUrl;
-            
-           
+            const posterUri = getVideoPosterUri(item.thumbnail, item.video);
+
+            if (isMuxEncoding || !videoUrl) {
+              return (
+                <View
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    backgroundColor: "#000",
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  {posterUri ? (
+                    <Image
+                      source={{ uri: posterUri }}
+                      style={{
+                        position: "absolute",
+                        width: "100%",
+                        height: "100%",
+                        opacity: 0.35,
+                      }}
+                      resizeMode="contain"
+                    />
+                  ) : null}
+                  <ActivityIndicator size="large" color="#ffffff" />
+                  <Text
+                    style={{
+                      color: "#fff",
+                      marginTop: 14,
+                      fontSize: 14,
+                      paddingHorizontal: 24,
+                      textAlign: "center",
+                    }}
+                  >
+                    {t("home.muxProcessing", "Preparing video…")}
+                  </Text>
+                </View>
+              );
+            }
             
             // Use WebView if there are filters or adjustments to apply CSS filters
             if (videoFilterCSS !== 'none') {
@@ -1170,8 +1217,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                 isMuted={false}
                 useNativeControls={false}
                 progressUpdateIntervalMillis={500}
-                posterSource={item.thumbnail ? { uri: item.thumbnail } : undefined}
-                usePoster={!isVideoReady}
+                posterSource={posterUri ? { uri: posterUri } : undefined}
+                usePoster={Boolean(posterUri) && !isVideoReady}
                 onError={(error) => {
                   if (videoSourceIndex < videoPlaybackCandidates.length - 1) {
                     setVideoSourceIndex((prev) => prev + 1);
@@ -1196,8 +1243,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                   allowsExternalPlayback: false,
                   playInSilentModeIOS: true,
                   ignoreSilentSwitch: 'ignore',
-                  automaticallyWaitsToMinimizeStalling: false,
-                  preferredForwardBufferDuration: 1,
+                  automaticallyWaitsToMinimizeStalling: true,
+                  preferredForwardBufferDuration: 12,
                 })}
               />
             );
@@ -1216,7 +1263,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
           </View>
         )}
         {/* Play/Pause Button - videos only */}
-        {isVideoMedia(item?.video, item?.postType) && (
+        {isVideoMedia(item?.video, item?.postType) && !isMuxEncoding && (
           <TouchableOpacity
             onPress={handlePausePlay}
             style={{ 
@@ -2566,10 +2613,16 @@ const Home = () => {
       }
     };
 
-    const trendingPosterUri =
+    const rawTrendingThumb =
       (item?.thumbnail ? getPhotoUrl(item.thumbnail) : null) ||
       (typeof item?.thumbnail === "string" ? item.thumbnail : null) ||
       null;
+    const trendingPosterUri = getVideoPosterUri(rawTrendingThumb, item?.video);
+    const trendingVideoPlaybackUri =
+      getPlaybackUriForPost(item) ||
+      (!isMuxPlaceholderVideo(item?.video)
+        ? getIOSCompatibleVideoUrl(item?.video) || item?.video
+        : null);
 
     return (
       <View
@@ -2824,9 +2877,10 @@ const Home = () => {
                 );
               })()
             ) : isVideoMedia(item?.video, item?.postType) ? (
+              trendingVideoPlaybackUri ? (
               <Video
                 source={{
-                  uri: item.video,
+                  uri: trendingVideoPlaybackUri,
                 }}
                 style={{ width: '100%', height: '100%' }}
                 resizeMode="contain"
@@ -2844,8 +2898,14 @@ const Home = () => {
                   allowsExternalPlayback: false,
                   playInSilentModeIOS: true,
                   ignoreSilentSwitch: 'ignore',
+                  preferredForwardBufferDuration: 8,
                 })}
               />
+              ) : (
+                <View style={{ width: '100%', height: '100%', backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+                  <ActivityIndicator color="#fff" />
+                </View>
+              )
             ) : (
               <View
                 style={{
@@ -3572,11 +3632,33 @@ const Home = () => {
                     );
                   })()
                 ) : isVideoMedia(trendingModalVideo?.video, trendingModalVideo?.postType) ? (
+                  (() => {
+                    const modalThumbRaw = trendingModalVideo?.thumbnail
+                      ? getPhotoUrl(trendingModalVideo.thumbnail) || trendingModalVideo.thumbnail
+                      : null;
+                    const modalPoster = getVideoPosterUri(modalThumbRaw, trendingModalVideo.video);
+                    const modalStreamUri =
+                      getPlaybackUriForPost(trendingModalVideo) ||
+                      (!isMuxPlaceholderVideo(trendingModalVideo?.video)
+                        ? getIOSCompatibleVideoUrl(trendingModalVideo.video) ||
+                          trendingModalVideo.video
+                        : null);
+                    if (!modalStreamUri) {
+                      return (
+                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+                          <ActivityIndicator color="#fff" size="large" />
+                          <Text style={{ color: theme.textPrimary, marginTop: 12 }}>
+                            {t("home.muxProcessing", "Preparing video…")}
+                          </Text>
+                        </View>
+                      );
+                    }
+                    return (
                   <>
                     <Video
                       ref={trendingVideoRef}
                       source={{ 
-                        uri: trendingModalVideo.video
+                        uri: modalStreamUri
                       }}
                       style={{ flex: 1, width: '100%', height: '100%' }}
                       resizeMode={ResizeMode.CONTAIN}
@@ -3585,18 +3667,14 @@ const Home = () => {
                       isLooping={true}
                       useNativeControls={false}
                       progressUpdateIntervalMillis={500}
-                      posterSource={
-                        trendingModalVideo?.thumbnail
-                          ? { uri: getPhotoUrl(trendingModalVideo.thumbnail) || trendingModalVideo.thumbnail }
-                          : undefined
-                      }
-                      usePoster={Boolean(trendingModalVideo?.thumbnail)}
+                      posterSource={modalPoster ? { uri: modalPoster } : undefined}
+                      usePoster={Boolean(modalPoster)}
                       {...(Platform.OS === 'ios' && {
                         allowsExternalPlayback: false,
                         playInSilentModeIOS: true,
                         ignoreSilentSwitch: 'ignore',
-                        automaticallyWaitsToMinimizeStalling: false,
-                        preferredForwardBufferDuration: 1,
+                        automaticallyWaitsToMinimizeStalling: true,
+                        preferredForwardBufferDuration: 12,
                       })}
                       onError={(error) => {
                       }}
@@ -3635,6 +3713,8 @@ const Home = () => {
                       </Text>
                     </TouchableOpacity>
                   </>
+                    );
+                  })()
                 ) : (
                   <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                     <Text style={{ color: theme.textPrimary, fontSize: 16 }}>
