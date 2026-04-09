@@ -11,13 +11,14 @@ import { useTranslation } from "react-i18next";
 
 import { icons } from "../../../constants";
 import useAppwrite from "../../../lib/useAppwrite";
-import { getUserPosts, getCurrentUser, databases, appwriteConfig } from "../../../lib/appwrite";
+import { getUserPosts, getCurrentUser, databases, appwriteConfig, getVideoPosterUri, getIOSCompatibleVideoUrl } from "../../../lib/appwrite";
 import { useGlobalContext } from "../../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, VideoProgressBar } from "../../../components";
 import CallButton from "../../../components/CallButton";
 import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLike, isPostLiked, getLikeCount } from "../../../lib/appwrite";
 import { images } from "../../../constants";
-import { isVideoMedia } from "../../../lib/mediaType";
+import { isVideoMedia, isMuxPlaceholderVideo } from "../../../lib/mediaType";
+import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../../lib/muxPlayback";
 
 const UserProfile = () => {
   const { id } = useLocalSearchParams();
@@ -52,6 +53,7 @@ const UserProfile = () => {
   const [modalIndex, setModalIndex] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
   const modalVideoRef = useRef(null);
+  const recentLikeActionRef = useRef(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [showProgressBar, setShowProgressBar] = useState(false);
@@ -803,9 +805,7 @@ const UserProfile = () => {
                 >
                   <Image
                     source={{
-                      uri: isVideoMedia(item?.video, item?.postType)
-                        ? (item?.thumbnail || item?.photo || item?.video)
-                        : (item?.photo || item?.thumbnail || item?.video),
+                      uri: getGridThumbnailUriForPost(item),
                     }}
                     style={{ width: '100%', height: '100%' }}
                     resizeMode="cover"
@@ -1293,10 +1293,29 @@ const UserProfile = () => {
                                {/* Media */}
                 <View style={{ flex: 1, backgroundColor: '#000', position: 'relative' }}>
                   {isVideoMedia(modalVideo?.video, modalVideo?.postType) ? (
+                    (() => {
+                      const profilePosterUri =
+                        modalVideo.thumbnail && !String(modalVideo.thumbnail).includes("placeholder")
+                          ? getVideoPosterUri(modalVideo.thumbnail, modalVideo.video)
+                          : undefined;
+                      const profileStreamUri =
+                        getPlaybackUriForPost(modalVideo) ||
+                        (!isMuxPlaceholderVideo(modalVideo?.video)
+                          ? getIOSCompatibleVideoUrl(modalVideo.video) || modalVideo.video
+                          : null);
+                      if (!profileStreamUri) {
+                        return (
+                          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+                            <ActivityIndicator color="#fff" size="large" />
+                            <Text style={{ color: '#fff', marginTop: 12 }}>Preparing video…</Text>
+                          </View>
+                        );
+                      }
+                      return (
                     <>
                       <Video
                         ref={modalVideoRef}
-                        source={{ uri: modalVideo.video }}
+                        source={{ uri: profileStreamUri }}
                         style={{ flex: 1, width: '100%', height: '100%' }}
                         resizeMode={ResizeMode.CONTAIN}
                         shouldPlay={isVideoPlaying}
@@ -1304,7 +1323,8 @@ const UserProfile = () => {
                         isMuted={false}
                         useNativeControls={false}
                         progressUpdateIntervalMillis={250}
-                        posterSource={modalVideo.thumbnail ? { uri: modalVideo.thumbnail } : undefined}
+                        posterSource={profilePosterUri ? { uri: profilePosterUri } : undefined}
+                        usePoster={Boolean(profilePosterUri) && !isVideoReady}
                         onLoad={(status) => {
                           if (status.isLoaded) {
                             setPlaybackDuration(status.durationMillis || 0);
@@ -1396,6 +1416,8 @@ const UserProfile = () => {
                         </Text>
                       </TouchableOpacity>
                     </>
+                      );
+                    })()
                   ) : (
                     <Image
                       source={{ uri: modalVideo?.photo || modalVideo?.thumbnail || modalVideo?.video }}

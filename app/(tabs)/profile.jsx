@@ -13,7 +13,7 @@ import { WebView } from 'react-native-webview';
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
 import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri } from "../../lib/appwrite";
-import { getPlaybackUriForPost } from "../../lib/muxPlayback";
+import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../lib/muxPlayback";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar } from "../../components";
 import { images } from "../../constants";
@@ -353,6 +353,7 @@ const Profile = () => {
   const [modalIndex, setModalIndex] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
   const modalVideoRef = useRef(null);
+  const recentLikeActionRef = useRef(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [showProgressBar, setShowProgressBar] = useState(false);
@@ -2084,9 +2085,7 @@ const Profile = () => {
                         <View style={{ width: '100%', height: '100%' }}>
                           <Image
                             source={{
-                              uri: isVideoMedia(post?.video, post?.postType)
-                                ? (post.thumbnail || post.photo || post.video || 'https://via.placeholder.com/300x300')
-                                : (post.thumbnail || post.photo || post.video || 'https://via.placeholder.com/300x300'),
+                              uri: getGridThumbnailUriForPost(post),
                             }}
                             style={{ width: '100%', height: '100%' }}
                             resizeMode="cover"
@@ -2431,7 +2430,7 @@ const Profile = () => {
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
                   {bookmarkedPosts.map((post, index) => (
                     <View
-                      key={post.$id || post.bookmarkId || index}
+                      key={post.bookmarkId ? String(post.bookmarkId) : `${post.$id ?? "post"}-${index}`}
                       style={{
                         width: '48%',
                         aspectRatio: 1,

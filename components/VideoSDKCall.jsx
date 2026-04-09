@@ -25,7 +25,7 @@ import {
   useParticipant,
   RTCView,
 } from '@videosdk.live/react-native-sdk';
-import { VIDEOSDK_CONFIG } from '../lib/config';
+import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { updateCallStatus, endCall } from '../lib/calls';
@@ -371,22 +371,27 @@ const VideoSDKCall = ({
           return;
         }
 
-        // Dev-only: no token URL configured — VideoSDK may accept apiKey in some setups
-        if (__DEV__ && !VIDEOSDK_CONFIG.tokenServerUrl) {
-          console.warn(
-            '[VideoSDK] No JWT: tokenServerUrl empty. Using apiKey as token (dev only).'
-          );
-          setToken(null);
+        if (!VIDEOSDK_CONFIG.tokenServerUrl) {
+          if (__DEV__) {
+            console.warn(
+              '[VideoSDK] No JWT: tokenServerUrl empty. Using apiKey as token (dev only).'
+            );
+            setToken(null);
+            return;
+          }
+          setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
           return;
         }
 
-        throw new Error('No token returned from server.');
+        setTokenError(
+          'Could not get a secure call token. Check that your token server is running and returns JSON { "token": "..." }.'
+        );
       } catch (error) {
         if (cancelled) return;
         const msg = error?.message || 'Failed to get call token';
         console.error('Error fetching token:', error);
         setTokenError(msg);
-        if (onError) onError(error);
+        // Keep user on call UI with inline error; do not replace whole screen via parent onError
       } finally {
         if (!cancelled) setLoading(false);
       }

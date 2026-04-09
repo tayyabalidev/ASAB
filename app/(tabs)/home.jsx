@@ -1920,6 +1920,7 @@ const Home = () => {
   const searchInputRef = useRef(null);
   const [trendingModalVisible, setTrendingModalVisible] = useState(false);
   const [trendingModalVideo, setTrendingModalVideo] = useState(null);
+  const [trendingModalIndex, setTrendingModalIndex] = useState(0);
   const [isTrendingVideoPlaying, setIsTrendingVideoPlaying] = useState(true);
   const [trendingCommentsCount, setTrendingCommentsCount] = useState(0);
   const [trendingShareCount, setTrendingShareCount] = useState(0);
@@ -1935,6 +1936,7 @@ const Home = () => {
   const [trendingPostingReply, setTrendingPostingReply] = useState(false);
   const [trendingBookmarked, setTrendingBookmarked] = useState(false);
   const trendingVideoRef = useRef(null);
+  const recentTrendingLikeActionRef = useRef(false);
   const lastSyncedVideoIdRef = useRef(null); // Track last synced video ID to prevent re-syncing
   const flatListRef = useRef(null);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -2447,6 +2449,42 @@ const Home = () => {
   };
 
   // Handle trending modal share
+  const navigateToNextTrendingVideo = useCallback(() => {
+    if (trendingModalIndex < combinedLatestPosts.length - 1) {
+      const nextVideo = combinedLatestPosts[trendingModalIndex + 1];
+      setTrendingModalVideo(nextVideo);
+      setTrendingModalIndex(trendingModalIndex + 1);
+      setIsTrendingVideoPlaying(true);
+      setTrendingComments([]);
+      setTrendingNewComment("");
+      recentTrendingLikeActionRef.current = false;
+    }
+  }, [trendingModalIndex, combinedLatestPosts]);
+
+  const navigateToPreviousTrendingVideo = useCallback(() => {
+    if (trendingModalIndex > 0) {
+      const prevVideo = combinedLatestPosts[trendingModalIndex - 1];
+      setTrendingModalVideo(prevVideo);
+      setTrendingModalIndex(trendingModalIndex - 1);
+      setIsTrendingVideoPlaying(true);
+      setTrendingComments([]);
+      setTrendingNewComment("");
+      recentTrendingLikeActionRef.current = false;
+    }
+  }, [trendingModalIndex, combinedLatestPosts]);
+
+  const onTrendingModalGestureEvent = useCallback(
+    (event) => {
+      const { translationY } = event.nativeEvent;
+      if (translationY > 50) {
+        navigateToPreviousTrendingVideo();
+      } else if (translationY < -50) {
+        navigateToNextTrendingVideo();
+      }
+    },
+    [navigateToNextTrendingVideo, navigateToPreviousTrendingVideo]
+  );
+
   const handleTrendingShare = async () => {
     if (!trendingModalVideo) return;
     
@@ -2637,6 +2675,9 @@ const Home = () => {
           activeOpacity={0.85}
           style={{ width: '100%' }}
           onPress={() => {
+            const list = combinedLatestPosts;
+            const idx = list.findIndex((p) => p.$id === item.$id);
+            setTrendingModalIndex(idx >= 0 ? idx : index);
             setTrendingModalVideo(item);
             setTrendingModalVisible(true);
             setIsTrendingVideoPlaying(true);
@@ -3033,7 +3074,7 @@ const Home = () => {
         </TouchableOpacity>
       </View>
     );
-  }, [currentTrendingIndex, trendingCreators, theme, isDarkMode, isRTL, themedColor, t, setTrendingModalVisible]);
+  }, [currentTrendingIndex, trendingCreators, combinedLatestPosts, theme, isDarkMode, isRTL, themedColor, t, setTrendingModalVisible]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.background }}>
@@ -3094,11 +3135,11 @@ const Home = () => {
             }
             style={{ flex: 1 }}
             contentContainerStyle={{ flexGrow: 1 }}
-            removeClippedSubviews={true}
-            maxToRenderPerBatch={3}
+            removeClippedSubviews={false}
+            maxToRenderPerBatch={5}
             updateCellsBatchingPeriod={50}
-            initialNumToRender={2}
-            windowSize={5}
+            initialNumToRender={3}
+            windowSize={11}
             ListHeaderComponent={useMemo(() => (
             // Header Section with User Name and Search
             <View style={{ 
@@ -3400,6 +3441,14 @@ const Home = () => {
       >
         {trendingModalVideo && (
           <GestureHandlerRootView style={{ flex: 1 }}>
+            <PanGestureHandler
+              onGestureEvent={onTrendingModalGestureEvent}
+              onHandlerStateChange={(event) => {
+                if (event.nativeEvent.state === State.END) {
+                  onTrendingModalGestureEvent(event);
+                }
+              }}
+            >
             <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
               {/* Close Button */}
               <TouchableOpacity 
@@ -4119,6 +4168,7 @@ const Home = () => {
                 </View>
               )}
             </SafeAreaView>
+            </PanGestureHandler>
           </GestureHandlerRootView>
         )}
       </Modal>

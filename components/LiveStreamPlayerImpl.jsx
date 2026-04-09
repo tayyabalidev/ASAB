@@ -19,7 +19,7 @@ import {
   isFollowing,
   getFollowerCount,
 } from '../lib/livestream';
-import { VIDEOSDK_CONFIG } from '../lib/config';
+import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { images } from '../constants';
 
@@ -36,17 +36,21 @@ function pickHlsUrl(hlsUrls) {
 
 function LiveHlsViewerInner({ onPlaybackEnded }) {
   const [hlsUrl, setHlsUrl] = useState(null);
+  const [hlsStateText, setHlsStateText] = useState('CONNECTING');
+  const [waitSeconds, setWaitSeconds] = useState(0);
   const player = useVideoPlayer(null, (p) => {
     p.loop = false;
     p.muted = false;
   });
 
   const { join, leave, hlsUrls } = useMeeting({
-    onMeetingJoined: () => {},
+    onMeetingJoined: () => setHlsStateText('MEETING_JOINED'),
     onHlsStarted: ({ downstreamUrl }) => {
+      setHlsStateText('HLS_STARTED');
       if (downstreamUrl) setHlsUrl(downstreamUrl);
     },
     onHlsStateChanged: ({ status, downstreamUrl, playbackHlsUrl }) => {
+      if (status) setHlsStateText(status);
       if (status === 'HLS_PLAYABLE') {
         const u = downstreamUrl || playbackHlsUrl;
         if (u) setHlsUrl(u);
@@ -56,7 +60,10 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
       }
     },
     onMeetingLeft: () => onPlaybackEnded?.(),
-    onError: () => onPlaybackEnded?.(),
+    onError: () => {
+      setHlsStateText('ERROR');
+      onPlaybackEnded?.();
+    },
   });
 
   useEffect(() => {
@@ -87,12 +94,25 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
     };
   }, [join, leave]);
 
+  useEffect(() => {
+    if (hlsUrl) return;
+    const t = setInterval(() => setWaitSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [hlsUrl]);
+
   if (!hlsUrl) {
     return (
       <View style={styles.hlsWaiting}>
         <ActivityIndicator color="#a77df8" size="large" />
         <Text style={styles.hlsWaitingText}>Waiting for live video…</Text>
         <Text style={styles.hlsWaitingHint}>The host may still be starting the stream.</Text>
+        <Text style={styles.hlsStateText}>State: {hlsStateText}</Text>
+        {waitSeconds >= 45 ? (
+          <Text style={styles.hlsTroubleshoot}>
+            Taking longer than expected. Host should confirm HLS started successfully and that the
+            VideoSDK project has interactive live streaming enabled.
+          </Text>
+        ) : null}
       </View>
     );
   }
@@ -164,8 +184,12 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
           setToken(t);
           return;
         }
-        if (__DEV__ && !VIDEOSDK_CONFIG.tokenServerUrl) {
-          setToken(null);
+        if (!VIDEOSDK_CONFIG.tokenServerUrl) {
+          if (__DEV__) {
+            setToken(null);
+            return;
+          }
+          setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
           return;
         }
         throw new Error('No token from server');
@@ -379,6 +403,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 8,
     textAlign: 'center',
+  },
+  hlsStateText: {
+    color: '#a77df8',
+    fontSize: 12,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  hlsTroubleshoot: {
+    color: '#c9c9c9',
+    fontSize: 12,
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   viewerBadge: {
     position: 'absolute',

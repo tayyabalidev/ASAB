@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
-import { VIDEOSDK_CONFIG } from '../lib/config';
+import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { mapLiveQualityToHls } from '../lib/videosdkLiveQuality';
@@ -230,8 +230,12 @@ export default function LiveStreamBroadcasterImpl({
           setToken(t);
           return;
         }
-        if (__DEV__ && !VIDEOSDK_CONFIG.tokenServerUrl) {
-          setToken(null);
+        if (!VIDEOSDK_CONFIG.tokenServerUrl) {
+          if (__DEV__) {
+            setToken(null);
+            return;
+          }
+          setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
           return;
         }
         throw new Error('No token from server');
