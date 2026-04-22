@@ -35,7 +35,21 @@ const GoLive = () => {
   const [description, setDescription] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('General');
   const [selectedQuality, setSelectedQuality] = useState('auto');
+  const [selectedLiveMode, setSelectedLiveMode] = useState('camera');
   const [loading, setLoading] = useState(false);
+
+  const liveModeOptions = [
+    {
+      value: 'camera',
+      title: t('liveGo.liveModeCameraTitle'),
+      subtitle: t('liveGo.liveModeCameraSubtitle'),
+    },
+    {
+      value: 'screen',
+      title: t('liveGo.liveModeScreenTitle'),
+      subtitle: t('liveGo.liveModeScreenSubtitle'),
+    },
+  ];
   const [showPreview, setShowPreview] = useState(false);
   const [facing, setFacing] = useState('front');
   const [permission, requestPermission] = useCameraPermissions();
@@ -49,6 +63,11 @@ const GoLive = () => {
 
     if (!user?.$id) {
       Alert.alert(t('common.error'), t('alerts.loginRequired'));
+      return;
+    }
+
+    if (selectedLiveMode === 'screen') {
+      handleGoLive();
       return;
     }
 
@@ -82,7 +101,8 @@ const GoLive = () => {
         user.$id,
         title.trim(),
         description.trim(),
-        selectedCategory
+        selectedCategory,
+        selectedLiveMode
       );
 
       // Close preview
@@ -94,6 +114,7 @@ const GoLive = () => {
         params: {
           streamId: liveStream.$id,
           quality: selectedQuality,
+          liveMode: selectedLiveMode,
         }
       });
     } catch (error) {
@@ -251,6 +272,42 @@ const GoLive = () => {
             </View>
           </View>
 
+          {/* Live Mode Selection */}
+          <View style={styles.inputSection}>
+            <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('liveGo.liveModeLabel')}
+            </Text>
+            <View style={styles.liveModeContainer}>
+              {liveModeOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.liveModeButton,
+                    selectedLiveMode === option.value && styles.liveModeButtonSelected
+                  ]}
+                  onPress={() => setSelectedLiveMode(option.value)}
+                >
+                  <Text
+                    style={[
+                      styles.liveModeTitle,
+                      selectedLiveMode === option.value && styles.liveModeTitleSelected
+                    ]}
+                  >
+                    {option.title}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.liveModeSubtitle,
+                      selectedLiveMode === option.value && styles.liveModeSubtitleSelected
+                    ]}
+                  >
+                    {option.subtitle}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           {/* Tips Card */}
           <View style={styles.tipsCard}>
             <Text style={[styles.tipsTitle, { textAlign: isRTL ? 'right' : 'left' }]}>
@@ -305,14 +362,23 @@ const GoLive = () => {
                     <Text style={styles.previewQuality}>
                       {t(`liveGo.quality.${selectedQuality}.label`, selectedQuality)}
                     </Text>
+                    <Text style={styles.previewModeText}>
+                      {selectedLiveMode === 'screen'
+                        ? t('liveGo.liveModeScreenTitle')
+                        : t('liveGo.liveModeCameraTitle')}
+                    </Text>
                   </View>
 
-                  <TouchableOpacity 
-                    style={styles.previewFlipButton}
-                    onPress={toggleCameraFacing}
-                  >
-                    <Text style={styles.previewFlipIcon}>🔄</Text>
-                  </TouchableOpacity>
+                  {selectedLiveMode !== 'screen' ? (
+                    <TouchableOpacity 
+                      style={styles.previewFlipButton}
+                      onPress={toggleCameraFacing}
+                    >
+                      <Text style={styles.previewFlipIcon}>🔄</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.previewFlipButtonPlaceholder} />
+                  )}
                 </View>
 
                 {/* Bottom Bar */}
@@ -529,6 +595,37 @@ const styles = StyleSheet.create({
   qualityDescriptionSelected: {
     color: '#bbb',
   },
+  liveModeContainer: {
+    gap: 10,
+  },
+  liveModeButton: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  liveModeButtonSelected: {
+    borderColor: '#a77df8',
+    backgroundColor: 'rgba(167, 125, 248, 0.18)',
+  },
+  liveModeTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  liveModeTitleSelected: {
+    color: '#d8c9ff',
+  },
+  liveModeSubtitle: {
+    color: '#aaa',
+    marginTop: 4,
+    fontSize: 12,
+  },
+  liveModeSubtitleSelected: {
+    color: '#cfc2f5',
+  },
   previewModal: {
     flex: 1,
     backgroundColor: '#000',
@@ -578,6 +675,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textTransform: 'uppercase',
   },
+  previewModeText: {
+    color: '#fff',
+    opacity: 0.85,
+    fontSize: 12,
+    marginTop: 3,
+  },
   previewFlipButton: {
     width: 40,
     height: 40,
@@ -588,6 +691,10 @@ const styles = StyleSheet.create({
   },
   previewFlipIcon: {
     fontSize: 20,
+  },
+  previewFlipButtonPlaceholder: {
+    width: 40,
+    height: 40,
   },
   previewBottomBar: {
     paddingHorizontal: 20,

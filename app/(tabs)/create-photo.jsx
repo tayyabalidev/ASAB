@@ -103,7 +103,8 @@ const CreatePhoto = () => {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
+        // Keep original framing; native crop UI can snap back.
+        allowsEditing: false,
         quality: 0.8,
         exif: false,
       });
@@ -375,11 +376,18 @@ const CreatePhoto = () => {
                 </Text>
 
                 {editedImage ? (
-                  <View style={{ position: 'relative' }}>
+                  <View
+                    style={{
+                      position: 'relative',
+                      borderRadius: 16,
+                      overflow: 'hidden',
+                      backgroundColor: themedColor('rgba(2,6,23,0.85)', '#111827'),
+                    }}
+                  >
                     <Image
                       source={{ uri: editedImage.uri }}
-                      style={{ width: "100%", height: 400, borderRadius: 16, overflow: "hidden" }}
-                      resizeMode="cover"
+                      style={{ width: "100%", height: 400 }}
+                      resizeMode="contain"
                     />
                     {/* Change Photo Button */}
                     <TouchableOpacity

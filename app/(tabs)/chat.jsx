@@ -2211,11 +2211,16 @@ const Chat = () => {
       <Modal visible={showUserSearch} animationType="slide" transparent={true}>
         <SafeAreaView style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)' }}>
           <View style={{ flex: 1, backgroundColor: '#232533', width: '100%', height: '100%' }}>
-            {/* Cancel button in top right */}
-            <TouchableOpacity onPress={() => setShowUserSearch(false)} style={{ position: 'absolute', top: 24, right: 24, zIndex: 10 }}>
-              <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('cancel')}</Text>
-            </TouchableOpacity>
-            <View style={{ padding: 24, paddingTop: 60 }}>
+            <View style={{ paddingHorizontal: 24, paddingTop: 12, paddingBottom: 4, alignItems: 'flex-end' }}>
+              <TouchableOpacity
+                onPress={() => setShowUserSearch(false)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={{ paddingHorizontal: 8, paddingVertical: 6 }}
+              >
+                <Text style={{ color: '#7f5af0', fontSize: 18 }}>{t('cancel')}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ padding: 24, paddingTop: 8 }}>
               <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12, textAlign: 'center' }}>
                 {t('chat.startNewChat')}
               </Text>

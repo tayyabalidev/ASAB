@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Dimensions, TouchableOpacity, Alert, Text, KeyboardAvoidingView, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { LiveStreamPlayer, LiveChatPanel, LiveReactions } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
@@ -9,14 +9,23 @@ import { useTranslation } from 'react-i18next';
 
 const { width, height } = Dimensions.get('window');
 
+/** Expo Router may pass a param as string or string[] */
+function firstRouteParam(value) {
+  if (value == null) return undefined;
+  const v = Array.isArray(value) ? value[0] : value;
+  return typeof v === 'string' ? v : v != null ? String(v) : undefined;
+}
+
 const LiveViewer = () => {
-  const { streamId } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const streamId = firstRouteParam(params.streamId);
   const { user } = useGlobalContext();
   const [stream, setStream] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showChat, setShowChat] = useState(true);
   const [isPiP, setIsPiP] = useState(false);
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!streamId) {
@@ -93,6 +102,15 @@ const LiveViewer = () => {
             onClose={handleClose}
           />
 
+          {stream.liveMode === 'screen' ? (
+            <View
+              pointerEvents="none"
+              style={[styles.liveModePill, { top: insets.top + 10 }]}
+            >
+              <Text style={styles.liveModePillText}>{t('live.modeScreen')}</Text>
+            </View>
+          ) : null}
+
           {/* Live Reactions Overlay */}
           <LiveReactions streamId={streamId} isHost={false} />
 
@@ -141,6 +159,23 @@ const styles = StyleSheet.create({
   loadingText: {
     color: '#fff',
     fontSize: 16,
+  },
+  liveModePill: {
+    position: 'absolute',
+    alignSelf: 'center',
+    zIndex: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  liveModePillText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   chatPanel: {
     position: 'absolute',

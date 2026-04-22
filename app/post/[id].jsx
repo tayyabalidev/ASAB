@@ -13,6 +13,7 @@ import {
   Alert,
   Modal,
   FlatList,
+  Linking,
 } from "react-native";
 import { Video, ResizeMode } from "expo-av";
 import { router, Stack, useLocalSearchParams } from "expo-router";
@@ -243,6 +244,30 @@ const PostDetails = () => {
       router.back();
     } else {
       router.replace("/home");
+    }
+  };
+
+  const postLink = useMemo(() => {
+    const rawLink = typeof post?.link === "string" ? post.link.trim() : "";
+    if (!rawLink || rawLink.toLowerCase() === "null" || rawLink.toLowerCase() === "undefined") {
+      return null;
+    }
+    return rawLink.startsWith("http://") || rawLink.startsWith("https://")
+      ? rawLink
+      : `https://${rawLink}`;
+  }, [post?.link]);
+
+  const handleOpenPostLink = async () => {
+    if (!postLink) return;
+    try {
+      const canOpen = await Linking.canOpenURL(postLink);
+      if (!canOpen) {
+        Alert.alert("Error", "Cannot open this link");
+        return;
+      }
+      await Linking.openURL(postLink);
+    } catch (linkError) {
+      Alert.alert("Error", "Failed to open link");
     }
   };
 
@@ -492,6 +517,23 @@ const PostDetails = () => {
               >
                 {post.description || "No description provided."}
               </Text>
+              {postLink && (
+                <TouchableOpacity
+                  onPress={handleOpenPostLink}
+                  style={{
+                    marginTop: 12,
+                    alignSelf: "flex-start",
+                    backgroundColor: theme.accent,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>
+                    🔗 Open Link
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               <View
                 style={{

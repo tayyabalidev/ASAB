@@ -533,7 +533,7 @@ const UserProfile = () => {
     setModalIndex(index);
     setModalVisible(true);
     setIsVideoPlaying(true);
-    setShowProgressBar(true);
+    setShowProgressBar(false);
     setPlaybackPosition(0);
     setPlaybackDuration(0);
     setIsVideoReady(false);
@@ -545,6 +545,8 @@ const UserProfile = () => {
       setModalVideo(nextVideo);
       setModalIndex(modalIndex + 1);
       setIsVideoPlaying(true);
+      setIsVideoReady(false);
+      setShowProgressBar(false);
       // Reset modal states for new video - will be synced by useEffect
       setComments([]);
       setNewComment("");
@@ -559,6 +561,8 @@ const UserProfile = () => {
       setModalVideo(prevVideo);
       setModalIndex(modalIndex - 1);
       setIsVideoPlaying(true);
+      setIsVideoReady(false);
+      setShowProgressBar(false);
       // Reset modal states for new video - will be synced by useEffect
       setComments([]);
       setNewComment("");
@@ -1340,6 +1344,7 @@ const UserProfile = () => {
                           }
                         }}
                         onError={(error) => {
+                          setIsVideoReady(false);
                         }}
                         onLoadStart={() => {
                         }}
@@ -1384,37 +1389,41 @@ const UserProfile = () => {
                         showProgressBar={showProgressBar}
                         onShowProgressBar={setShowProgressBar}
                         bottomOffset={20}
+                        disableAutoHide={!isVideoPlaying}
                       />
                       
-                      {/* Play/Pause Button */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          if (isVideoPlaying) {
-                            modalVideoRef.current?.pauseAsync();
-                            setIsVideoPlaying(false);
-                          } else {
-                            modalVideoRef.current?.playAsync();
-                            setIsVideoPlaying(true);
-                          }
-                        }}
-                        style={{
-                          position: 'absolute',
-                          top: '50%',
-                          left: '50%',
-                          transform: [{ translateX: -25 }, { translateY: -25 }],
-                          width: 50,
-                          height: 50,
-                          borderRadius: 25,
-                          backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          zIndex: 5
-                        }}
-                      >
-                        <Text style={{ color: '#fff', fontSize: 24 }}>
-                          {isVideoPlaying ? '❚❚' : '▶'}
-                        </Text>
-                      </TouchableOpacity>
+                      {/* Play button stays visible while paused */}
+                      {(showProgressBar || !isVideoPlaying) && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (isVideoPlaying) {
+                              modalVideoRef.current?.pauseAsync();
+                              setIsVideoPlaying(false);
+                            } else {
+                              modalVideoRef.current?.playAsync();
+                              setIsVideoPlaying(true);
+                            }
+                            setShowProgressBar(true);
+                          }}
+                          style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: [{ translateX: -25 }, { translateY: -25 }],
+                            width: 50,
+                            height: 50,
+                            borderRadius: 25,
+                            backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            zIndex: 5
+                          }}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 24 }}>
+                            {isVideoPlaying ? '❚❚' : '▶'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                     </>
                       );
                     })()
@@ -1426,8 +1435,8 @@ const UserProfile = () => {
                     />
                   )}
                   
-                  {/* Fallback thumbnail if video doesn't load */}
-                  {isVideoMedia(modalVideo?.video, modalVideo?.postType) && modalVideo.thumbnail && (
+                  {/* Fallback thumbnail while video is loading/not ready */}
+                  {isVideoMedia(modalVideo?.video, modalVideo?.postType) && modalVideo.thumbnail && !isVideoReady && (
                     <Image
                       source={{ uri: modalVideo.thumbnail }}
                       style={{ 
@@ -1436,7 +1445,7 @@ const UserProfile = () => {
                         left: 0, 
                         width: '100%', 
                         height: '100%',
-                        opacity: 0.3
+                        opacity: 0.1
                       }}
                       resizeMode="cover"
                     />

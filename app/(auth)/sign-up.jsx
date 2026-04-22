@@ -23,7 +23,52 @@ const SignUp = () => {
     username: "",
     email: "",
     password: "",
+    birthday: "",
   });
+
+  const normalizeBirthdayInput = (value = "") => {
+    const digitsOnly = value.replace(/\D/g, "").slice(0, 8);
+    if (digitsOnly.length <= 2) return digitsOnly;
+    if (digitsOnly.length <= 4) {
+      return `${digitsOnly.slice(0, 2)}/${digitsOnly.slice(2)}`;
+    }
+    return `${digitsOnly.slice(0, 2)}/${digitsOnly.slice(2, 4)}/${digitsOnly.slice(4)}`;
+  };
+
+  const parseBirthday = (value = "") => {
+    const parts = value.split("/");
+    if (parts.length !== 3) return null;
+    const month = Number(parts[0]);
+    const day = Number(parts[1]);
+    const year = Number(parts[2]);
+    if (!month || !day || !year) return null;
+    const candidate = new Date(year, month - 1, day);
+    const isValid =
+      candidate.getFullYear() === year &&
+      candidate.getMonth() === month - 1 &&
+      candidate.getDate() === day;
+    return isValid ? candidate : null;
+  };
+
+  const getAgeFromDate = (birthDate) => {
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (
+      monthDiff < 0 ||
+      (monthDiff === 0 && today.getDate() < birthDate.getDate())
+    ) {
+      age -= 1;
+    }
+    return age;
+  };
+
+  const toBirthdayIso = (birthDate) => {
+    const year = birthDate.getFullYear();
+    const month = String(birthDate.getMonth() + 1).padStart(2, "0");
+    const day = String(birthDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}T12:00:00.000Z`;
+  };
 
   // Reset loading states if user successfully logged in
   React.useEffect(() => {
@@ -71,7 +116,7 @@ const SignUp = () => {
 
 
   const submit = async () => {
-    if (form.username === "" || form.email === "" || form.password === "") {
+    if (form.username === "" || form.email === "" || form.password === "" || form.birthday === "") {
       Alert.alert(t("common.error"), t("auth.fillAllFieldsSignup"));
       return;
     }
@@ -79,9 +124,25 @@ const SignUp = () => {
       Alert.alert(t("common.error"), t("auth.enterValidEmail"));
       return;
     }
+    const parsedBirthday = parseBirthday(form.birthday.trim());
+    if (!parsedBirthday) {
+      Alert.alert(t("common.error"), "Birthday must be in MM/DD/YYYY format");
+      return;
+    }
+    const minimumAge = 13;
+    if (getAgeFromDate(parsedBirthday) < minimumAge) {
+      Alert.alert(t("common.error"), `You must be at least ${minimumAge} years old to sign up`);
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const result = await createUser(form.email, form.password, form.username);
+      const result = await createUser(
+        form.email,
+        form.password,
+        form.username,
+        toBirthdayIso(parsedBirthday)
+      );
       setUser(result);
       setIsLogged(true);
       router.replace("/(tabs)/home");
@@ -292,6 +353,15 @@ const SignUp = () => {
             otherStyles="mt-7"
             placeholder={t('auth.passwordPlaceholder')}
             isPassword
+          />
+
+          <FormField
+            title="Birthday"
+            value={form.birthday}
+            handleChangeText={(e) => setForm({ ...form, birthday: normalizeBirthdayInput(e) })}
+            otherStyles="mt-7"
+            keyboardType="number-pad"
+            placeholder="MM/DD/YYYY"
           />
 
           <CustomButton

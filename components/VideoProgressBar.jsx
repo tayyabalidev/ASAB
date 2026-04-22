@@ -11,6 +11,7 @@ const VideoProgressBar = ({
   showProgressBar,
   onShowProgressBar,
   bottomOffset = 90,
+  disableAutoHide = false,
 }) => {
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekPosition, setSeekPosition] = useState(0);
@@ -18,7 +19,7 @@ const VideoProgressBar = ({
 
   // Auto-hide progress bar after 3 seconds
   useEffect(() => {
-    if (showProgressBar) {
+    if (showProgressBar && !disableAutoHide) {
       if (progressBarTimeoutRef.current) {
         clearTimeout(progressBarTimeoutRef.current);
       }
@@ -31,7 +32,7 @@ const VideoProgressBar = ({
         clearTimeout(progressBarTimeoutRef.current);
       }
     };
-  }, [showProgressBar, onShowProgressBar]);
+  }, [showProgressBar, onShowProgressBar, disableAutoHide]);
 
   const formatTime = (milliseconds) => {
     if (!milliseconds || isNaN(milliseconds)) return '0:00';

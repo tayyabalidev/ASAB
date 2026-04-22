@@ -56,19 +56,23 @@ const VideoSDKCallInner = ({
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(callType === 'video');
   const [callDuration, setCallDuration] = useState(0);
+  /** Room joined (VideoSDK) vs peer visible — Appwrite CONNECTED only after peer is in the room */
+  const [meetingJoined, setMeetingJoined] = useState(false);
   
   const durationIntervalRef = useRef(null);
   const callIdRef = useRef(callId);
   const participantsRef = useRef(new Map());
+  const connectedReportedRef = useRef(false);
 
   useEffect(() => {
     callIdRef.current = callId;
+    connectedReportedRef.current = false;
   }, [callId]);
 
   const { join, leave, toggleMic, toggleWebcam, participants, localParticipant } = useMeeting({
     onMeetingJoined: () => {
       console.log('✅ Joined VideoSDK meeting successfully');
-      updateCallStatus(callIdRef.current, CallState.CONNECTED).catch(console.error);
+      setMeetingJoined(true);
     },
     onMeetingLeft: () => {
       console.log('👋 Left VideoSDK meeting');
@@ -94,18 +98,36 @@ const VideoSDKCallInner = ({
 
   participantsRef.current = participants;
 
+  // VideoSDK participant ids are not Appwrite user ids — exclude local by SDK localParticipant
+  const localId = localParticipant?.id;
+  const remoteParticipants = localId
+    ? Array.from(participants.values()).filter((p) => p.id !== localId)
+    : [];
+  // Do not treat "everyone as remote" before localParticipant exists (avoids false "Connected")
+  const remoteConnected = Boolean(localId) && remoteParticipants.length > 0;
+
+  // Mark Appwrite call CONNECTED only once both sides are in the same VideoSDK room
   useEffect(() => {
-    // Start call duration timer
+    if (!remoteConnected || !callIdRef.current || connectedReportedRef.current) return;
+    connectedReportedRef.current = true;
+    updateCallStatus(callIdRef.current, CallState.CONNECTED).catch(console.error);
+  }, [remoteConnected]);
+
+  useEffect(() => {
+    if (!remoteConnected) return;
+
+    setCallDuration(0);
     durationIntervalRef.current = setInterval(() => {
-      setCallDuration(prev => prev + 1);
+      setCallDuration((prev) => prev + 1);
     }, 1000);
 
     return () => {
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
       }
     };
-  }, []);
+  }, [remoteConnected]);
 
   useEffect(() => {
     // Join meeting when component mounts
@@ -135,6 +157,8 @@ const VideoSDKCallInner = ({
   }, [meetingId, join]);
 
   const handleCallEnd = async () => {
+    connectedReportedRef.current = false;
+    setMeetingJoined(false);
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
@@ -184,17 +208,16 @@ const VideoSDKCallInner = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // VideoSDK participant ids are not Appwrite user ids — exclude local by SDK localParticipant
-  const localId = localParticipant?.id;
-  const remoteParticipants = localId
-    ? Array.from(participants.values()).filter((p) => p.id !== localId)
-    : Array.from(participants.values());
-
-  const remoteConnected = remoteParticipants.length > 0;
   const remoteLabel =
     remoteParticipants[0]?.displayName || peerDisplayName || 'Participant';
   const remoteInitial = (remoteLabel.charAt(0) || 'P').toUpperCase();
   const voiceAccent = callType === 'audio' ? UI.accentVoice : UI.accent;
+
+  const audioStatusText = !meetingJoined
+    ? 'Joining call…'
+    : remoteConnected
+      ? 'Connected'
+      : `Waiting for ${peerDisplayName || 'participant'}…`;
 
   const controlsBottom = Math.max(insets.bottom, 20) + 16;
 
@@ -222,9 +245,13 @@ const VideoSDKCallInner = ({
                 <Text style={styles.waitingAvatarText}>{remoteInitial}</Text>
               </View>
               <ActivityIndicator size="small" color={voiceAccent} style={{ marginTop: 20 }} />
-              <Text style={styles.waitingTitle}>Connecting</Text>
+              <Text style={styles.waitingTitle}>
+                {!meetingJoined ? 'Joining call…' : 'Waiting for peer'}
+              </Text>
               <Text style={styles.waitingSubtitle} numberOfLines={2}>
-                Waiting for {peerDisplayName}
+                {!meetingJoined
+                  ? 'Connecting to the room'
+                  : `Waiting for ${peerDisplayName || 'the other person'}`}
               </Text>
             </LinearGradient>
           )}
@@ -251,9 +278,7 @@ const VideoSDKCallInner = ({
           <Text style={styles.audioName}>{remoteLabel}</Text>
           <View style={styles.audioStatusRow}>
             <View style={[styles.statusDot, remoteConnected && styles.statusDotLive]} />
-            <Text style={styles.callStatus}>
-              {remoteConnected ? 'Connected' : 'Connecting…'}
-            </Text>
+            <Text style={styles.callStatus}>{audioStatusText}</Text>
           </View>
         </LinearGradient>
       )}

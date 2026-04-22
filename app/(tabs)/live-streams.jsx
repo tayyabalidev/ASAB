@@ -41,6 +41,12 @@ const LiveStreamCard = ({ stream, onPress, onEndStream, currentUserId, t, isRTL 
           <Text style={styles.viewerIcon}>👁️</Text>
           <Text style={styles.viewerText}>{stream.viewerCount || 0}</Text>
         </View>
+
+        {stream.liveMode === 'screen' ? (
+          <View style={[styles.modeBadge, styles.modeBadgeScreen]}>
+            <Text style={styles.modeBadgeText}>{t('live.modeScreen')}</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.cardInfo}>
@@ -320,6 +326,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
+  },
+  modeBadge: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    maxWidth: '70%',
+  },
+  modeBadgeScreen: {
+    backgroundColor: 'rgba(52, 152, 219, 0.92)',
+  },
+  modeBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   cardInfo: {
     padding: 15,

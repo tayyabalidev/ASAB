@@ -227,6 +227,7 @@ const CallScreen = () => {
           handleCallEnd();
         } else if (payload.status === CallState.CONNECTING || payload.status === CallState.CONNECTED) {
           setCallState('connecting');
+          setCallData(payload);
         }
       });
     } catch (err) {

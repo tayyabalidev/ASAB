@@ -107,7 +107,7 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
         <Text style={styles.hlsWaitingText}>Waiting for live video…</Text>
         <Text style={styles.hlsWaitingHint}>The host may still be starting the stream.</Text>
         <Text style={styles.hlsStateText}>State: {hlsStateText}</Text>
-        {waitSeconds >= 45 ? (
+        {waitSeconds >= 20 ? (
           <Text style={styles.hlsTroubleshoot}>
             Taking longer than expected. Host should confirm HLS started successfully and that the
             VideoSDK project has interactive live streaming enabled.

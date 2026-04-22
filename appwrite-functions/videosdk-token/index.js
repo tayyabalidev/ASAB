@@ -96,7 +96,7 @@ module.exports = async ({ req, res, log }) => {
 
     const payload = {
       apikey: apiKey,
-      permissions: ['allow_join'],
+      permissions: ['allow_join', 'allow_mod'],
       version: 2,
       roles: ['rtc'],
     };

@@ -199,6 +199,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [showProgressBar, setShowProgressBar] = useState(false);
+  const [showPlayPauseOverlay, setShowPlayPauseOverlay] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekPosition, setSeekPosition] = useState(0);
   const [isVideoReady, setIsVideoReady] = useState(false);
@@ -404,6 +405,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     setPlaybackDuration(0);
     setSeekPosition(0);
     setVideoSourceIndex(0);
+    setShowPlayPauseOverlay(false);
   }, [item.$id]);
 
   // Handle visibility changes and home focus
@@ -418,11 +420,13 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
         }
         progressBarTimeoutRef.current = setTimeout(() => {
           setShowProgressBar(false);
+          setShowPlayPauseOverlay(false);
         }, 3000);
       }
     } else {
       setPlay(false);
       setShowProgressBar(false);
+      setShowPlayPauseOverlay(false);
     }
   }, [isVisible, isHomeFocused]);
 
@@ -436,15 +440,16 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   }, []);
 
   const handleVideoPress = () => {
-    // Only show progress bar when video is tapped, don't pause/play
+    // Tap: show progress bar and play/pause control briefly (do not toggle play here)
     if (isVideoMedia(item?.video, item?.postType)) {
       setShowProgressBar(true);
-      // Hide progress bar after 3 seconds
+      setShowPlayPauseOverlay(true);
       if (progressBarTimeoutRef.current) {
         clearTimeout(progressBarTimeoutRef.current);
       }
       progressBarTimeoutRef.current = setTimeout(() => {
         setShowProgressBar(false);
+        setShowPlayPauseOverlay(false);
       }, 3000);
     }
   };
@@ -452,11 +457,13 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
   const handlePausePlay = () => {
     setPlay((prev) => !prev);
     setShowProgressBar(true);
+    setShowPlayPauseOverlay(true);
     if (progressBarTimeoutRef.current) {
       clearTimeout(progressBarTimeoutRef.current);
     }
     progressBarTimeoutRef.current = setTimeout(() => {
       setShowProgressBar(false);
+      setShowPlayPauseOverlay(false);
     }, 3000);
   };
 
@@ -1262,8 +1269,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t("home.noVideoAvailable")}</Text>
           </View>
         )}
-        {/* Play/Pause Button - videos only */}
-        {isVideoMedia(item?.video, item?.postType) && !isMuxEncoding && (
+        {/* Play/Pause Button - videos only; shown after tap (same chrome as progress bar) */}
+        {showPlayPauseOverlay && isVideoMedia(item?.video, item?.postType) && !isMuxEncoding && (
           <TouchableOpacity
             onPress={handlePausePlay}
             style={{ 
@@ -1922,6 +1929,7 @@ const Home = () => {
   const [trendingModalVideo, setTrendingModalVideo] = useState(null);
   const [trendingModalIndex, setTrendingModalIndex] = useState(0);
   const [isTrendingVideoPlaying, setIsTrendingVideoPlaying] = useState(true);
+  const [showTrendingPlayOverlay, setShowTrendingPlayOverlay] = useState(false);
   const [trendingCommentsCount, setTrendingCommentsCount] = useState(0);
   const [trendingShareCount, setTrendingShareCount] = useState(0);
   const [trendingLiked, setTrendingLiked] = useState(false);
@@ -1936,6 +1944,7 @@ const Home = () => {
   const [trendingPostingReply, setTrendingPostingReply] = useState(false);
   const [trendingBookmarked, setTrendingBookmarked] = useState(false);
   const trendingVideoRef = useRef(null);
+  const trendingPlayOverlayTimeoutRef = useRef(null);
   const recentTrendingLikeActionRef = useRef(false);
   const lastSyncedVideoIdRef = useRef(null); // Track last synced video ID to prevent re-syncing
   const flatListRef = useRef(null);
@@ -2001,6 +2010,16 @@ const Home = () => {
       return dateB - dateA;
     });
   }, [latestPosts, latestPhotos]);
+
+  const trendingCarouselPosts = useMemo(
+    () => (combinedLatestPosts || []).slice(0, 50),
+    [combinedLatestPosts]
+  );
+
+  useEffect(() => {
+    const maxI = Math.max(0, trendingCarouselPosts.length - 1);
+    setCurrentTrendingIndex((i) => Math.min(i, maxI));
+  }, [trendingCarouselPosts.length]);
   
   const [trendingCreators, setTrendingCreators] = useState({});
   const fetchedTrendingCreatorIds = useRef(new Set());
@@ -2279,22 +2298,29 @@ const Home = () => {
     }
   }, [trendingModalVisible]);
 
-  // Handle trending videos scroll to determine center video
-  const handleTrendingScroll = (event) => {
-    const scrollX = event.nativeEvent.contentOffset.x;
-    // Calculate item width: center video (130) + margins (16 total), side videos (110) + margins (16 total)
-    // Use average width for calculation
-    const averageItemWidth = 126; // Average of 146 (130+16) and 126 (110+16)
-    const centerIndex = Math.round(scrollX / averageItemWidth);
-    
-    // Clamp the index between 0 and the number of videos - 1
-    const maxIndex = Math.max(0, (latestPosts?.length || 1) - 1);
-    const newIndex = Math.max(0, Math.min(centerIndex, maxIndex));
-    
-    if (newIndex !== currentTrendingIndex && newIndex < (combinedLatestPosts?.length || 0)) {
-      setCurrentTrendingIndex(newIndex);
+  useEffect(() => {
+    setShowTrendingPlayOverlay(false);
+    if (trendingPlayOverlayTimeoutRef.current) {
+      clearTimeout(trendingPlayOverlayTimeoutRef.current);
+      trendingPlayOverlayTimeoutRef.current = null;
     }
-  };
+  }, [trendingModalVisible, trendingModalVideo?.$id]);
+
+  // Handle trending videos scroll to determine center video
+  const handleTrendingScroll = useCallback(
+    (event) => {
+      const scrollX = event.nativeEvent.contentOffset.x;
+      // Calculate item width: center video (130) + margins (16 total), side videos (110) + margins (16 total)
+      // Use average width for calculation
+      const averageItemWidth = 126; // Average of 146 (130+16) and 126 (110+16)
+      const centerIndex = Math.round(scrollX / averageItemWidth);
+      const len = trendingCarouselPosts.length;
+      const maxIndex = Math.max(0, len - 1);
+      const newIndex = Math.max(0, Math.min(centerIndex, maxIndex));
+      setCurrentTrendingIndex((prev) => (newIndex !== prev ? newIndex : prev));
+    },
+    [trendingCarouselPosts.length]
+  );
 
 
   // Handle trending modal like
@@ -3315,28 +3341,25 @@ const Home = () => {
                     snapToInterval={146}
                     snapToAlignment="center"
                     pagingEnabled={false}
+                    onScroll={handleTrendingScroll}
+                    scrollEventThrottle={16}
                   >
-                    {combinedLatestPosts.slice(0, 5).map((item, index) => renderTrendingItem({ item, index }))}
+                    {trendingCarouselPosts.map((item, index) => renderTrendingItem({ item, index }))}
                   </ScrollView>
                   
-                  {/* Carousel Indicators */}
-                  <View style={{ 
-                    flexDirection: 'row', 
-                    justifyContent: 'center', 
-                  }}>
-                    {combinedLatestPosts.slice(0, 4).map((_, index) => (
-                      <View 
-                        key={index}
-                        style={{ 
-                          width: 8, 
-                          height: 8, 
-                          borderRadius: 4, 
-                          backgroundColor: index === 1 ? theme.accent : themedColor('rgba(255,255,255,0.3)', 'rgba(15,23,42,0.2)'), 
-                          marginHorizontal: 4 
-                        }} 
-                      />
-                    ))}
-                  </View>
+                  {/* Carousel position (many items; avoids dozens of dot indicators) */}
+                  {trendingCarouselPosts.length > 1 ? (
+                    <Text
+                      style={{
+                        textAlign: 'center',
+                        marginTop: 10,
+                        fontSize: 12,
+                        color: themedColor('rgba(255,255,255,0.55)', 'rgba(15,23,42,0.55)'),
+                      }}
+                    >
+                      {currentTrendingIndex + 1} / {trendingCarouselPosts.length}
+                    </Text>
+                  ) : null}
                 </View>
               ) : null}
               
@@ -3378,7 +3401,7 @@ const Home = () => {
                 </View>
               </View>
             </View>
-        ), [selectedTab, combinedLatestPosts, trendingCreators, searchQuery, isSearching, searchResults, user, theme, isRTL, isDarkMode, themedColor, t, currentTrendingIndex, renderTrendingItem])}
+        ), [selectedTab, combinedLatestPosts, trendingCarouselPosts, trendingCreators, searchQuery, isSearching, searchResults, user, theme, isRTL, isDarkMode, themedColor, t, currentTrendingIndex, renderTrendingItem, handleTrendingScroll])}
         />
         
         {/* Scroll to Top Button */}
@@ -3703,7 +3726,20 @@ const Home = () => {
                       );
                     }
                     return (
-                  <>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    style={{ flex: 1, width: '100%', height: '100%' }}
+                    onPress={() => {
+                      setShowTrendingPlayOverlay(true);
+                      if (trendingPlayOverlayTimeoutRef.current) {
+                        clearTimeout(trendingPlayOverlayTimeoutRef.current);
+                      }
+                      trendingPlayOverlayTimeoutRef.current = setTimeout(() => {
+                        setShowTrendingPlayOverlay(false);
+                        trendingPlayOverlayTimeoutRef.current = null;
+                      }, 3000);
+                    }}
+                  >
                     <Video
                       ref={trendingVideoRef}
                       source={{ 
@@ -3731,17 +3767,24 @@ const Home = () => {
                         
                       }}
                     />
-                    
-                    {/* Play/Pause Button - Only for videos */}
+                    {showTrendingPlayOverlay ? (
                     <TouchableOpacity
-                      onPress={() => {
+                      onPress={async () => {
                         if (isTrendingVideoPlaying) {
-                          trendingVideoRef.current?.pauseAsync();
+                          await trendingVideoRef.current?.pauseAsync();
                           setIsTrendingVideoPlaying(false);
                         } else {
-                          trendingVideoRef.current?.playAsync();
+                          await trendingVideoRef.current?.playAsync();
                           setIsTrendingVideoPlaying(true);
                         }
+                        setShowTrendingPlayOverlay(true);
+                        if (trendingPlayOverlayTimeoutRef.current) {
+                          clearTimeout(trendingPlayOverlayTimeoutRef.current);
+                        }
+                        trendingPlayOverlayTimeoutRef.current = setTimeout(() => {
+                          setShowTrendingPlayOverlay(false);
+                          trendingPlayOverlayTimeoutRef.current = null;
+                        }, 3000);
                       }}
                       style={{
                         position: 'absolute',
@@ -3761,7 +3804,8 @@ const Home = () => {
                         {isTrendingVideoPlaying ? '❚❚' : '►'}
                       </Text>
                     </TouchableOpacity>
-                  </>
+                    ) : null}
+                  </TouchableOpacity>
                     );
                   })()
                 ) : (

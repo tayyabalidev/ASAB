@@ -474,8 +474,8 @@ const Create = () => {
 
       // Add type-specific options
       if (selectType === "image") {
-        pickerOptions.allowsEditing = true;
-        pickerOptions.aspect = [16, 9];
+        // Keep original framing; avoid native crop UI resets.
+        pickerOptions.allowsEditing = false;
       } else if (selectType === "video") {
         pickerOptions.allowsEditing = false; // Disable editing for videos (we handle trimming separately)
         pickerOptions.videoMaxDuration = 360; // Support up to 6 minutes
@@ -611,6 +611,7 @@ const Create = () => {
           setForm({
             ...form,
             video: file,
+            thumbnail: null,
           });
           setIsMediaEdited(false); // Reset edit flag when new video is selected
           // Reset all video editing states
@@ -2595,6 +2596,29 @@ const Create = () => {
                                   </Text>
                                 </View>
                               )}
+                              {form.thumbnail && (
+                                <View
+                                  style={{
+                                    position: "absolute",
+                                    top: 10,
+                                    left: 10,
+                                    backgroundColor: "rgba(0,0,0,0.7)",
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 6,
+                                    borderRadius: 8,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      color: "#fff",
+                                      fontSize: 12,
+                                      fontWeight: "600",
+                                    }}
+                                  >
+                                    🖼️ Custom cover
+                                  </Text>
+                                </View>
+                              )}
                             </View>
                           ) : (
                             <TouchableOpacity onPress={() => openPicker("video")}>
@@ -2649,7 +2673,9 @@ const Create = () => {
                         )}
                         {form.video && (
                           <TouchableOpacity
-                            onPress={() => setForm({ ...form, video: null })}
+                            onPress={() =>
+                              setForm({ ...form, video: null, thumbnail: null })
+                            }
                             style={{
                               position: "absolute",
                               top: 10,
@@ -2877,6 +2903,42 @@ const Create = () => {
                               }}
                             >
                               Cover
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={() => openPicker("image")}
+                            style={{
+                              paddingVertical: 12,
+                              paddingHorizontal: 16,
+                              borderRadius: 12,
+                              backgroundColor: themedColor(
+                                "rgba(15,23,42,0.6)",
+                                theme.surface
+                              ),
+                              borderWidth: 1,
+                              borderColor: form.thumbnail
+                                ? theme.accent
+                                : theme.border,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minWidth: 96,
+                            }}
+                          >
+                            <Feather
+                              name="image"
+                              size={20}
+                              color={theme.textPrimary}
+                            />
+                            <Text
+                              style={{
+                                color: theme.textPrimary,
+                                fontSize: 12,
+                                fontFamily: "Poppins-Medium",
+                                marginTop: 4,
+                              }}
+                            >
+                              {form.thumbnail ? "Thumbnail ✓" : "Thumbnail"}
                             </Text>
                           </TouchableOpacity>
 
@@ -3935,7 +3997,7 @@ const Create = () => {
                                 img {
                                   width: 100%;
                                   height: 100%;
-                                  object-fit: cover;
+                                  object-fit: contain;
                                   display: block;
                                   filter: ${(() => {
                                     // If image came from PhotoEditor, adjustments are already baked in
@@ -4141,7 +4203,7 @@ const Create = () => {
                                             img {
                                               width: 100%;
                                               height: 100%;
-                                              object-fit: cover;
+                                              object-fit: contain;
                                               display: block;
                                               filter: ${filterCSS};
                                             }
@@ -6228,7 +6290,7 @@ const Create = () => {
                                   img {
                                     width: 100%;
                                     height: 100%;
-                                    object-fit: cover;
+                                    object-fit: contain;
                                     display: block;
                                     filter: ${(() => {
                                       // If image came from PhotoEditor, adjustments are already baked in

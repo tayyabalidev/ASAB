@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { router, useFocusEffect } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Image, FlatList, TouchableOpacity, Modal, Text, TextInput, Alert, Platform, ScrollView, ActivityIndicator, KeyboardAvoidingView, Share, Linking } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Image, FlatList, TouchableOpacity, Modal, Text, TextInput, Alert, Platform, ScrollView, ActivityIndicator, KeyboardAvoidingView, Share, Linking, useWindowDimensions } from "react-native";
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as ImagePicker from "expo-image-picker";
@@ -337,11 +337,15 @@ const Profile = () => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [newUsername, setNewUsername] = useState(user?.username || "");
   const [newAvatar, setNewAvatar] = useState(user?.avatar || "");
+  const [newBio, setNewBio] = useState(user?.bio || "");
+  const [newBirthday, setNewBirthday] = useState(user?.birthday || "");
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   // Re-enable privacy states
   const [isPrivate, setIsPrivate] = useState(user?.isPrivate || false);
   const [pendingRequests, setPendingRequests] = useState(user?.pendingRequests || []);
+  const [editFocusKey, setEditFocusKey] = useState(null);
+  const [usernameShowError, setUsernameShowError] = useState(false);
 
   // Video playback state
   const [playingVideo, setPlayingVideo] = useState(null);
@@ -404,6 +408,7 @@ const Profile = () => {
   
   // Notification count state
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const MINIMUM_PROFILE_AGE = 18;
   
   // Delete handlers
   const handleDeleteVideo = async (videoId, index, e) => {
@@ -626,6 +631,76 @@ const Profile = () => {
       day: 'numeric', 
       year: 'numeric' 
     });
+  };
+
+  const birthdayToInput = (value = "") => {
+    if (!value) return "";
+    if (value.includes("/")) return normalizeBirthdayInput(value);
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "";
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    const year = String(parsed.getFullYear());
+    return `${month}/${day}/${year}`;
+  };
+
+  const normalizeBirthdayInput = (value = "") => {
+    const digitsOnly = value.replace(/\D/g, "").slice(0, 8);
+    if (digitsOnly.length <= 2) return digitsOnly;
+    if (digitsOnly.length <= 4) {
+      return `${digitsOnly.slice(0, 2)}/${digitsOnly.slice(2)}`;
+    }
+    return `${digitsOnly.slice(0, 2)}/${digitsOnly.slice(2, 4)}/${digitsOnly.slice(4)}`;
+  };
+
+  const parseBirthday = (value = "") => {
+    const parts = value.split("/");
+    if (parts.length !== 3) return null;
+    const month = Number(parts[0]);
+    const day = Number(parts[1]);
+    const year = Number(parts[2]);
+    if (!month || !day || !year) return null;
+    const candidate = new Date(year, month - 1, day);
+    const isValid =
+      candidate.getFullYear() === year &&
+      candidate.getMonth() === month - 1 &&
+      candidate.getDate() === day;
+    return isValid ? candidate : null;
+  };
+
+  const toBirthdayIso = (birthDate) => {
+    if (!birthDate) return "";
+    const year = birthDate.getFullYear();
+    const month = String(birthDate.getMonth() + 1).padStart(2, "0");
+    const day = String(birthDate.getDate()).padStart(2, "0");
+    // Noon UTC avoids timezone shifts when client parses date for display.
+    return `${year}-${month}-${day}T12:00:00.000Z`;
+  };
+
+  const formatBirthdayDisplay = (value = "") => {
+    if (!value) return "";
+    if (value.includes("/")) return value;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const getAgeFromDate = (birthDate) => {
+    if (!birthDate) return null;
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (
+      monthDiff < 0 ||
+      (monthDiff === 0 && today.getDate() < birthDate.getDate())
+    ) {
+      age -= 1;
+    }
+    return age;
   };
 
   const handleLinkStripeAccount = async () => {
@@ -872,9 +947,13 @@ const Profile = () => {
   const openEditModal = () => {
     setNewUsername(user?.username || "");
     setNewAvatar(user?.avatar || "");
+    setNewBio(user?.bio || "");
+    setNewBirthday(birthdayToInput(user?.birthday || ""));
     // Re-enable privacy states
     setIsPrivate(user?.isPrivate || false);
     setPendingRequests(user?.pendingRequests || []);
+    setEditFocusKey(null);
+    setUsernameShowError(false);
     setEditModalVisible(true);
   };
 
@@ -928,13 +1007,39 @@ const Profile = () => {
 
   const saveProfileChanges = async () => {
     if (!newUsername.trim()) {
+      setUsernameShowError(true);
       Alert.alert(t('common.error'), t('profile.alerts.usernameEmpty'));
       return;
+    }
+    const trimmedBirthday = newBirthday.trim();
+    let birthdayToStore = "";
+    if (trimmedBirthday) {
+      const parsedBirthday = parseBirthday(trimmedBirthday);
+      if (!parsedBirthday) {
+        Alert.alert(t('common.error'), "Birthday must be in MM/DD/YYYY format");
+        return;
+      }
+      const age = getAgeFromDate(parsedBirthday);
+      if (age < MINIMUM_PROFILE_AGE) {
+        Alert.alert(
+          t('common.error'),
+          `You must be at least ${MINIMUM_PROFILE_AGE} years old to use the app`
+        );
+        return;
+      }
+      birthdayToStore = toBirthdayIso(parsedBirthday);
     }
     setSaving(true);
     try {
       // Re-enable isPrivate parameter
-      const updatedUser = await updateUserProfile(user.$id, newUsername, newAvatar, isPrivate);
+      const updatedUser = await updateUserProfile(
+        user.$id,
+        newUsername,
+        newAvatar,
+        isPrivate,
+        newBio.trim(),
+        birthdayToStore
+      );
       setUser(updatedUser);
       Alert.alert(t('common.success'), t('profile.alerts.saveProfileSuccess'));
       setEditModalVisible(false);
@@ -1023,7 +1128,7 @@ const Profile = () => {
     setModalIndex(index);
     setModalVisible(true);
     setIsVideoPlaying(true);
-    setShowProgressBar(true);
+    setShowProgressBar(false);
     setPlaybackPosition(0);
     setPlaybackDuration(0);
     setIsVideoReady(false);
@@ -1035,6 +1140,8 @@ const Profile = () => {
       setModalVideo(nextVideo);
       setModalIndex(modalIndex + 1);
       setIsVideoPlaying(true);
+      setIsVideoReady(false);
+      setShowProgressBar(false);
       // Reset modal states for new video - will be synced by useEffect
       setComments([]);
       setNewComment("");
@@ -1049,6 +1156,8 @@ const Profile = () => {
       setModalVideo(prevVideo);
       setModalIndex(modalIndex - 1);
       setIsVideoPlaying(true);
+      setIsVideoReady(false);
+      setShowProgressBar(false);
       // Reset modal states for new video - will be synced by useEffect
       setComments([]);
       setNewComment("");
@@ -1311,6 +1420,28 @@ const Profile = () => {
     [isDarkMode]
   );
 
+  const { width: windowWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  const profileEditBirthdayHint = useMemo(() => {
+    const birthdayTrim = newBirthday.trim();
+    if (!birthdayTrim) {
+      return { variant: "neutral", message: `Optional · ${MINIMUM_PROFILE_AGE}+ · MM/DD/YYYY` };
+    }
+    if (birthdayTrim.length < 10) {
+      return { variant: "neutral", message: "Complete MM/DD/YYYY." };
+    }
+    const parsedBirthday = parseBirthday(birthdayTrim);
+    if (!parsedBirthday) {
+      return { variant: "error", message: "That date is not valid." };
+    }
+    const age = getAgeFromDate(parsedBirthday);
+    if (age < MINIMUM_PROFILE_AGE) {
+      return { variant: "error", message: `Must be at least ${MINIMUM_PROFILE_AGE} years old.` };
+    }
+    return { variant: "success", message: "Date looks good." };
+  }, [newBirthday]);
+
   const supportGradient = useMemo(
     () => (isDarkMode ? ["#34D399", "#059669"] : ["#4ADE80", "#22C55E"]),
     [isDarkMode]
@@ -1359,326 +1490,502 @@ const Profile = () => {
             bottom: 0,
             backgroundColor: themedColor('rgba(0, 0, 0, 0.45)', 'rgba(255, 255, 255, 0.85)')
           }} />
-          {/* Header with logout, notification and menu */}
-          <View className="flex-row justify-between items-center px-4 pt-4 pb-6">
-            <TouchableOpacity onPress={logout}>
-              <Image
-                source={icons.logout}
-                resizeMode="contain"
-                className="w-6 h-6"
-              />
+          {/* Header — compact toolbar on same background + overlay */}
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+              paddingHorizontal: 16,
+              paddingTop: 10,
+              paddingBottom: 14,
+            }}
+          >
+            <TouchableOpacity
+              onPress={logout}
+              accessibilityRole="button"
+              accessibilityLabel={t("profile.header.logout", "Log out")}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: themedColor("rgba(0,0,0,0.28)", "rgba(255,255,255,0.55)"),
+                borderWidth: 1,
+                borderColor: themedColor("rgba(255,255,255,0.12)", "rgba(15,23,42,0.08)"),
+              }}
+            >
+              <Image source={icons.logout} resizeMode="contain" style={{ width: 22, height: 22 }} />
             </TouchableOpacity>
-            <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
-              <TouchableOpacity onPress={() => router.push('/chat')} style={{ position: 'relative' }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => router.push("/chat")}
+                accessibilityRole="button"
+                style={{ position: "relative" }}
+              >
                 <Image
                   source={icons.messages}
                   resizeMode="contain"
                   style={{ width: 66, height: 66, tintColor: theme.textPrimary }}
                 />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => router.push('/inbox')} style={{ position: 'relative' }}>
-                <Feather name="bell" size={24} color={theme.textPrimary} />
-                {unreadNotificationCount > 0 && (
-                  <View style={{
-                    position: 'absolute',
-                    top: -6,
-                    right: -6,
-                    backgroundColor: '#ff4757',
-                    borderRadius: 10,
-                    minWidth: 20,
-                    height: 20,
-                    paddingHorizontal: 6,
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    borderWidth: 2,
-                    borderColor: theme.background,
-                  }}>
-                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>
-                      {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+              <TouchableOpacity
+                onPress={() => router.push("/inbox")}
+                accessibilityRole="button"
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: themedColor("rgba(0,0,0,0.28)", "rgba(255,255,255,0.55)"),
+                  borderWidth: 1,
+                  borderColor: themedColor("rgba(255,255,255,0.12)", "rgba(15,23,42,0.08)"),
+                }}
+              >
+                <Feather name="bell" size={20} color={theme.textPrimary} />
+                {unreadNotificationCount > 0 ? (
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      right: 4,
+                      backgroundColor: theme.danger,
+                      borderRadius: 10,
+                      minWidth: 18,
+                      height: 18,
+                      paddingHorizontal: 5,
+                      justifyContent: "center",
+                      alignItems: "center",
+                      borderWidth: 2,
+                      borderColor: themedColor("rgba(15,23,42,0.9)", "#fff"),
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>
+                      {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
                     </Text>
                   </View>
-                )}
+                ) : null}
               </TouchableOpacity>
-              <TouchableOpacity onPress={openEditModal}>
-                <Image
-                  source={icons.menu}
-                  resizeMode="contain"
-                  className="w-6 h-6"
-                />
+              <TouchableOpacity
+                onPress={openEditModal}
+                accessibilityRole="button"
+                accessibilityLabel={t("profile.modals.editTitle")}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: themedColor("rgba(0,0,0,0.28)", "rgba(255,255,255,0.55)"),
+                  borderWidth: 1,
+                  borderColor: themedColor("rgba(255,255,255,0.12)", "rgba(15,23,42,0.08)"),
+                }}
+              >
+                <Image source={icons.menu} resizeMode="contain" style={{ width: 24, height: 24 }} />
               </TouchableOpacity>
             </View>
           </View>
 
-         {/* Profile Section */}
-          <View style={{ alignItems: 'center', paddingHorizontal: 16, marginBottom: 32, marginTop: 24 }}>
-            {/* Profile Picture */}
+          {/* Profile hero card */}
+          <View style={{ paddingHorizontal: 16, marginBottom: 20 }}>
             <View
               style={{
-                width: 96,
-                height: 96,
-                borderRadius: 24,
-                borderWidth: 2,
-                borderColor: theme.accent,
-                backgroundColor: theme.surface,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 16,
-                overflow: 'hidden',
+                alignSelf: "center",
+                width: "100%",
+                maxWidth: Math.min(440, windowWidth - 32),
+                padding: 22,
+                borderRadius: 20,
+                backgroundColor: themedColor("rgba(15,23,42,0.58)", "rgba(255,255,255,0.94)"),
+                borderWidth: 1,
+                borderColor: themedColor("rgba(148,163,184,0.22)", theme.border),
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: isDarkMode ? 0.35 : 0.1,
+                shadowRadius: 20,
+                elevation: 8,
               }}
             >
-              {user?.avatar ? (
-                <Image
-                  source={{ uri: user.avatar }}
-                  style={{ width: '92%', height: '92%', borderRadius: 18 }}
-                  resizeMode="cover"
-                />
-              ) : (
-                <Text style={{ color: theme.textPrimary, fontSize: 24, fontWeight: '700' }}>
-                  {getUserInitials(user?.username)}
-                </Text>
-              )}
-            </View>
-
-            {/* Username and Handle */}
-            <Text
-              style={{
-                color: theme.textPrimary,
-                fontSize: 22,
-                fontWeight: '700',
-                marginBottom: 6,
-                textAlign: 'center',
-              }}
-            >
-              {user?.username || t('profile.general.userPlaceholder')}
-            </Text>
-            <Text
-              style={{
-                color: theme.textSecondary,
-                fontSize: 14,
-                marginBottom: 20,
-              }}
-            >
-              @{user?.username || t('profile.general.handlePlaceholder')}
-            </Text>
-
-            {/* Statistics */}
-            <View style={{ flexDirection: 'row', gap: 28, marginBottom: 24 }}>
-              <TouchableOpacity
-                style={{ alignItems: 'center' }}
-                onPress={() => openFollowModal('following')}
+            <View style={{ alignItems: "center" }}>
+              <View
+                style={{
+                  width: 108,
+                  height: 108,
+                  borderRadius: 54,
+                  padding: 3,
+                  backgroundColor: theme.accentSoft,
+                  marginBottom: 16,
+                }}
               >
-                <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '700' }}>
-                  {following?.length || 0}
-                </Text>
-                <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
-                  {t('profile.stats.following')}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={{ alignItems: 'center' }}
-                onPress={() => openFollowModal('followers')}
-              >
-                <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '700' }}>
-                  {followers?.length || 0}
-                </Text>
-                <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
-                  {t('profile.stats.followers')}
-                </Text>
-              </TouchableOpacity>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '700' }}>
-                  {totalLikes}
-                </Text>
-                <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
-                  {t('profile.stats.likes')}
-                </Text>
+                <View
+                  style={{
+                    flex: 1,
+                    borderRadius: 51,
+                    backgroundColor: theme.surface,
+                    borderWidth: 2,
+                    borderColor: theme.card,
+                    overflow: "hidden",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {user?.avatar ? (
+                    <Image source={{ uri: user.avatar }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                  ) : (
+                    <Text style={{ color: theme.textPrimary, fontSize: 34, fontWeight: "700" }}>
+                      {getUserInitials(user?.username)}
+                    </Text>
+                  )}
+                </View>
               </View>
+
+              <Text
+                style={{
+                  color: theme.textPrimary,
+                  fontSize: 24,
+                  fontWeight: "700",
+                  letterSpacing: -0.3,
+                  textAlign: "center",
+                  marginBottom: 4,
+                }}
+              >
+                {user?.username || t("profile.general.userPlaceholder")}
+              </Text>
+              <Text
+                style={{
+                  color: theme.textMuted,
+                  fontSize: 15,
+                  fontWeight: "500",
+                  marginBottom: 10,
+                }}
+              >
+                @{user?.username || t("profile.general.handlePlaceholder")}
+              </Text>
+
+              {user?.isPrivate ? (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 999,
+                    backgroundColor: theme.accentSoft,
+                    borderWidth: 1,
+                    borderColor: theme.accent,
+                    marginBottom: 14,
+                  }}
+                >
+                  <Feather name="lock" size={14} color={theme.accent} />
+                  <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "700" }}>
+                    {t("profile.badges.private", "Private profile")}
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* Stats row */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  width: "100%",
+                  marginTop: user?.isPrivate ? 0 : 6,
+                  marginBottom: 18,
+                  paddingVertical: 14,
+                  paddingHorizontal: 4,
+                  borderRadius: 14,
+                  backgroundColor: themedColor("rgba(0,0,0,0.2)", "rgba(248,250,252,0.95)"),
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                }}
+              >
+                <TouchableOpacity
+                  style={{ flex: 1, alignItems: "center" }}
+                  onPress={() => openFollowModal("following")}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: "800" }}>
+                    {following?.length || 0}
+                  </Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "600", marginTop: 4 }}>
+                    {t("profile.stats.following")}
+                  </Text>
+                </TouchableOpacity>
+                <View style={{ width: 1, height: 40, backgroundColor: theme.divider }} />
+                <TouchableOpacity
+                  style={{ flex: 1, alignItems: "center" }}
+                  onPress={() => openFollowModal("followers")}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: "800" }}>
+                    {followers?.length || 0}
+                  </Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "600", marginTop: 4 }}>
+                    {t("profile.stats.followers")}
+                  </Text>
+                </TouchableOpacity>
+                <View style={{ width: 1, height: 40, backgroundColor: theme.divider }} />
+                <View style={{ flex: 1, alignItems: "center" }}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: "800" }}>{totalLikes}</Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "600", marginTop: 4 }}>
+                    {t("profile.stats.likes")}
+                  </Text>
+                </View>
+              </View>
+
+              {user?.bio || user?.birthday ? (
+                <View
+                  style={{
+                    width: "100%",
+                    borderRadius: 14,
+                    padding: 14,
+                    backgroundColor: themedColor("rgba(0,0,0,0.18)", theme.surfaceMuted),
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 11,
+                      fontWeight: "700",
+                      letterSpacing: 0.8,
+                      textTransform: "uppercase",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {t("profile.hero.about", "About")}
+                  </Text>
+                  {user?.bio ? (
+                    <Text style={{ color: theme.textPrimary, fontSize: 14, lineHeight: 21, marginBottom: user?.birthday ? 10 : 0 }}>
+                      {user.bio}
+                    </Text>
+                  ) : null}
+                  {user?.birthday ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Feather name="gift" size={16} color={theme.textMuted} />
+                      <Text style={{ color: theme.textSecondary, fontSize: 14, fontWeight: "500" }}>
+                        {formatBirthdayDisplay(user.birthday)}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
             </View>
           </View>
 
-          {/* Action Buttons */}
-          <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16, paddingHorizontal: 16 }}>
-            <TouchableOpacity 
+          {/* Primary actions — horizontal scroll on narrow screens */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{
+              paddingHorizontal: 16,
+              gap: 10,
+              paddingBottom: 4,
+            }}
+            style={{ marginBottom: 10 }}
+          >
+            <TouchableOpacity
               onPress={() => {
                 const followerCount = followers?.length || 0;
                 if (followerCount < SUPPORT_REQUIREMENT) {
                   Alert.alert(
-                    t('profile.alerts.supportNotAvailableTitle'),
-                    t('profile.alerts.supportNotAvailableMessage', { required: SUPPORT_REQUIREMENT, count: followerCount })
+                    t("profile.alerts.supportNotAvailableTitle"),
+                    t("profile.alerts.supportNotAvailableMessage", {
+                      required: SUPPORT_REQUIREMENT,
+                      count: followerCount,
+                    })
                   );
                 } else {
-                  router.push('/donation');
+                  router.push("/donation");
                 }
               }}
-              style={{
-                borderRadius: 8,
-                shadowColor: themedColor("rgba(52,211,153,0.35)", "rgba(34,197,94,0.35)"),
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.3,
-                shadowRadius: 4,
-                elevation: 3,
-                opacity: (followers?.length || 0) < SUPPORT_REQUIREMENT ? 0.5 : 1,
-              }}
               disabled={(followers?.length || 0) < SUPPORT_REQUIREMENT}
+              activeOpacity={0.9}
+              style={{
+                borderRadius: 14,
+                minHeight: 46,
+                overflow: "hidden",
+                opacity: (followers?.length || 0) < SUPPORT_REQUIREMENT ? 0.55 : 1,
+                shadowColor: themedColor("rgba(52,211,153,0.45)", "rgba(34,197,94,0.35)"),
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.25,
+                shadowRadius: 8,
+                elevation: 4,
+              }}
             >
               <LinearGradient
                 colors={supportGradient}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
+                end={{ x: 1, y: 1 }}
                 style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  borderRadius: 8,
-                  flexDirection: 'row',
-                  alignItems: 'center',
+                  paddingHorizontal: 18,
+                  paddingVertical: 13,
+                  borderRadius: 14,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
+                <Feather name="heart" size={18} color="#fff" />
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14, maxWidth: 200 }} numberOfLines={2}>
                   {(followers?.length || 0) < SUPPORT_REQUIREMENT
-                    ? t('profile.actions.supportWithProgress', { current: followers?.length || 0, required: SUPPORT_REQUIREMENT })
-                    : t('profile.actions.support')}
+                    ? t("profile.actions.supportWithProgress", {
+                        current: followers?.length || 0,
+                        required: SUPPORT_REQUIREMENT,
+                      })
+                    : t("profile.actions.support")}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
-            <TouchableOpacity 
-              onPress={() => router.push('/go-live')}
+            <TouchableOpacity
+              onPress={() => router.push("/go-live")}
+              activeOpacity={0.9}
               style={{
-                borderRadius: 8,
-                shadowColor: themedColor("rgba(239,68,68,0.35)", "rgba(220,38,38,0.35)"),
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.3,
-                shadowRadius: 4,
-                elevation: 3,
+                borderRadius: 14,
+                minHeight: 46,
+                overflow: "hidden",
+                shadowColor: themedColor("rgba(239,68,68,0.45)", "rgba(220,38,38,0.35)"),
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.25,
+                shadowRadius: 8,
+                elevation: 4,
               }}
             >
               <LinearGradient
                 colors={goLiveGradient}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
+                end={{ x: 1, y: 1 }}
                 style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  borderRadius: 8,
-                  flexDirection: 'row',
-                  alignItems: 'center',
+                  paddingHorizontal: 18,
+                  paddingVertical: 13,
+                  borderRadius: 14,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{t('profile.actions.goLive')}</Text>
+                <Feather name="video" size={18} color="#fff" />
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>
+                  {t("profile.actions.goLive")}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
-            <TouchableOpacity 
-              onPress={() => router.push('/live-streams')}
+            <TouchableOpacity
+              onPress={() => router.push("/live-streams")}
+              activeOpacity={0.9}
               style={{
-                borderRadius: 8,
-                shadowColor: themedColor("rgba(139,92,246,0.35)", "rgba(99,102,241,0.35)"),
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.3,
-                shadowRadius: 4,
-                elevation: 3,
+                borderRadius: 14,
+                minHeight: 46,
+                overflow: "hidden",
+                shadowColor: themedColor("rgba(189,92,246,0.45)", "rgba(99,102,241,0.35)"),
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.25,
+                shadowRadius: 8,
+                elevation: 4,
               }}
             >
               <LinearGradient
                 colors={liveStreamsGradient}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
+                end={{ x: 1, y: 1 }}
                 style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  borderRadius: 8,
-                  flexDirection: 'row',
-                  alignItems: 'center',
+                  paddingHorizontal: 18,
+                  paddingVertical: 13,
+                  borderRadius: 14,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>{t('profile.actions.liveStreams')}</Text>
+                <Feather name="radio" size={18} color="#fff" />
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>
+                  {t("profile.actions.liveStreams")}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
 
-          {/* Advertisement and Earnings Dashboard Buttons - Second Row */}
-          <View style={{ flexDirection: 'row', marginBottom: 16, paddingHorizontal: 16, gap: 12 }}>
+          {/* Secondary actions */}
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              marginBottom: 16,
+              paddingHorizontal: 16,
+              gap: 10,
+            }}
+          >
             <TouchableOpacity
-              onPress={() => router.push('/advertisements')}
+              onPress={() => router.push("/advertisements")}
+              activeOpacity={0.88}
               style={{
                 flex: 1,
-                borderRadius: 8,
-                shadowColor: themedColor("rgba(127,90,240,0.35)", "rgba(99,102,241,0.35)"),
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.3,
-                shadowRadius: 4,
-                elevation: 3,
-                backgroundColor: theme.accentSoft,
+                minWidth: 140,
+                borderRadius: 14,
+                borderWidth: 1,
+                borderColor: themedColor("rgba(99,102,241,0.35)", theme.border),
+                backgroundColor: themedColor("rgba(99,102,241,0.2)", theme.accentSoft),
+                paddingVertical: 14,
+                paddingHorizontal: 12,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
               }}
             >
-              <View style={{
-                paddingHorizontal: 16,
-                paddingVertical: 12,
-                borderRadius: 8,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}>
-                <Text style={{ color: theme.accent, fontWeight: 'bold', fontSize: 14 }}>Advertisements</Text>
-              </View>
+              <Feather name="sidebar" size={18} color={theme.accent} />
+              <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 14 }}>Advertisements</Text>
             </TouchableOpacity>
 
-            {/* Earnings Dashboard Button */}
             <TouchableOpacity
               onPress={() => setShowEarningsDashboard(!showEarningsDashboard)}
+              activeOpacity={0.88}
               style={{
                 flex: 1,
-                borderRadius: 8,
-                shadowColor: "rgba(50, 205, 50, 0.35)",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.3,
-                shadowRadius: 4,
-                elevation: 3,
-                backgroundColor: "rgba(50, 205, 50, 0.15)",
+                minWidth: 140,
+                borderRadius: 14,
                 borderWidth: 1,
-                borderColor: "rgba(50, 205, 50, 0.3)",
+                borderColor: themedColor("rgba(52,211,153,0.35)", "rgba(22,163,74,0.35)"),
+                backgroundColor: themedColor("rgba(52,211,153,0.14)", "rgba(22,163,74,0.08)"),
+                paddingVertical: 14,
+                paddingHorizontal: 12,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
               }}
             >
-              <View style={{
-                paddingHorizontal: 16,
-                paddingVertical: 12,
-                borderRadius: 8,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-              }}>
-                <Text style={{ fontSize: 16 }}>💰</Text>
-                <Text style={{ color: '#32CD32', fontWeight: 'bold', fontSize: 14 }}>Earnings</Text>
-              </View>
+              <Feather name="dollar-sign" size={18} color={theme.success} />
+              <Text style={{ color: theme.success, fontWeight: "700", fontSize: 14 }}>Earnings</Text>
             </TouchableOpacity>
 
-            {isAdminUser(user) && (
+            {isAdminUser(user) ? (
               <TouchableOpacity
-                onPress={() => router.push('/admin')}
+                onPress={() => router.push("/admin")}
+                activeOpacity={0.88}
                 style={{
-                  flex: 1,
-                  borderRadius: 8,
-                  shadowColor: themedColor("rgba(99,102,241,0.35)", "rgba(99,102,241,0.35)"),
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.3,
-                  shadowRadius: 4,
-                  elevation: 3,
-                  backgroundColor: themedColor("rgba(99,102,241,0.18)", "rgba(99,102,241,0.14)"),
+                  flexGrow: 1,
+                  minWidth: 140,
+                  borderRadius: 14,
                   borderWidth: 1,
                   borderColor: themedColor("rgba(99,102,241,0.35)", theme.border),
+                  backgroundColor: themedColor("rgba(99,102,241,0.22)", "rgba(99,102,241,0.1)"),
+                  paddingVertical: 14,
+                  paddingHorizontal: 12,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexDirection: "row",
+                  gap: 8,
                 }}
               >
-                <View style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  borderRadius: 8,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  <Text style={{ color: theme.textPrimary, fontWeight: 'bold', fontSize: 14 }}>Admin</Text>
-                </View>
+                <Feather name="shield" size={18} color={theme.textPrimary} />
+                <Text style={{ color: theme.textPrimary, fontWeight: "700", fontSize: 14 }}>Admin</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
           </View>
 
           {/* Earnings Dashboard Expanded View */}
@@ -1970,13 +2277,14 @@ const Profile = () => {
         </View>
 
           {/* Section Tabs */}
-          <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+          <View style={{ paddingHorizontal: 16, marginBottom: 18 }}>
             <View
               style={{
-                flexDirection: 'row',
-                borderRadius: 14,
-                padding: 4,
-                backgroundColor: themedColor('rgba(15,23,42,0.6)', theme.surface),
+                flexDirection: "row",
+                borderRadius: 16,
+                padding: 5,
+                gap: 4,
+                backgroundColor: themedColor("rgba(15,23,42,0.45)", theme.surfaceMuted),
                 borderWidth: 1,
                 borderColor: theme.border,
               }}
@@ -1984,39 +2292,57 @@ const Profile = () => {
               <TouchableOpacity
                 style={{
                   flex: 1,
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
-                  borderRadius: 10,
-                  backgroundColor: activeSection === 'videos' ? theme.accentSoft : 'transparent',
+                  paddingVertical: 11,
+                  paddingHorizontal: 8,
+                  borderRadius: 12,
+                  backgroundColor: activeSection === "videos" ? theme.card : "transparent",
+                  borderWidth: activeSection === "videos" ? 1 : 0,
+                  borderColor: theme.border,
+                  shadowColor: activeSection === "videos" ? "#000" : "transparent",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: activeSection === "videos" ? (isDarkMode ? 0.25 : 0.08) : 0,
+                  shadowRadius: activeSection === "videos" ? 6 : 0,
+                  elevation: activeSection === "videos" ? 2 : 0,
                 }}
-                onPress={() => handleSectionChange('videos')}
+                onPress={() => handleSectionChange("videos")}
+                activeOpacity={0.9}
               >
                 <Text
                   style={{
-                    textAlign: 'center',
-                    fontFamily: 'Poppins-Medium',
-                    color: activeSection === 'videos' ? theme.textPrimary : theme.textSecondary,
+                    textAlign: "center",
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 13,
+                    color: activeSection === "videos" ? theme.textPrimary : theme.textMuted,
                   }}
                 >
-                  {t('profile.sections.videos')}
+                  {t("profile.sections.videos")}
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={{
                   flex: 1,
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
-                  borderRadius: 10,
-                  backgroundColor: activeSection === 'pics' ? theme.accentSoft : 'transparent',
+                  paddingVertical: 11,
+                  paddingHorizontal: 8,
+                  borderRadius: 12,
+                  backgroundColor: activeSection === "pics" ? theme.card : "transparent",
+                  borderWidth: activeSection === "pics" ? 1 : 0,
+                  borderColor: theme.border,
+                  shadowColor: activeSection === "pics" ? "#000" : "transparent",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: activeSection === "pics" ? (isDarkMode ? 0.25 : 0.08) : 0,
+                  shadowRadius: activeSection === "pics" ? 6 : 0,
+                  elevation: activeSection === "pics" ? 2 : 0,
                 }}
-                onPress={() => handleSectionChange('pics')}
+                onPress={() => handleSectionChange("pics")}
+                activeOpacity={0.9}
               >
                 <Text
                   style={{
-                    textAlign: 'center',
-                    fontFamily: 'Poppins-Medium',
-                    color: activeSection === 'pics' ? theme.textPrimary : theme.textSecondary,
+                    textAlign: "center",
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 13,
+                    color: activeSection === "pics" ? theme.textPrimary : theme.textMuted,
                   }}
                 >
                   Pics
@@ -2026,18 +2352,27 @@ const Profile = () => {
               <TouchableOpacity
                 style={{
                   flex: 1,
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
-                  borderRadius: 10,
-                  backgroundColor: activeSection === 'bookmarks' ? theme.accentSoft : 'transparent',
+                  paddingVertical: 11,
+                  paddingHorizontal: 8,
+                  borderRadius: 12,
+                  backgroundColor: activeSection === "bookmarks" ? theme.card : "transparent",
+                  borderWidth: activeSection === "bookmarks" ? 1 : 0,
+                  borderColor: theme.border,
+                  shadowColor: activeSection === "bookmarks" ? "#000" : "transparent",
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: activeSection === "bookmarks" ? (isDarkMode ? 0.25 : 0.08) : 0,
+                  shadowRadius: activeSection === "bookmarks" ? 6 : 0,
+                  elevation: activeSection === "bookmarks" ? 2 : 0,
                 }}
-                onPress={() => handleSectionChange('bookmarks')}
+                onPress={() => handleSectionChange("bookmarks")}
+                activeOpacity={0.9}
               >
                 <Text
                   style={{
-                    textAlign: 'center',
-                    fontFamily: 'Poppins-Medium',
-                    color: activeSection === 'bookmarks' ? theme.textPrimary : theme.textSecondary,
+                    textAlign: "center",
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 13,
+                    color: activeSection === "bookmarks" ? theme.textPrimary : theme.textMuted,
                   }}
                 >
                   Bookmarks
@@ -2600,7 +2935,7 @@ const Profile = () => {
               <Text style={{ color: theme.textPrimary, fontWeight: '600', marginBottom: 8 }}>
                 {t('profile.pending.bannerTitle', { count: pendingRequests.length })}
               </Text>
-              <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+              <Text style={{ color: theme.textSecondary, fontSize: 18 }}>
                 {t('profile.pending.bannerSubtitle')}
               </Text>
               <TouchableOpacity
@@ -2696,7 +3031,7 @@ const Profile = () => {
                             }
                           }}
                           onError={(error) => {
-                           
+                            setIsVideoReady(false);
                           }}
                           onLoadStart={() => {
                            
@@ -2742,37 +3077,41 @@ const Profile = () => {
                           showProgressBar={showProgressBar}
                           onShowProgressBar={setShowProgressBar}
                           bottomOffset={20}
+                          disableAutoHide={!isVideoPlaying}
                         />
                         
-                        {/* Play/Pause Button */}
-                        <TouchableOpacity
-                          onPress={() => {
-                            if (isVideoPlaying) {
-                              modalVideoRef.current?.pauseAsync();
-                              setIsVideoPlaying(false);
-                            } else {
-                              modalVideoRef.current?.playAsync();
-                              setIsVideoPlaying(true);
-                            }
-                          }}
-                          style={{
-                            position: 'absolute',
-                            top: '50%',
-                            left: '50%',
-                            transform: [{ translateX: -25 }, { translateY: -25 }],
-                            width: 50,
-                            height: 50,
-                            borderRadius: 25,
-                            backgroundColor: themedColor('rgba(255, 255, 255, 0.2)', 'rgba(15,23,42,0.2)'),
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            zIndex: 5
-                          }}
-                        >
-                          <Text style={{ color: theme.textPrimary, fontSize: 24 }}>
-                            {isVideoPlaying ? '❚❚' : '▶'}
-                          </Text>
-                        </TouchableOpacity>
+                        {/* Play button stays visible while paused */}
+                        {(showProgressBar || !isVideoPlaying) && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (isVideoPlaying) {
+                                modalVideoRef.current?.pauseAsync();
+                                setIsVideoPlaying(false);
+                              } else {
+                                modalVideoRef.current?.playAsync();
+                                setIsVideoPlaying(true);
+                              }
+                              setShowProgressBar(true);
+                            }}
+                            style={{
+                              position: 'absolute',
+                              top: '50%',
+                              left: '50%',
+                              transform: [{ translateX: -25 }, { translateY: -25 }],
+                              width: 50,
+                              height: 50,
+                              borderRadius: 25,
+                              backgroundColor: themedColor('rgba(255, 255, 255, 0.2)', 'rgba(15,23,42,0.2)'),
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              zIndex: 5
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 24 }}>
+                              {isVideoPlaying ? '❚❚' : '▶'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
                       </>
                         );
                       })()
@@ -2784,8 +3123,8 @@ const Profile = () => {
                       />
                     )}
                     
-                    {/* Fallback thumbnail if video doesn't load - only show for videos */}
-                    {isVideoMedia(modalVideo?.video, modalVideo?.postType) && modalVideo.thumbnail && (
+                    {/* Fallback thumbnail while video is loading/not ready */}
+                    {isVideoMedia(modalVideo?.video, modalVideo?.postType) && modalVideo.thumbnail && !isVideoReady && (
                       <Image
                         source={{ uri: modalVideo.thumbnail }}
                         style={{ 
@@ -3508,254 +3847,596 @@ const Profile = () => {
           )}
         </Modal>
 
-        {/* Edit Profile Modal */}
+        {/* Edit Profile Modal — sheet layout, cards, focus/validation UX */}
         <Modal
           visible={editModalVisible}
           animationType="slide"
           transparent={true}
           onRequestClose={closeEditModal}
         >
-          <View style={{ 
-            flex: 1, 
-            backgroundColor: themedColor("rgba(0,0,0,0.55)", "rgba(15,23,42,0.3)"),
-            justifyContent: "center",
-            alignItems: "center",
-            paddingHorizontal: 20
-          }}>
-            <View style={{ 
-              backgroundColor: theme.surface, 
-              padding: 24, 
-              borderRadius: 12, 
-              width: "100%",
-              maxWidth: 350,
-              borderWidth: 1,
-              borderColor: theme.border,
-            }}>
-              <Text style={{ color: theme.textPrimary, fontSize: 20, marginBottom: 20, textAlign: "center" }}>
-                {t('profile.modals.editTitle')}
-              </Text>
-              
-              {/* Username Input */}
-              <Text style={{ color: theme.textPrimary, fontSize: 16, marginBottom: 8 }}>{t('profile.modals.usernameLabel')}</Text>
-              <TextInput
-                value={newUsername}
-                onChangeText={setNewUsername}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+          >
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: themedColor("rgba(0,0,0,0.5)", "rgba(15,23,42,0.35)"),
+                justifyContent: "flex-end",
+              }}
+            >
+              <View
                 style={{
-                  backgroundColor: themedColor('#333', theme.inputBackground),
-                  color: theme.textPrimary,
-                  padding: 12,
-                  borderRadius: 8,
-                  marginBottom: 20,
+                  width: "100%",
+                  maxHeight: "92%",
+                  alignSelf: "center",
+                  maxWidth: 520,
+                  backgroundColor: theme.background,
+                  borderTopLeftRadius: 20,
+                  borderTopRightRadius: 20,
                   borderWidth: 1,
                   borderColor: theme.border,
-                }}
-                placeholder={t('profile.modals.usernamePlaceholder')}
-                placeholderTextColor={theme.inputPlaceholder}
-              />
-
-              {/* Avatar Upload */}
-              <Text style={{ color: theme.textPrimary, fontSize: 16, marginBottom: 8 }}>{t('profile.modals.avatarLabel')}</Text>
-              
-              {/* Avatar Preview */}
-              <View style={{ alignItems: "center", marginBottom: 16 }}>
-                <View
-                  style={{
-                    width: 100,
-                    height: 100,
-                    borderRadius: 50,
-                    borderWidth: 2,
-                    borderColor: theme.accent,
-                    backgroundColor: theme.surface,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden',
-                    marginBottom: 12,
-                  }}
-                >
-                  {newAvatar ? (
-                    <Image
-                      source={{ uri: newAvatar }}
-                      style={{ width: '100%', height: '100%', borderRadius: 50 }}
-                      resizeMode="cover"
-                    />
-                  ) : user?.avatar ? (
-                    <Image
-                      source={{ uri: user.avatar }}
-                      style={{ width: '100%', height: '100%', borderRadius: 50 }}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <Text style={{ color: theme.textPrimary, fontSize: 32, fontWeight: '700' }}>
-                      {getUserInitials(newUsername || user?.username)}
-                    </Text>
-                  )}
-                </View>
-                {uploadingAvatar && (
-                  <ActivityIndicator color={theme.accent} size="small" style={{ marginBottom: 8 }} />
-                )}
-              </View>
-              
-              <TouchableOpacity
-                onPress={pickAvatarImage}
-                disabled={uploadingAvatar}
-                style={{
-                  backgroundColor: uploadingAvatar ? theme.border : themedColor('#333', theme.surfaceMuted),
-                  padding: 12,
-                  borderRadius: 8,
-                  marginBottom: 20,
-                  alignItems: "center",
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  opacity: uploadingAvatar ? 0.6 : 1,
+                  paddingBottom: Math.max(insets.bottom, 16),
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: -4 },
+                  shadowOpacity: isDarkMode ? 0.35 : 0.08,
+                  shadowRadius: 16,
+                  elevation: 24,
                 }}
               >
-                <Text style={{ color: theme.textPrimary }}>
-                  {uploadingAvatar ? t('profile.modals.uploadingAvatar') : newAvatar ? t('Change Avatar') : t('profile.modals.uploadAvatar')}
-                </Text>
-              </TouchableOpacity>
-              
-              {/* Remove Avatar Option */}
-              {newAvatar && (
-                <TouchableOpacity
-                  onPress={() => {
-                    Alert.alert(
-                      t('profile.modals.removeAvatarTitle', 'Remove Avatar'),
-                      t('profile.modals.removeAvatarMessage', 'Are you sure you want to remove your avatar?'),
-                      [
-                        {
-                          text: t('common.cancel', 'Cancel'),
-                          style: 'cancel'
-                        },
-                        {
-                          text: t('common.remove', 'Remove'),
-                          style: 'destructive',
-                          onPress: () => setNewAvatar("")
-                        }
-                      ]
-                    );
-                  }}
+                <View
                   style={{
-                    backgroundColor: theme.danger || '#ff4757',
-                    padding: 12,
-                    borderRadius: 8,
-                    marginBottom: 20,
-                    alignItems: "center",
+                    width: 36,
+                    height: 4,
+                    borderRadius: 2,
+                    backgroundColor: theme.border,
+                    alignSelf: "center",
+                    marginTop: 10,
+                    marginBottom: 6,
+                  }}
+                />
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{
+                    paddingHorizontal: 16,
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    width: "100%",
+                    maxWidth: Math.min(480, windowWidth),
+                    alignSelf: "center",
                   }}
                 >
-                  <Text style={{ color: "#fff", fontWeight: "600" }}>
-                    {t('profile.modals.removeAvatar', 'Remove Avatar')}
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Theme Toggle */}
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingVertical: 8 }}>
-                <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t('profile.modals.themeLabel')}</Text>
-                <ThemeToggle />
-              </View>
-
-              {/* Re-enable privacy toggle */}
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingVertical: 8 }}>
-                <Text style={{ color: theme.textPrimary, fontSize: 16 }}>{t('profile.modals.privateProfileLabel')}</Text>
-                <TouchableOpacity
-                  onPress={() => setIsPrivate(!isPrivate)}
-                  style={{
-                    width: 50,
-                    height: 30,
-                    borderRadius: 15,
-                    backgroundColor: isPrivate ? theme.accent : theme.cardSoft,
-                    justifyContent: "center",
-                    alignItems: isPrivate ? "flex-end" : "flex-start",
-                    paddingHorizontal: 4,
-                  }}
-                >
-                  <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' }} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Re-enable pending requests section in modal */}
-              {isPrivate && pendingRequests && pendingRequests.length > 0 && (
-                <View style={{ marginBottom: 20 }}>
-                  <Text style={{ color: theme.textPrimary, fontSize: 16, marginBottom: 12 }}>
-                    {t('profile.modals.pendingRequestsTitle', { count: pendingRequests.length })}
-                  </Text>
-                  <View style={{ maxHeight: 200 }}>
-                    {pendingRequests.map((requestingUserId, index) => (
-                      <PendingRequestItem 
-                        key={index} 
-                        requestingUserId={requestingUserId}
-                        onApprove={() => handleAccessRequest(requestingUserId, 'approve')}
-                        onDeny={() => handleAccessRequest(requestingUserId, 'deny')}
-                      />
-                    ))}
+                  {/* Header */}
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      marginBottom: 20,
+                      gap: 12,
+                    }}
+                  >
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text
+                        style={{
+                          color: theme.textPrimary,
+                          fontSize: 22,
+                          fontWeight: "700",
+                          letterSpacing: -0.3,
+                        }}
+                      >
+                        {t("profile.modals.editTitle")}
+                      </Text>
+                      <Text
+                        style={{
+                          color: theme.textMuted,
+                          fontSize: 14,
+                          marginTop: 6,
+                          lineHeight: 20,
+                        }}
+                      >
+                        {t(
+                          "profile.modals.editSubtitle",
+                          "Update your photo and details. Changes apply after you save."
+                        )}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={closeEditModal}
+                      accessibilityRole="button"
+                      accessibilityLabel={t("profile.modals.cancel")}
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 20,
+                        backgroundColor: theme.cardSoft,
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Feather name="x" size={20} color={theme.textSecondary} />
+                    </TouchableOpacity>
                   </View>
-                </View>
-              )}
 
-              {/* Save and Cancel Buttons */}
-              <View style={{ flexDirection: "row", gap: 12, marginBottom: 16 }}>
-                <TouchableOpacity
-                  onPress={saveProfileChanges}
-                  disabled={saving}
-                  style={{
-                    flex: 1,
-                    backgroundColor: saving ? theme.border : theme.accent,
-                    padding: 12,
-                    borderRadius: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{ color: "#fff", fontWeight: "bold" }}>
-                    {saving ? t('profile.modals.saving') : t('profile.modals.save')}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={closeEditModal}
-                  style={{
-                    flex: 1,
-                    backgroundColor: theme.cardSoft,
-                    padding: 12,
-                    borderRadius: 8,
-                    alignItems: "center",
-                    borderWidth: 1,
-                    borderColor: theme.border,
-                  }}
-                >
-                  <Text style={{ color: theme.textPrimary, fontWeight: "bold" }}>{t('profile.modals.cancel')}</Text>
-                </TouchableOpacity>
-              </View>
+                  {/** Card shell */}
+                  {(() => {
+                    const card = {
+                      backgroundColor: theme.card,
+                      borderRadius: 16,
+                      padding: 18,
+                      marginBottom: 14,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      shadowColor: isDarkMode ? "#000" : "#0f172a",
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: isDarkMode ? 0.25 : 0.06,
+                      shadowRadius: 10,
+                      elevation: 3,
+                    };
+                    const label = {
+                      color: theme.textSecondary,
+                      fontSize: 13,
+                      fontWeight: "600",
+                      marginBottom: 8,
+                    };
+                    const inputShell = (key, hasError) => ({
+                      backgroundColor: theme.inputBackground,
+                      borderWidth: 1.5,
+                      borderColor: hasError
+                        ? theme.danger
+                        : editFocusKey === key
+                          ? theme.accent
+                          : theme.border,
+                      borderRadius: 12,
+                      paddingHorizontal: 14,
+                      paddingVertical: Platform.OS === "ios" ? 13 : 10,
+                    });
+                    return (
+                      <>
+                        {/* Photo card */}
+                        <View style={card}>
+                          <Text style={{ color: theme.textPrimary, fontSize: 17, fontWeight: "600", marginBottom: 4 }}>
+                            {t("profile.modals.avatarLabel")}
+                          </Text>
+                          <Text style={{ color: theme.textMuted, fontSize: 13, marginBottom: 18 }}>
+                            {t(
+                              "profile.modals.avatarHint",
+                              "A clear face or logo helps people recognize you."
+                            )}
+                          </Text>
+                          <View style={{ alignItems: "center" }}>
+                            <View
+                              style={{
+                                width: 112,
+                                height: 112,
+                                borderRadius: 56,
+                                padding: 3,
+                                backgroundColor: theme.accentSoft,
+                                marginBottom: 16,
+                              }}
+                            >
+                              <View
+                                style={{
+                                  flex: 1,
+                                  borderRadius: 53,
+                                  backgroundColor: theme.surface,
+                                  borderWidth: 2,
+                                  borderColor: theme.card,
+                                  overflow: "hidden",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                {newAvatar ? (
+                                  <Image
+                                    source={{ uri: newAvatar }}
+                                    style={{ width: "100%", height: "100%" }}
+                                    resizeMode="cover"
+                                  />
+                                ) : user?.avatar ? (
+                                  <Image
+                                    source={{ uri: user.avatar }}
+                                    style={{ width: "100%", height: "100%" }}
+                                    resizeMode="cover"
+                                  />
+                                ) : (
+                                  <Text style={{ color: theme.textPrimary, fontSize: 36, fontWeight: "700" }}>
+                                    {getUserInitials(newUsername || user?.username)}
+                                  </Text>
+                                )}
+                              </View>
+                            </View>
+                            {uploadingAvatar ? (
+                              <ActivityIndicator color={theme.accent} style={{ marginBottom: 12 }} />
+                            ) : null}
+                            <TouchableOpacity
+                              onPress={pickAvatarImage}
+                              disabled={uploadingAvatar}
+                              activeOpacity={0.85}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 8,
+                                alignSelf: "stretch",
+                                paddingVertical: 12,
+                                paddingHorizontal: 16,
+                                borderRadius: 12,
+                                borderWidth: 1.5,
+                                borderColor: theme.accent,
+                                backgroundColor: theme.accentSoft,
+                                opacity: uploadingAvatar ? 0.55 : 1,
+                              }}
+                            >
+                              <Feather name="camera" size={18} color={theme.accent} />
+                              <Text style={{ color: theme.accent, fontSize: 15, fontWeight: "600" }}>
+                                {uploadingAvatar
+                                  ? t("profile.modals.uploadingAvatar")
+                                  : newAvatar
+                                    ? t("Change Avatar")
+                                    : t("profile.modals.uploadAvatar")}
+                              </Text>
+                            </TouchableOpacity>
+                            {newAvatar ? (
+                              <TouchableOpacity
+                                onPress={() => {
+                                  Alert.alert(
+                                    t("profile.modals.removeAvatarTitle", "Remove Avatar"),
+                                    t(
+                                      "profile.modals.removeAvatarMessage",
+                                      "Are you sure you want to remove your avatar?"
+                                    ),
+                                    [
+                                      { text: t("common.cancel", "Cancel"), style: "cancel" },
+                                      {
+                                        text: t("common.remove", "Remove"),
+                                        style: "destructive",
+                                        onPress: () => setNewAvatar(""),
+                                      },
+                                    ]
+                                  );
+                                }}
+                                style={{ marginTop: 12, paddingVertical: 8 }}
+                              >
+                                <Text style={{ color: theme.danger, fontSize: 14, fontWeight: "600" }}>
+                                  {t("profile.modals.removeAvatar", "Remove photo")}
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        </View>
 
-              {/* Delete Account Button - App Store Compliance */}
-              <View style={{ 
-                borderTopWidth: 1, 
-                borderTopColor: theme.border, 
-                paddingTop: 16, 
-                marginTop: 8 
-              }}>
-                <TouchableOpacity
-                  onPress={handleDeleteAccount}
-                  style={{
-                    backgroundColor: theme.danger || '#ff4757',
-                    padding: 12,
-                    borderRadius: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <Text style={{ color: "#fff", fontWeight: "600" }}>
-                    {t('profile.deleteAccount.button', 'Delete Account')}
-                  </Text>
-                </TouchableOpacity>
-                <Text style={{ 
-                  color: theme.textSecondary, 
-                  fontSize: 12, 
-                  textAlign: 'center', 
-                  marginTop: 8 
-                }}>
-                  {t('profile.deleteAccount.warning', 'Permanently delete your account and all data')}
-                </Text>
+                        {/* Personal info */}
+                        <View style={card}>
+                          <Text style={{ color: theme.textPrimary, fontSize: 17, fontWeight: "600", marginBottom: 4 }}>
+                            {t("profile.modals.personalSection", "Personal details")}
+                          </Text>
+                          <Text style={{ color: theme.textMuted, fontSize: 13, marginBottom: 18 }}>
+                            {t(
+                              "profile.modals.personalSectionHint",
+                              "This information appears on your profile."
+                            )}
+                          </Text>
+
+                          <Text style={label}>{t("profile.modals.usernameLabel")}</Text>
+                          <TextInput
+                            value={newUsername}
+                            onChangeText={(v) => {
+                              setNewUsername(v);
+                              if (v.trim()) setUsernameShowError(false);
+                            }}
+                            onFocus={() => setEditFocusKey("username")}
+                            onBlur={() => {
+                              setEditFocusKey((k) => (k === "username" ? null : k));
+                              if (!newUsername.trim()) setUsernameShowError(true);
+                            }}
+                            style={{
+                              ...inputShell(
+                                "username",
+                                usernameShowError && !newUsername.trim()
+                              ),
+                              color: theme.textPrimary,
+                              fontSize: 16,
+                              marginBottom: usernameShowError && !newUsername.trim() ? 6 : 16,
+                            }}
+                            placeholder={t("profile.modals.usernamePlaceholder")}
+                            placeholderTextColor={theme.inputPlaceholder}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                          />
+                          {usernameShowError && !newUsername.trim() ? (
+                            <Text style={{ color: theme.danger, fontSize: 12, marginBottom: 12, fontWeight: "500" }}>
+                              {t("profile.validation.usernameRequired", "Username is required.")}
+                            </Text>
+                          ) : null}
+
+                          <Text style={label}>Bio</Text>
+                          <TextInput
+                            value={newBio}
+                            onChangeText={setNewBio}
+                            onFocus={() => setEditFocusKey("bio")}
+                            onBlur={() => setEditFocusKey((k) => (k === "bio" ? null : k))}
+                            multiline
+                            maxLength={220}
+                            style={{
+                              ...inputShell("bio", false),
+                              color: theme.textPrimary,
+                              fontSize: 16,
+                              minHeight: 100,
+                              textAlignVertical: "top",
+                              paddingTop: Platform.OS === "ios" ? 13 : 12,
+                              marginBottom: 8,
+                            }}
+                            placeholder={t("profile.modals.bioPlaceholder", "Write a short bio")}
+                            placeholderTextColor={theme.inputPlaceholder}
+                          />
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              marginBottom: 16,
+                            }}
+                          >
+                            <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1, marginRight: 8 }}>
+                              {t("profile.modals.bioHelper", "Keep it concise and professional.")}
+                            </Text>
+                            <Text style={{ color: theme.textMuted, fontSize: 12, fontVariant: ["tabular-nums"] }}>
+                              {newBio.length}/220
+                            </Text>
+                          </View>
+
+                          <Text style={label}>
+                            {t("profile.modals.birthdayLabel", "Birthday (MM/DD/YYYY)")}
+                          </Text>
+                          <TextInput
+                            value={newBirthday}
+                            onChangeText={(value) => setNewBirthday(normalizeBirthdayInput(value))}
+                            onFocus={() => setEditFocusKey("birthday")}
+                            onBlur={() => setEditFocusKey((k) => (k === "birthday" ? null : k))}
+                            keyboardType="number-pad"
+                            maxLength={10}
+                            style={{
+                              ...inputShell("birthday", profileEditBirthdayHint.variant === "error"),
+                              color: theme.textPrimary,
+                              fontSize: 16,
+                              marginBottom: 6,
+                            }}
+                            placeholder="MM/DD/YYYY"
+                            placeholderTextColor={theme.inputPlaceholder}
+                          />
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontWeight: "500",
+                              marginBottom: 4,
+                              color:
+                                profileEditBirthdayHint.variant === "error"
+                                  ? theme.danger
+                                  : profileEditBirthdayHint.variant === "success"
+                                    ? theme.success
+                                    : theme.textMuted,
+                            }}
+                          >
+                            {profileEditBirthdayHint.message}
+                          </Text>
+                        </View>
+
+                        {/* Preferences */}
+                        <View style={card}>
+                          <Text style={{ color: theme.textPrimary, fontSize: 17, fontWeight: "600", marginBottom: 4 }}>
+                            {t("profile.modals.preferencesSection", "Preferences")}
+                          </Text>
+                          <Text style={{ color: theme.textMuted, fontSize: 13, marginBottom: 16 }}>
+                            {t("profile.modals.preferencesHint", "Appearance and privacy.")}
+                          </Text>
+
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              paddingVertical: 12,
+                              borderBottomWidth: 1,
+                              borderBottomColor: theme.divider,
+                            }}
+                          >
+                            <View style={{ flex: 1, paddingRight: 12 }}>
+                              <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}>
+                                {t("profile.modals.themeLabel")}
+                              </Text>
+                              <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
+                                {t("profile.modals.themeHint", "Light or dark appearance")}
+                              </Text>
+                            </View>
+                            <ThemeToggle />
+                          </View>
+
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              paddingVertical: 14,
+                            }}
+                          >
+                            <View style={{ flex: 1, paddingRight: 12 }}>
+                              <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}>
+                                {t("profile.modals.privateProfileLabel")}
+                              </Text>
+                              <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
+                                {t("profile.modals.privateHint", "Only approved followers see your posts.")}
+                              </Text>
+                            </View>
+                            <TouchableOpacity
+                              onPress={() => setIsPrivate(!isPrivate)}
+                              accessibilityRole="switch"
+                              accessibilityState={{ checked: isPrivate }}
+                              activeOpacity={0.9}
+                              style={{
+                                width: 52,
+                                height: 32,
+                                borderRadius: 16,
+                                backgroundColor: isPrivate ? theme.accent : theme.cardSoft,
+                                justifyContent: "center",
+                                paddingHorizontal: 3,
+                                borderWidth: 1,
+                                borderColor: isPrivate ? theme.accent : theme.border,
+                              }}
+                            >
+                              <View
+                                style={{
+                                  width: 26,
+                                  height: 26,
+                                  borderRadius: 13,
+                                  backgroundColor: "#fff",
+                                  alignSelf: isPrivate ? "flex-end" : "flex-start",
+                                  shadowColor: "#000",
+                                  shadowOffset: { width: 0, height: 1 },
+                                  shadowOpacity: 0.12,
+                                  shadowRadius: 2,
+                                  elevation: 2,
+                                }}
+                              />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {isPrivate && pendingRequests && pendingRequests.length > 0 ? (
+                          <View style={card}>
+                            <Text style={{ color: theme.textPrimary, fontSize: 17, fontWeight: "600", marginBottom: 12 }}>
+                              {t("profile.modals.pendingRequestsTitle", { count: pendingRequests.length })}
+                            </Text>
+                            <View style={{ maxHeight: 220 }}>
+                              {pendingRequests.map((requestingUserId, index) => (
+                                <PendingRequestItem
+                                  key={index}
+                                  requestingUserId={requestingUserId}
+                                  onApprove={() => handleAccessRequest(requestingUserId, "approve")}
+                                  onDeny={() => handleAccessRequest(requestingUserId, "deny")}
+                                />
+                              ))}
+                            </View>
+                          </View>
+                        ) : null}
+
+                        {/* Actions */}
+                        <View style={{ marginTop: 4, marginBottom: 8, gap: 10 }}>
+                          <TouchableOpacity
+                            onPress={saveProfileChanges}
+                            disabled={
+                              saving ||
+                              uploadingAvatar ||
+                              (newBirthday.trim().length > 0 &&
+                                profileEditBirthdayHint.variant === "error")
+                            }
+                            activeOpacity={0.9}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 10,
+                              minHeight: 52,
+                              borderRadius: 14,
+                              backgroundColor: theme.accent,
+                              opacity:
+                                saving ||
+                                uploadingAvatar ||
+                                (newBirthday.trim().length > 0 &&
+                                  profileEditBirthdayHint.variant === "error")
+                                  ? 0.72
+                                  : 1,
+                            }}
+                          >
+                            {saving ? (
+                              <ActivityIndicator color="#fff" size="small" />
+                            ) : (
+                              <Feather name="check" size={20} color="#fff" />
+                            )}
+                            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
+                              {saving ? t("profile.modals.saving") : t("profile.modals.save")}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={closeEditModal}
+                            disabled={saving}
+                            activeOpacity={0.85}
+                            style={{
+                              minHeight: 48,
+                              borderRadius: 14,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderWidth: 1.5,
+                              borderColor: theme.border,
+                              backgroundColor: theme.cardSoft,
+                            }}
+                          >
+                            <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}>
+                              {t("profile.modals.cancel")}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Danger zone */}
+                        <View
+                          style={{
+                            ...card,
+                            backgroundColor: isDarkMode ? "rgba(248,113,113,0.08)" : "rgba(220,38,38,0.06)",
+                            borderColor: isDarkMode ? "rgba(248,113,113,0.25)" : "rgba(220,38,38,0.2)",
+                            marginBottom: 4,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: theme.danger,
+                              fontSize: 12,
+                              fontWeight: "700",
+                              letterSpacing: 0.6,
+                              marginBottom: 10,
+                            }}
+                          >
+                            {t("profile.deleteAccount.zoneLabel", "Danger zone")}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={handleDeleteAccount}
+                            activeOpacity={0.9}
+                            style={{
+                              minHeight: 48,
+                              borderRadius: 12,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: theme.danger,
+                            }}
+                          >
+                            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
+                              {t("profile.deleteAccount.button", "Delete Account")}
+                            </Text>
+                          </TouchableOpacity>
+                          <Text
+                            style={{
+                              color: theme.textSecondary,
+                              fontSize: 12,
+                              textAlign: "center",
+                              marginTop: 10,
+                              lineHeight: 18,
+                            }}
+                          >
+                            {t("profile.deleteAccount.warning", "Permanently delete your account and all data")}
+                          </Text>
+                        </View>
+                      </>
+                    );
+                  })()}
+                </ScrollView>
               </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
       </ScrollView>
     </SafeAreaView>

@@ -8,8 +8,18 @@ import { useTranslation } from 'react-i18next';
 
 const { height } = Dimensions.get('window');
 
+/** Expo Router may pass a param as string or string[] */
+function firstRouteParam(value) {
+  if (value == null) return undefined;
+  const v = Array.isArray(value) ? value[0] : value;
+  return typeof v === 'string' ? v : v != null ? String(v) : undefined;
+}
+
 const LiveBroadcast = () => {
-  const { streamId, quality } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const streamId = firstRouteParam(params.streamId);
+  const quality = firstRouteParam(params.quality);
+  const liveMode = firstRouteParam(params.liveMode);
   const { user } = useGlobalContext();
   const [showChat, setShowChat] = useState(false);
   const { t } = useTranslation();
@@ -44,6 +54,7 @@ const LiveBroadcast = () => {
   }
 
   const qualityParam = typeof quality === 'string' ? quality : 'auto';
+  const liveModeParam = liveMode === 'screen' ? 'screen' : 'camera';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -53,6 +64,7 @@ const LiveBroadcast = () => {
           hostUserId={user.$id}
           hostDisplayName={user.username}
           quality={qualityParam}
+          liveMode={liveModeParam}
           onStreamEnd={handleStreamEnd}
         />
 

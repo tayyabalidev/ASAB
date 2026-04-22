@@ -6,7 +6,7 @@ import { Query } from 'react-native-appwrite';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { icons, images } from "../../constants";
-import { databases, appwriteConfig, getCurrentUser } from "../../lib/appwrite";
+import { databases, appwriteConfig } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { useTranslation } from "react-i18next";
 
@@ -36,13 +36,37 @@ const Friends = () => {
     const fetchUsers = async () => {
       try {
         setLoading(true);
-        const userResponse = await databases.listDocuments(
-          appwriteConfig.databaseId,
-          appwriteConfig.userCollectionId
-        );
+        const allUsers = [];
+        let lastDocumentId = null;
+
+        // Appwrite listDocuments returns a limited first page by default.
+        // Keep paging so Discover includes newly registered users too.
+        while (true) {
+          const queries = [Query.limit(100)];
+          if (lastDocumentId) {
+            queries.push(Query.cursorAfter(lastDocumentId));
+          }
+
+          const userResponse = await databases.listDocuments(
+            appwriteConfig.databaseId,
+            appwriteConfig.userCollectionId,
+            queries
+          );
+
+          const docs = Array.isArray(userResponse?.documents) ? userResponse.documents : [];
+          allUsers.push(...docs);
+
+          if (docs.length < 100) {
+            break;
+          }
+          lastDocumentId = docs[docs.length - 1]?.$id;
+          if (!lastDocumentId) {
+            break;
+          }
+        }
         
         // Filter out the current user
-        const otherUsers = userResponse.documents.filter(user => user.$id !== currentUser?.$id);
+        const otherUsers = allUsers.filter((user) => user.$id !== currentUser?.$id);
         setUsers(otherUsers);
       } catch (error) {
 
