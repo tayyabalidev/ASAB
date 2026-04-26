@@ -851,16 +851,65 @@ app.get('/api/health', (req, res) => {
 
 // ==================== VideoSDK (calls) — JWT must be minted server-side ====================
 const jwt = require('jsonwebtoken');
+const VIDEOSDK_ROOMS_URL = 'https://api.videosdk.live/v2/rooms';
 
 /**
- * GET /get-token?meetingId=...&participantId=...
+ * POST /create-room
+ * Creates a VideoSDK room server-side using VIDEOSDK_AUTH_TOKEN (preferred)
+ * or VIDEOSDK_API_KEY fallback.
+ */
+app.post('/create-room', async (req, res) => {
+  const authToken = (process.env.VIDEOSDK_AUTH_TOKEN || '').trim();
+  const apiKey = (process.env.VIDEOSDK_API_KEY || '').trim();
+  const authHeader = authToken || apiKey;
+
+  if (!authHeader) {
+    return res.status(503).json({
+      error: 'VideoSDK room API not configured',
+      message: 'Set VIDEOSDK_AUTH_TOKEN (preferred) or VIDEOSDK_API_KEY in server environment',
+    });
+  }
+
+  try {
+    const response = await axios.post(
+      VIDEOSDK_ROOMS_URL,
+      {},
+      {
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const roomId = response?.data?.roomId || response?.data?.room_id || response?.data?.id || '';
+    if (!roomId) {
+      return res.status(502).json({
+        error: 'Room creation response missing roomId',
+        details: response?.data || null,
+      });
+    }
+
+    return res.json({ roomId });
+  } catch (e) {
+    const status = e?.response?.status || 500;
+    const detail = e?.response?.data || e?.message || 'unknown';
+    return res.status(status).json({
+      error: 'Failed to create VideoSDK room',
+      details: detail,
+    });
+  }
+});
+
+/**
+ * GET /get-token?roomId=...&participantId=...
  * Returns { token } for @videosdk.live/react-native-sdk MeetingProvider.
  * Set VIDEOSDK_API_KEY and VIDEOSDK_SECRET_KEY in server/.env (same values as VideoSDK dashboard).
  */
 app.get('/get-token', (req, res) => {
   const apiKey = (process.env.VIDEOSDK_API_KEY || '').trim();
   const secretKey = (process.env.VIDEOSDK_SECRET_KEY || '').trim();
-  const meetingId = typeof req.query.meetingId === 'string' ? req.query.meetingId : '';
+  const roomId = typeof req.query.roomId === 'string' ? req.query.roomId.trim() : '';
   const participantId =
     typeof req.query.participantId === 'string' ? req.query.participantId : '';
 
@@ -870,14 +919,20 @@ app.get('/get-token', (req, res) => {
       message: 'Set VIDEOSDK_API_KEY and VIDEOSDK_SECRET_KEY in server environment',
     });
   }
+  if (!roomId) {
+    return res.status(400).json({
+      error: 'roomId is required',
+      message: 'Pass VideoSDK roomId from /v2/rooms as ?roomId=...',
+    });
+  }
 
   const payload = {
     apikey: apiKey,
-    permissions: ['allow_join', 'allow_mod'],
+    permissions: ['allow_join', 'allow_mod', 'ask_join'],
     version: 2,
     roles: ['rtc'],
   };
-  if (meetingId) payload.roomId = meetingId;
+  payload.roomId = roomId;
   if (participantId) payload.participantId = participantId;
 
   try {

@@ -44,7 +44,7 @@ const UI = {
 
 // Inner component that uses VideoSDK hooks
 const VideoSDKCallInner = ({
-  meetingId,
+  roomId,
   currentUserId,
   callType = 'video',
   callId = null,
@@ -63,6 +63,8 @@ const VideoSDKCallInner = ({
   const callIdRef = useRef(callId);
   const participantsRef = useRef(new Map());
   const connectedReportedRef = useRef(false);
+  const endingRef = useRef(false);
+  const joinTimeoutRef = useRef(null);
 
   useEffect(() => {
     callIdRef.current = callId;
@@ -72,11 +74,17 @@ const VideoSDKCallInner = ({
   const { join, leave, toggleMic, toggleWebcam, participants, localParticipant } = useMeeting({
     onMeetingJoined: () => {
       console.log('✅ Joined VideoSDK meeting successfully');
+      if (joinTimeoutRef.current) {
+        clearTimeout(joinTimeoutRef.current);
+        joinTimeoutRef.current = null;
+      }
       setMeetingJoined(true);
     },
     onMeetingLeft: () => {
       console.log('👋 Left VideoSDK meeting');
-      handleCallEnd();
+      if (!endingRef.current) {
+        handleCallEnd();
+      }
     },
     onError: (error) => {
       console.error('❌ VideoSDK error:', error);
@@ -130,10 +138,25 @@ const VideoSDKCallInner = ({
   }, [remoteConnected]);
 
   useEffect(() => {
+    if (meetingJoined && remoteConnected) return;
+    if (meetingJoined && !remoteConnected) {
+      const t = setTimeout(() => {
+        if (!endingRef.current && participantsRef.current.size <= 1) {
+          handleCallEnd();
+        }
+      }, 3500);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [meetingJoined, remoteConnected]);
+
+  useEffect(() => {
     // Join meeting when component mounts
+    let cancelled = false;
     const joinMeeting = async () => {
       try {
         const allowed = await ensureCallMediaPermissions(callType);
+        if (cancelled) return;
         if (!allowed) {
           Alert.alert(
             'Permissions Required',
@@ -145,8 +168,16 @@ const VideoSDKCallInner = ({
           return;
         }
 
+        joinTimeoutRef.current = setTimeout(() => {
+          if (!cancelled && !meetingJoined && !endingRef.current) {
+            const timeoutError = new Error('Joining room timed out. Check token, roomId, or network.');
+            if (onError) onError(timeoutError);
+          }
+        }, 45000);
+
         await join();
       } catch (error) {
+        if (cancelled || endingRef.current) return;
         console.error('Error joining VideoSDK meeting:', error);
         Alert.alert('Error', 'Failed to join call. Please try again.');
         if (onError) onError(error);
@@ -154,9 +185,18 @@ const VideoSDKCallInner = ({
     };
 
     joinMeeting();
-  }, [meetingId, join]);
+    return () => {
+      cancelled = true;
+      if (joinTimeoutRef.current) {
+        clearTimeout(joinTimeoutRef.current);
+        joinTimeoutRef.current = null;
+      }
+    };
+  }, [roomId, join, callType, onError]);
 
   const handleCallEnd = async () => {
+    if (endingRef.current) return;
+    endingRef.current = true;
     connectedReportedRef.current = false;
     setMeetingJoined(false);
     if (durationIntervalRef.current) {
@@ -181,6 +221,25 @@ const VideoSDKCallInner = ({
       console.warn('Error in onCallEnd:', e);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (joinTimeoutRef.current) {
+        clearTimeout(joinTimeoutRef.current);
+        joinTimeoutRef.current = null;
+      }
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+      if (!endingRef.current) {
+        endingRef.current = true;
+        try {
+          leave();
+        } catch (_) {}
+      }
+    };
+  }, [leave]);
 
   const toggleMute = async () => {
     try {
@@ -365,7 +424,7 @@ const LocalParticipantView = () => {
 
 // Main VideoSDK Call Component
 const VideoSDKCall = ({
-  meetingId,
+  roomId,
   callerId,
   receiverId,
   currentUserId,
@@ -378,6 +437,7 @@ const VideoSDKCall = ({
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tokenError, setTokenError] = useState(null);
+  const normalizedRoomId = typeof roomId === 'string' ? roomId.trim() : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -387,7 +447,10 @@ const VideoSDKCall = ({
 
     const fetchToken = async () => {
       try {
-        const meetingToken = await getVideoSDKToken(meetingId, currentUserId);
+        if (!normalizedRoomId) {
+          throw new Error('Missing VideoSDK roomId for this call.');
+        }
+        const meetingToken = await getVideoSDKToken(normalizedRoomId, currentUserId);
 
         if (cancelled) return;
 
@@ -426,7 +489,7 @@ const VideoSDKCall = ({
     return () => {
       cancelled = true;
     };
-  }, [meetingId, currentUserId]);
+  }, [normalizedRoomId, currentUserId]);
 
   if (loading) {
     return (
@@ -480,7 +543,8 @@ const VideoSDKCall = ({
   return (
     <MeetingProvider
       config={{
-        meetingId: meetingId,
+        // VideoSDK SDK expects the key "meetingId", sourced from roomId.
+        meetingId: normalizedRoomId,
         participantId: currentUserId || undefined,
         micEnabled: VIDEOSDK_CONFIG.meetingSettings.micEnabled,
         webcamEnabled: callType === 'video' && VIDEOSDK_CONFIG.meetingSettings.webcamEnabled,
@@ -493,7 +557,7 @@ const VideoSDKCall = ({
       token={authToken}
     >
       <VideoSDKCallInner
-        meetingId={meetingId}
+        roomId={normalizedRoomId}
         currentUserId={currentUserId}
         callType={callType}
         callId={callId}

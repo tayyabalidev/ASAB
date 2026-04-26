@@ -360,6 +360,7 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
 
 export default function LiveStreamBroadcasterImpl({
   streamId,
+  roomId,
   hostUserId,
   hostDisplayName,
   quality = 'auto',
@@ -371,6 +372,8 @@ export default function LiveStreamBroadcasterImpl({
   const [tokenError, setTokenError] = useState(null);
   const [tokenDebug, setTokenDebug] = useState('token: n/a');
   const hlsStartedRef = useRef(false);
+  // Backward compatible fallback for older records without videosdkRoomId.
+  const effectiveRoomId = roomId || streamId;
 
   useEffect(() => {
     let cancelled = false;
@@ -379,7 +382,7 @@ export default function LiveStreamBroadcasterImpl({
     setLoading(true);
     (async () => {
       try {
-        const t = await getVideoSDKToken(streamId, hostUserId);
+        const t = await getVideoSDKToken(effectiveRoomId, hostUserId);
         if (cancelled) return;
         if (t) {
           if (__DEV__) {
@@ -434,7 +437,7 @@ export default function LiveStreamBroadcasterImpl({
     return () => {
       cancelled = true;
     };
-  }, [streamId, hostUserId]);
+  }, [effectiveRoomId, hostUserId]);
 
   if (loading) {
     return (
@@ -473,7 +476,7 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
-  if (!hostUserId || !streamId) {
+  if (!hostUserId || !effectiveRoomId) {
     return (
       <View style={styles.center}>
         <Text style={styles.err}>Missing host or stream</Text>
@@ -487,7 +490,7 @@ export default function LiveStreamBroadcasterImpl({
   return (
     <MeetingProvider
       config={{
-        meetingId: streamId,
+        meetingId: effectiveRoomId,
         participantId: hostUserId,
         micEnabled: true,
         webcamEnabled: liveMode !== 'screen',

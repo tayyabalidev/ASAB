@@ -436,6 +436,17 @@ const UserProfile = () => {
     });
   };
 
+  const formatBirthdayDisplay = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return dateString;
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
   const handleRequestWithdrawal = async () => {
     if (pendingPayout <= 0) {
       Alert.alert('No Funds', 'You have no pending funds available for withdrawal.');
@@ -1256,16 +1267,40 @@ const UserProfile = () => {
                     </View>
                   </View>
                 )}
-                {/* Bio and Link */}
-                {/* {profileUser?.bio && (
-                  <Text style={{ color: '#fff', fontSize: 15, textAlign: 'center', marginBottom: 6 }}>{profileUser.bio}</Text>
-                )} */}
-                {/* {profileUser?.link && (
-                  <TouchableOpacity onPress={() => Linking.openURL(profileUser.link)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
-                    <Image source={icons.link} style={{ width: 16, height: 16, marginRight: 4, tintColor: '#3ec6ff' }} />
-                    <Text style={{ color: '#3ec6ff', fontSize: 15 }}>{profileUser.link}</Text>
-                  </TouchableOpacity>
-                )} */}
+                {(profileUser?.bio || profileUser?.birthday) && (
+                  <View
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                      borderRadius: 12,
+                      padding: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: '#aaa',
+                        fontSize: 11,
+                        fontWeight: '700',
+                        letterSpacing: 0.8,
+                        textTransform: 'uppercase',
+                        marginBottom: 8,
+                      }}
+                    >
+                      About
+                    </Text>
+                    {profileUser?.bio ? (
+                      <Text style={{ color: '#fff', fontSize: 15, textAlign: 'left', marginBottom: profileUser?.birthday ? 8 : 0 }}>
+                        {profileUser.bio}
+                      </Text>
+                    ) : null}
+                    {profileUser?.birthday ? (
+                      <Text style={{ color: '#ddd', fontSize: 14 }}>
+                        Birthday: {formatBirthdayDisplay(profileUser.birthday)}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
               </ImageBackground>
             )}
           />

@@ -437,12 +437,12 @@ const CallScreen = () => {
       );
     }
 
-    if (!callData.channelName) {
+    if (!callData.channelName && !callData.roomName) {
       return renderShell(
         <View style={styles.centerBlock}>
           <Feather name="wifi-off" size={40} color={COLORS.textMuted} />
           <Text style={styles.errorTitle}>Configuration issue</Text>
-          <Text style={styles.errorBody}>This call is missing channel data. Please try again.</Text>
+          <Text style={styles.errorBody}>This call is missing room data. Please try again.</Text>
           <TouchableOpacity style={styles.primaryBtn} onPress={handleCallEnd}>
             <Text style={styles.primaryBtnText}>Close</Text>
           </TouchableOpacity>
@@ -450,10 +450,10 @@ const CallScreen = () => {
       );
     }
 
-    const meetingId = callData.channelName || callData.meetingId;
+    const roomId = callData.channelName || callData.roomName;
     const receiverId = callData.receiverId === user.$id ? callData.callerId : callData.receiverId;
 
-    if (!meetingId) {
+    if (!roomId) {
       return renderShell(
         <View style={styles.centerBlock}>
           <Text style={styles.errorTitle}>Missing meeting</Text>
@@ -469,7 +469,7 @@ const CallScreen = () => {
 
     return (
       <VideoSDKCallWrapper
-        meetingId={meetingId}
+        roomId={roomId}
         callerId={callData.callerId}
         receiverId={receiverId}
         currentUserId={user.$id}

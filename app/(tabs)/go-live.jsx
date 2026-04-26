@@ -113,12 +113,14 @@ const GoLive = () => {
         pathname: '/live-broadcast',
         params: {
           streamId: liveStream.$id,
+          roomId: liveStream.videosdkRoomId || '',
           quality: selectedQuality,
           liveMode: selectedLiveMode,
         }
       });
     } catch (error) {
-      Alert.alert(t('common.error'), t('liveGo.startError'));
+      const message = error?.message || t('liveGo.startError');
+      Alert.alert(t('common.error'), message);
     } finally {
       setLoading(false);
     }

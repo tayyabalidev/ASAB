@@ -2,12 +2,11 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.0.15",
+    "version": "1.0.21",
     "orientation": "portrait",
     "icon": "./assets/images/asab.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      
       "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
@@ -90,8 +89,9 @@
     ],
     "extra": {
       "router": {},
+      "videosdkTokenBaseUrl": "",
       "eas": {
-        "projectId": "c9976d74-4083-48ee-a4dd-1e5be3536af9"
+        "projectId": "ae0ceb34-c46e-4f8e-9d13-804335663376"
       }
     }
   }

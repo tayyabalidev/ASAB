@@ -129,6 +129,7 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
 
 export default function LiveStreamPlayerImpl({ stream, onClose }) {
   const { user } = useGlobalContext();
+  const effectiveRoomId = stream?.videosdkRoomId || stream?.$id || null;
   const [viewerCount, setViewerCount] = useState(stream?.viewerCount || 0);
   const [isFollowingUser, setIsFollowingUser] = useState(false);
   const [followerCount, setFollowerCount] = useState(0);
@@ -168,7 +169,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
   }, [stream?.$id, stream?.hostId, user?.$id, onClose]);
 
   useEffect(() => {
-    if (!stream?.$id || !user?.$id) {
+    if (!effectiveRoomId || !user?.$id) {
       setTokenLoading(false);
       return;
     }
@@ -178,7 +179,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
     setTokenLoading(true);
     (async () => {
       try {
-        const t = await getVideoSDKToken(stream.$id, user.$id);
+        const t = await getVideoSDKToken(effectiveRoomId, user.$id);
         if (cancelled) return;
         if (t) {
           setToken(t);
@@ -202,7 +203,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
     return () => {
       cancelled = true;
     };
-  }, [stream?.$id, user?.$id]);
+  }, [effectiveRoomId, user?.$id]);
 
   const handleFollowToggle = async () => {
     if (!user?.$id) {
@@ -292,7 +293,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
       <View style={styles.videoArea}>
         <MeetingProvider
           config={{
-            meetingId: stream.$id,
+            meetingId: effectiveRoomId,
             participantId: user.$id,
             micEnabled: false,
             webcamEnabled: false,

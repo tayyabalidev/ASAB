@@ -2,7 +2,7 @@
  * Appwrite Function — VideoSDK JWT for ASAB calls.
  *
  * Contract (matches lib/videosdkHelper.js):
- *   GET /?meetingId=<room>&participantId=<optional>
+ *   GET /?roomId=<room>&participantId=<optional>
  *   Response: { "token": "<jwt>" }
  *
  * Function env (Appwrite console): VIDEOSDK_API_KEY, VIDEOSDK_SECRET_KEY
@@ -21,11 +21,11 @@ const cors = {
 
 function parseQuery(req) {
   if (req.query && typeof req.query === 'object' && !Array.isArray(req.query)) {
-    const m = req.query.meetingId ?? req.query['meetingId'];
+    const r = req.query.roomId ?? req.query['roomId'];
     const p = req.query.participantId ?? req.query['participantId'];
-    if (m != null && m !== '' || p != null && p !== '') {
+    if (r != null && r !== '' || p != null && p !== '') {
       return {
-        meetingId: m != null && m !== '' ? String(m) : '',
+        roomId: r != null && r !== '' ? String(r) : '',
         participantId: p != null && p !== '' ? String(p) : '',
       };
     }
@@ -36,7 +36,7 @@ function parseQuery(req) {
     '';
   const params = new URLSearchParams(raw);
   return {
-    meetingId: params.get('meetingId') || '',
+    roomId: params.get('roomId') || '',
     participantId: params.get('participantId') || '',
   };
 }
@@ -57,7 +57,7 @@ module.exports = async ({ req, res, log }) => {
     const apiKey = String(process.env.VIDEOSDK_API_KEY || '').trim();
     const secretKey = String(process.env.VIDEOSDK_SECRET_KEY || '').trim();
 
-    const { meetingId, participantId } = parseQuery(req);
+    const { roomId, participantId } = parseQuery(req);
     const qs =
       typeof req.queryString === 'string' && req.queryString
         ? req.queryString
@@ -74,7 +74,7 @@ module.exports = async ({ req, res, log }) => {
           videoSdkKeysPresent: Boolean(apiKey && secretKey),
           hint: !apiKey || !secretKey
             ? 'Add VIDEOSDK_API_KEY and VIDEOSDK_SECRET_KEY to this function (Settings → Variables), save, redeploy.'
-            : 'Keys present; use ?meetingId=...&participantId=... for token.',
+            : 'Keys present; use ?roomId=...&participantId=... for token.',
         },
         200,
         cors
@@ -94,13 +94,21 @@ module.exports = async ({ req, res, log }) => {
       );
     }
 
+    if (!roomId) {
+      return res.json(
+        { error: 'roomId is required' },
+        400,
+        cors
+      );
+    }
+
     const payload = {
       apikey: apiKey,
-      permissions: ['allow_join', 'allow_mod'],
+      permissions: ['allow_join', 'allow_mod', 'ask_join'],
       version: 2,
       roles: ['rtc'],
     };
-    if (meetingId) payload.roomId = meetingId;
+    payload.roomId = roomId;
     if (participantId) payload.participantId = participantId;
 
     const token = jwt.sign(payload, secretKey, {

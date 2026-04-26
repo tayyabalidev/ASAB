@@ -18,6 +18,7 @@ function firstRouteParam(value) {
 const LiveBroadcast = () => {
   const params = useLocalSearchParams();
   const streamId = firstRouteParam(params.streamId);
+  const roomId = firstRouteParam(params.roomId);
   const quality = firstRouteParam(params.quality);
   const liveMode = firstRouteParam(params.liveMode);
   const { user } = useGlobalContext();
@@ -61,6 +62,7 @@ const LiveBroadcast = () => {
       <View style={styles.container}>
         <LiveStreamBroadcaster
           streamId={streamId}
+          roomId={roomId}
           hostUserId={user.$id}
           hostDisplayName={user.username}
           quality={qualityParam}
