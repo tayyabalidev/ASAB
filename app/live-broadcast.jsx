@@ -34,10 +34,18 @@ const LiveBroadcast = () => {
     if (!streamId) {
       Alert.alert(t('common.error'), t('liveBroadcast.missingStream'));
       router.replace('/home');
+      return;
     }
-  }, [streamId, t]);
+    if (!roomId) {
+      Alert.alert(
+        t('common.error'),
+        'Missing videosdkRoomId for this live stream. Please start a new stream and try again.'
+      );
+      router.replace('/home');
+    }
+  }, [streamId, roomId, t]);
 
-  if (!streamId) {
+  if (!streamId || !roomId) {
     return null;
   }
 

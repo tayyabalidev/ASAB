@@ -93,6 +93,17 @@ function BroadcasterMeetingInner({
     }
   }, []);
 
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('[LiveBroadcast] init', {
+        streamId,
+        roomId: roomDebug || null,
+        liveMode,
+        quality,
+      });
+    }
+  }, [streamId, roomDebug, liveMode, quality]);
+
   const stopMeeting = useCallback(() => {
     const act = actionsRef.current;
     try {
@@ -139,7 +150,11 @@ function BroadcasterMeetingInner({
   } = useMeeting({
     onMeetingJoined: async () => {
       if (__DEV__) {
-        console.log('[LiveBroadcast] onMeetingJoined');
+        console.log('[LiveBroadcast] onMeetingJoined', {
+          meetingId: roomDebug || null,
+          phase,
+          sdkState: lastSdkState,
+        });
       }
       if (hlsStartRequestedRef.current) {
         if (__DEV__) {
@@ -188,6 +203,12 @@ function BroadcasterMeetingInner({
 
         const q = mapLiveQualityToHls(quality);
         hlsStartRequestedRef.current = true;
+        if (__DEV__) {
+          console.log('[LiveBroadcast] startHls requested', {
+            meetingId: roomDebug || null,
+            quality: q,
+          });
+        }
         const hlsPromise = startHls({
           layout: {
             type: 'SPOTLIGHT',
@@ -210,7 +231,11 @@ function BroadcasterMeetingInner({
               setPhase((p) => (p === 'error' ? p : 'live'));
             })
             .catch((e) => {
-              console.error('startHls failed', e);
+              console.error('startHls failed', {
+                error: e?.message || String(e),
+                meetingId: roomDebug || null,
+                sdkState: lastSdkState,
+              });
               hlsStartedRef.current = false;
               hlsStartRequestedRef.current = false;
               setErrorMessage(e?.message || 'Could not start live stream');
@@ -281,7 +306,11 @@ function BroadcasterMeetingInner({
     },
     onError: ({ message }) => {
       if (__DEV__) {
-        console.error('[LiveBroadcast] sdk onError', message);
+        console.error('[LiveBroadcast] sdk onError', {
+          message: message || 'unknown',
+          meetingId: roomDebug || null,
+          sdkState: lastSdkState,
+        });
       }
       setErrorMessage(message || 'Meeting error');
       setPhase('error');
@@ -307,7 +336,11 @@ function BroadcasterMeetingInner({
         setPhase('error');
       }
       if (__DEV__) {
-        console.log('[LiveBroadcast] onMeetingStateChanged', stateText, meetingState);
+        console.log('[LiveBroadcast] onMeetingStateChanged', {
+          meetingId: roomDebug || null,
+          state: stateText,
+          raw: meetingState,
+        });
       }
     },
   });
@@ -336,11 +369,15 @@ function BroadcasterMeetingInner({
       try {
         joinRequestedRef.current = true;
         if (__DEV__) {
-          console.log('[LiveBroadcast] permissions ok, joining room');
+          console.log('[LiveBroadcast] permissions ok, joining room', {
+            meetingId: roomDebug || null,
+          });
         }
         await join();
         if (__DEV__ && !cancelled) {
-          console.log('[LiveBroadcast] join() resolved');
+          console.log('[LiveBroadcast] join() resolved', {
+            meetingId: roomDebug || null,
+          });
         }
       } catch (e) {
         joinRequestedRef.current = false;
@@ -354,7 +391,7 @@ function BroadcasterMeetingInner({
     return () => {
       cancelled = true;
     };
-  }, [join, liveMode]);
+  }, [join, liveMode, roomDebug]);
 
   useEffect(() => {
     if (phase !== 'joining') return undefined;
@@ -451,8 +488,8 @@ export default function LiveStreamBroadcasterImpl({
   const [tokenError, setTokenError] = useState(null);
   const [tokenDebug, setTokenDebug] = useState('token: n/a');
   const hlsStartedRef = useRef(false);
-  // Backward compatible fallback for older records without videosdkRoomId.
-  const effectiveRoomId = roomId || streamId;
+  // Host must always join using the real VideoSDK room id (not Appwrite stream id).
+  const effectiveRoomId = typeof roomId === 'string' ? roomId.trim() : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -461,6 +498,13 @@ export default function LiveStreamBroadcasterImpl({
     setLoading(true);
     (async () => {
       try {
+        if (!effectiveRoomId) {
+          throw new Error(
+            `Missing videosdkRoomId for host broadcast. streamId=${streamId || 'n/a'}, roomId=${
+              roomId || 'n/a'
+            }.`
+          );
+        }
         const t = await getVideoSDKToken(effectiveRoomId, hostUserId);
         if (cancelled) return;
         if (t) {
@@ -494,6 +538,16 @@ export default function LiveStreamBroadcasterImpl({
               setTokenDebug(
                 `key:${claims?.apikey || 'n/a'} perms:${Array.isArray(perms) ? perms.join('|') : 'n/a'}`
               );
+              if (__DEV__) {
+                console.log('[LiveBroadcast] token-room check', {
+                  streamId: streamId || null,
+                  routeRoomId: roomId || null,
+                  meetingId: effectiveRoomId || null,
+                  tokenRoomId: tokenRoomId || null,
+                  apikey: claims?.apikey || null,
+                  permissions: perms,
+                });
+              }
             }
             if (__DEV__ && claims) {
               console.log('[LiveBroadcast] token claims', {
@@ -530,7 +584,7 @@ export default function LiveStreamBroadcasterImpl({
     return () => {
       cancelled = true;
     };
-  }, [effectiveRoomId, hostUserId]);
+  }, [effectiveRoomId, hostUserId, roomId, streamId]);
 
   if (loading) {
     return (
@@ -572,7 +626,7 @@ export default function LiveStreamBroadcasterImpl({
   if (!hostUserId || !effectiveRoomId) {
     return (
       <View style={styles.center}>
-        <Text style={styles.err}>Missing host or stream</Text>
+        <Text style={styles.err}>Missing host or videosdkRoomId</Text>
         <TouchableOpacity style={styles.endBtn} onPress={() => onStreamEnd?.()}>
           <Text style={styles.endBtnText}>Close</Text>
         </TouchableOpacity>

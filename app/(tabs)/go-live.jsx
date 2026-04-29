@@ -113,7 +113,7 @@ const GoLive = () => {
         pathname: '/live-broadcast',
         params: {
           streamId: liveStream.$id,
-          roomId: liveStream.videosdkRoomId || '',
+          roomId: liveStream.videosdkRoomId,
           quality: selectedQuality,
           liveMode: selectedLiveMode,
         }
