@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
-import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
+import { VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { mapLiveQualityToHls } from '../lib/videosdkLiveQuality';
@@ -180,13 +180,7 @@ function BroadcasterMeetingInner({
             );
             pinTarget = 'SHARE';
           } catch (e) {
-            console.warn('Live broadcast: screen share unavailable, falling back to camera', e);
-            Alert.alert('Screen share', 'Screen sharing is unavailable on this build. Switching to camera.');
-            try {
-              enableWebcam();
-            } catch (webcamError) {
-              console.warn('Live broadcast: enableWebcam fallback', webcamError);
-            }
+            throw new Error(`Screen share failed: ${e?.message || String(e)}`);
           }
         } else {
           try {
@@ -566,15 +560,8 @@ export default function LiveStreamBroadcasterImpl({
           setToken(t);
           return;
         }
-        if (!VIDEOSDK_CONFIG.tokenServerUrl) {
-          if (__DEV__) {
-            setToken(null);
-            return;
-          }
-          setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
-          return;
-        }
-        throw new Error('No token from server');
+        setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
+        return;
       } catch (e) {
         if (!cancelled) setTokenError(e?.message || 'Token error');
       } finally {
@@ -609,8 +596,7 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
-  const authToken =
-    token || (__DEV__ && !VIDEOSDK_CONFIG.tokenServerUrl ? VIDEOSDK_CONFIG.apiKey : null);
+  const authToken = token;
 
   if (!authToken) {
     return (

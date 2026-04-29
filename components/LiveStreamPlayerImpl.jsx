@@ -19,7 +19,7 @@ import {
   isFollowing,
   getFollowerCount,
 } from '../lib/livestream';
-import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
+import { VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { images } from '../constants';
 
@@ -129,7 +129,7 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
 
 export default function LiveStreamPlayerImpl({ stream, onClose }) {
   const { user } = useGlobalContext();
-  const effectiveRoomId = stream?.videosdkRoomId || stream?.$id || null;
+  const effectiveRoomId = stream?.videosdkRoomId || null;
   const [viewerCount, setViewerCount] = useState(stream?.viewerCount || 0);
   const [isFollowingUser, setIsFollowingUser] = useState(false);
   const [followerCount, setFollowerCount] = useState(0);
@@ -185,15 +185,8 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
           setToken(t);
           return;
         }
-        if (!VIDEOSDK_CONFIG.tokenServerUrl) {
-          if (__DEV__) {
-            setToken(null);
-            return;
-          }
-          setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
-          return;
-        }
-        throw new Error('No token from server');
+        setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
+        return;
       } catch (e) {
         if (!cancelled) setTokenError(e?.message || 'Token error');
       } finally {
@@ -272,8 +265,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
     );
   }
 
-  const authToken =
-    token || (__DEV__ && !VIDEOSDK_CONFIG.tokenServerUrl ? VIDEOSDK_CONFIG.apiKey : null);
+  const authToken = token;
 
   if (!authToken) {
     return (
