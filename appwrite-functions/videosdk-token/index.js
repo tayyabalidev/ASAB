@@ -19,6 +19,16 @@ const cors = {
   'Access-Control-Allow-Headers': 'Content-Type, Accept',
 };
 
+function safeDecodeJwtNoVerify(token) {
+  try {
+    if (!token || typeof token !== 'string') return null;
+    const decoded = jwt.decode(token);
+    return decoded && typeof decoded === 'object' ? decoded : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function parseQuery(req) {
   if (req.query && typeof req.query === 'object' && !Array.isArray(req.query)) {
     const r = req.query.roomId ?? req.query['roomId'];
@@ -64,9 +74,13 @@ module.exports = async ({ req, res, log }) => {
         : typeof req.url === 'string' && req.url.includes('?')
           ? req.url.split('?')[1]
           : '';
+    const params = new URLSearchParams(qs);
     const healthRequested =
-      new URLSearchParams(qs).get('health') === '1' ||
+      params.get('health') === '1' ||
       (req.query && String(req.query.health) === '1');
+    const debugRequested =
+      params.get('debug') === '1' ||
+      (req.query && String(req.query.debug) === '1');
     if (healthRequested) {
       return res.json(
         {
@@ -115,8 +129,19 @@ module.exports = async ({ req, res, log }) => {
       expiresIn: '2h',
       algorithm: 'HS256',
     });
+    const claims = safeDecodeJwtNoVerify(token) || {};
+    const debug = {
+      requestedRoomId: roomId,
+      participantId: participantId || null,
+      tokenRoomId: claims.roomId || null,
+      tokenApiKey: claims.apikey || null,
+      tokenPermissions: Array.isArray(claims.permissions) ? claims.permissions : [],
+    };
+    if (debugRequested) {
+      log(`videosdk-token debug ${JSON.stringify(debug)}`);
+    }
 
-    return res.json({ token }, 200, {
+    return res.json({ token, debug }, 200, {
       ...cors,
       'Content-Type': 'application/json',
     });

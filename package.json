@@ -10,7 +10,8 @@
     "prebuild": "expo prebuild --clean",
     "prebuild:ios": "expo prebuild --platform ios",
     "prebuild:android": "expo prebuild --platform android",
-    "postinstall": "patch-package && node scripts/remove-nested-react.cjs"
+    "postinstall": "patch-package && node scripts/remove-nested-react.cjs",
+    "verify:videosdk-live": "node scripts/verify-videosdk-live.cjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",

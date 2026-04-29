@@ -853,6 +853,16 @@ app.get('/api/health', (req, res) => {
 const jwt = require('jsonwebtoken');
 const VIDEOSDK_ROOMS_URL = 'https://api.videosdk.live/v2/rooms';
 
+function safeDecodeJwtNoVerify(token) {
+  try {
+    if (!token || typeof token !== 'string') return null;
+    const decoded = jwt.decode(token);
+    return decoded && typeof decoded === 'object' ? decoded : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /**
  * POST /create-room
  * Creates a VideoSDK room server-side using VIDEOSDK_AUTH_TOKEN (preferred)
@@ -862,6 +872,9 @@ app.post('/create-room', async (req, res) => {
   const authToken = (process.env.VIDEOSDK_AUTH_TOKEN || '').trim();
   const apiKey = (process.env.VIDEOSDK_API_KEY || '').trim();
   const authHeader = authToken || apiKey;
+  const authTokenClaims = safeDecodeJwtNoVerify(authToken);
+  const authSource = authToken ? 'VIDEOSDK_AUTH_TOKEN' : 'VIDEOSDK_API_KEY';
+  const authApiKeyHint = authTokenClaims?.apikey || apiKey || null;
 
   if (!authHeader) {
     return res.status(503).json({
@@ -890,7 +903,13 @@ app.post('/create-room', async (req, res) => {
       });
     }
 
-    return res.json({ roomId });
+    return res.json({
+      roomId,
+      debug: {
+        authSource,
+        apiKeyHint: authApiKeyHint,
+      },
+    });
   } catch (e) {
     const status = e?.response?.status || 500;
     const detail = e?.response?.data || e?.message || 'unknown';
@@ -937,7 +956,17 @@ app.get('/get-token', (req, res) => {
 
   try {
     const token = jwt.sign(payload, secretKey, { expiresIn: '2h', algorithm: 'HS256' });
-    return res.json({ token });
+    const tokenClaims = safeDecodeJwtNoVerify(token) || {};
+    return res.json({
+      token,
+      debug: {
+        requestedRoomId: roomId,
+        participantId: participantId || null,
+        tokenRoomId: tokenClaims.roomId || null,
+        tokenApiKey: tokenClaims.apikey || null,
+        tokenPermissions: Array.isArray(tokenClaims.permissions) ? tokenClaims.permissions : [],
+      },
+    });
   } catch (e) {
     return res.status(500).json({ error: 'Token generation failed', message: e.message });
   }

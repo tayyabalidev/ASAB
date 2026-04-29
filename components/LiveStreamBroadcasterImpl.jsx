@@ -18,6 +18,18 @@ import { endLiveStream } from '../lib/livestream';
 
 const { width, height } = Dimensions.get('window');
 
+function decodeJwtPayload(token) {
+  try {
+    const payloadPart = String(token || '').split('.')[1] || '';
+    if (!payloadPart) return null;
+    const normalized = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
+    return JSON.parse(atob(padded));
+  } catch (_) {
+    return null;
+  }
+}
+
 function LocalPreview({ liveMode }) {
   const { localWebcamOn, localWebcamStream } = useMeeting();
 
@@ -50,7 +62,15 @@ function LocalPreview({ liveMode }) {
   );
 }
 
-function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hlsStartedRef, tokenDebug }) {
+function BroadcasterMeetingInner({
+  streamId,
+  quality,
+  liveMode,
+  onStreamEnd,
+  hlsStartedRef,
+  tokenDebug,
+  roomDebug,
+}) {
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState('joining');
   const [errorMessage, setErrorMessage] = useState(null);
@@ -59,6 +79,19 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
   const actionsRef = useRef({});
   /** HLS start is event-driven; do not rely solely on startHls()'s promise resolving. */
   const hlsStartRequestedRef = useRef(false);
+  const joinRequestedRef = useRef(false);
+  const everConnectedRef = useRef(false);
+  const withTimeout = useCallback(async (promiseLike, timeoutMs, timeoutMessage) => {
+    let timeoutId = null;
+    try {
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      });
+      return await Promise.race([Promise.resolve(promiseLike), timeoutPromise]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }, []);
 
   const stopMeeting = useCallback(() => {
     const act = actionsRef.current;
@@ -108,6 +141,12 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
       if (__DEV__) {
         console.log('[LiveBroadcast] onMeetingJoined');
       }
+      if (hlsStartRequestedRef.current) {
+        if (__DEV__) {
+          console.log('[LiveBroadcast] onMeetingJoined ignored (HLS already requested)');
+        }
+        return;
+      }
       try {
         await new Promise((r) => setTimeout(r, 200));
         let pinTarget = 'CAM';
@@ -119,7 +158,11 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
             if (!startScreen) {
               throw new Error('Screen share is not available in this build');
             }
-            await Promise.resolve(startScreen());
+            await withTimeout(
+              Promise.resolve(startScreen()),
+              8000,
+              'Screen share start timed out'
+            );
             pinTarget = 'SHARE';
           } catch (e) {
             console.warn('Live broadcast: screen share unavailable, falling back to camera', e);
@@ -156,7 +199,11 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
           quality: q,
         });
         if (hlsPromise && typeof hlsPromise.then === 'function') {
-          hlsPromise
+          withTimeout(
+            hlsPromise,
+            20000,
+            'HLS start timed out. Meeting joined but HLS did not become ready.'
+          )
             .then(() => {
               if (endedRef.current) return;
               hlsStartedRef.current = true;
@@ -170,9 +217,18 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
               setPhase('error');
               Alert.alert(
                 'Live stream',
-                'Failed to start HLS. Confirm your VideoSDK project has interactive live streaming enabled and your token server is configured.'
+                'Failed to start HLS. Confirm interactive live streaming is enabled in VideoSDK, token includes allow_mod, and this meeting room belongs to the same VideoSDK project.'
               );
             });
+        } else {
+          // Some SDK builds return void and only emit events; fail fast if no state change arrives.
+          setTimeout(() => {
+            if (endedRef.current || hlsStartedRef.current) return;
+            setErrorMessage(
+              `HLS did not start (SDK state: ${lastSdkState || 'unknown'}). Verify VideoSDK interactive HLS, token permissions, and project keys.`
+            );
+            setPhase((p) => (p === 'joining' ? 'error' : p));
+          }, 20000);
         }
       } catch (e) {
         console.error('onMeetingJoined / startHls setup failed', e);
@@ -237,6 +293,19 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
           ? meetingState
           : meetingState?.status || meetingState?.state || JSON.stringify(meetingState);
       setLastSdkState(stateText);
+      if (stateText === 'CONNECTED') {
+        everConnectedRef.current = true;
+      }
+      if (stateText === 'CLOSED') {
+        hlsStartRequestedRef.current = false;
+        if (endedRef.current) return;
+        const closedAfterConnect = everConnectedRef.current;
+        const closedMessage = closedAfterConnect
+          ? 'Meeting closed by SDK before HLS started. Most common cause is VideoSDK project mismatch (room created with one project and token signed for another), or host permissions/policy ending the meeting.'
+          : 'Meeting closed before becoming stable. Check token roomId, token permissions, and network.';
+        setErrorMessage(closedMessage);
+        setPhase('error');
+      }
       if (__DEV__) {
         console.log('[LiveBroadcast] onMeetingStateChanged', stateText, meetingState);
       }
@@ -250,6 +319,9 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (joinRequestedRef.current) {
+        return;
+      }
       const ok = await ensureCallMediaPermissions(liveMode === 'screen' ? 'audio' : 'video');
       if (cancelled) return;
       if (!ok) {
@@ -262,6 +334,7 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
         return;
       }
       try {
+        joinRequestedRef.current = true;
         if (__DEV__) {
           console.log('[LiveBroadcast] permissions ok, joining room');
         }
@@ -270,6 +343,7 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
           console.log('[LiveBroadcast] join() resolved');
         }
       } catch (e) {
+        joinRequestedRef.current = false;
         if (!cancelled) {
           console.error('[LiveBroadcast] join failed', e);
           Alert.alert('Error', 'Could not join the live room.');
@@ -348,6 +422,11 @@ function BroadcasterMeetingInner({ streamId, quality, liveMode, onStreamEnd, hls
           <Text style={styles.bannerText}> Starting stream…</Text>
         </View>
       )}
+      <View style={styles.statePanel}>
+        <Text style={styles.statePanelText}>phase: {phase}</Text>
+        <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
+        <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
+      </View>
       <TouchableOpacity
         style={[styles.endStream, { bottom: Math.max(insets.bottom, 16) + 16 }]}
         onPress={handleEndPress}
@@ -385,12 +464,38 @@ export default function LiveStreamBroadcasterImpl({
         const t = await getVideoSDKToken(effectiveRoomId, hostUserId);
         if (cancelled) return;
         if (t) {
-          if (__DEV__) {
-            try {
-              const payloadPart = String(t).split('.')[1] || '';
-              const normalized = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
-              const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
-              const claims = JSON.parse(atob(padded));
+          try {
+            const claims = decodeJwtPayload(t);
+            if (claims) {
+              const perms = Array.isArray(claims?.permissions) ? claims.permissions : [];
+              const tokenRoomId = claims?.roomId ? String(claims.roomId) : '';
+              const expectedRoomId = String(effectiveRoomId || '');
+
+              if (tokenRoomId && expectedRoomId && tokenRoomId !== expectedRoomId) {
+                setTokenError(
+                  `VideoSDK token room mismatch: token=${tokenRoomId}, expected=${expectedRoomId}.`
+                );
+                setLoading(false);
+                return;
+              }
+              if (!perms.includes('allow_join')) {
+                setTokenError('VideoSDK token missing allow_join permission.');
+                setLoading(false);
+                return;
+              }
+              if (!perms.includes('allow_mod')) {
+                setTokenError(
+                  'VideoSDK host token missing allow_mod permission. Live (HLS) start requires allow_mod.'
+                );
+                setLoading(false);
+                return;
+              }
+
+              setTokenDebug(
+                `key:${claims?.apikey || 'n/a'} perms:${Array.isArray(perms) ? perms.join('|') : 'n/a'}`
+              );
+            }
+            if (__DEV__ && claims) {
               console.log('[LiveBroadcast] token claims', {
                 apikey: claims?.apikey || null,
                 roomId: claims?.roomId || null,
@@ -398,21 +503,9 @@ export default function LiveStreamBroadcasterImpl({
                 permissions: claims?.permissions || null,
                 roles: claims?.roles || null,
               });
-              const perms = Array.isArray(claims?.permissions) ? claims.permissions : [];
-              setTokenDebug(
-                `key:${claims?.apikey || 'n/a'} perms:${Array.isArray(perms) ? perms.join('|') : 'n/a'}`
-              );
-              if (!perms.includes('allow_join')) {
-                setTokenError('VideoSDK token missing allow_join permission.');
-                setLoading(false);
-                return;
-              }
-              if (!perms.includes('allow_mod')) {
-                console.warn(
-                  '[LiveBroadcast] token does not include allow_mod. HLS/start controls may fail depending on account policy.'
-                );
-              }
-            } catch (decodeError) {
+            }
+          } catch (decodeError) {
+            if (__DEV__) {
               console.warn('[LiveBroadcast] token decode failed', decodeError);
             }
           }
@@ -511,6 +604,7 @@ export default function LiveStreamBroadcasterImpl({
         onStreamEnd={onStreamEnd}
         hlsStartedRef={hlsStartedRef}
         tokenDebug={tokenDebug}
+        roomDebug={effectiveRoomId}
       />
     </MeetingProvider>
   );
@@ -582,6 +676,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginLeft: 10,
     fontSize: 15,
+  },
+  statePanel: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 96,
+    zIndex: 20,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  statePanelText: {
+    color: '#b9f6ff',
+    fontSize: 11,
+    fontFamily: 'monospace',
   },
   devPanel: {
     position: 'absolute',
