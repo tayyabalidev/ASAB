@@ -19,7 +19,7 @@ import {
   isFollowing,
   getFollowerCount,
 } from '../lib/livestream';
-import { VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
+import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { images } from '../constants';
 
@@ -48,11 +48,15 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
 
   const { join, leave, hlsUrls } = useMeeting({
     onMeetingJoined: () => setHlsStateText('MEETING_JOINED'),
-    onHlsStarted: ({ downstreamUrl }) => {
+    onHlsStarted: (payload = {}) => {
+      const downstreamUrl = payload?.downstreamUrl;
       setHlsStateText('HLS_STARTED');
       if (downstreamUrl) setHlsUrl(downstreamUrl);
     },
-    onHlsStateChanged: ({ status, downstreamUrl, playbackHlsUrl }) => {
+    onHlsStateChanged: (payload = {}) => {
+      const status = payload?.status;
+      const downstreamUrl = payload?.downstreamUrl;
+      const playbackHlsUrl = payload?.playbackHlsUrl;
       if (status) setHlsStateText(status);
       if (status === 'HLS_PLAYABLE') {
         const u = downstreamUrl || playbackHlsUrl;
@@ -89,7 +93,11 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
   }, [hlsUrl, player]);
 
   useEffect(() => {
-    join();
+    Promise.resolve(join()).catch((e) => {
+      console.error('[LiveViewer] join failed', e);
+      setHlsStateText('ERROR');
+      onPlaybackEnded?.();
+    });
     return () => {
       try {
         leave();

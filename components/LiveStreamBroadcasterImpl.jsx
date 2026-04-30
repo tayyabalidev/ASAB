@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
-import { VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
+import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { mapLiveQualityToHls } from '../lib/videosdkLiveQuality';
@@ -301,10 +301,11 @@ function BroadcasterMeetingInner({
         setPhase('error');
       }
     },
-    onError: ({ message }) => {
+    onError: (error = {}) => {
+      const message = error?.message || 'unknown';
       if (__DEV__) {
         console.error('[LiveBroadcast] sdk onError', {
-          message: message || 'unknown',
+          message,
           meetingId: roomDebug || null,
           sdkState: lastSdkState,
         });
