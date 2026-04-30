@@ -24,6 +24,9 @@ import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
+const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
+  VIDEOSDK_CONFIG.tokenPath || ''
+}`;
 
 function pickHlsUrl(hlsUrls) {
   if (!hlsUrls) return null;
@@ -254,8 +257,10 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
       <View style={[styles.container, styles.centerFill, { padding: 24 }]}>
         <Text style={styles.errorText}>{tokenError}</Text>
         <Text style={styles.tokenHint}>
-          Configure EXPO_PUBLIC_VIDEOSDK_TOKEN_URL and use a development build (not Expo Go).
+          Configure EXPO_PUBLIC_VIDEOSDK_TOKEN_URL and EXPO_PUBLIC_VIDEOSDK_TOKEN_PATH, then use a
+          development build (not Expo Go).
         </Text>
+        <Text style={styles.tokenHint}>{TOKEN_ENDPOINT_HINT}</Text>
         {onClose && (
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
             <Text style={styles.closeButtonText}>Close</Text>

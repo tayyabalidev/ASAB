@@ -17,6 +17,9 @@ import { mapLiveQualityToHls } from '../lib/videosdkLiveQuality';
 import { endLiveStream } from '../lib/livestream';
 
 const { width, height } = Dimensions.get('window');
+const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
+  VIDEOSDK_CONFIG.tokenPath || ''
+}`;
 
 function decodeJwtPayload(token) {
   try {
@@ -586,9 +589,11 @@ export default function LiveStreamBroadcasterImpl({
       <View style={styles.center}>
         <Text style={styles.err}>{tokenError}</Text>
         <Text style={styles.sub}>
-          Set EXPO_PUBLIC_VIDEOSDK_TOKEN_URL (or EXPO_PUBLIC_SERVER_URL) and rebuild a native dev client.
+          Set EXPO_PUBLIC_VIDEOSDK_TOKEN_URL and EXPO_PUBLIC_VIDEOSDK_TOKEN_PATH correctly, then
+          rebuild a native dev client.
           VideoSDK does not run in Expo Go.
         </Text>
+        <Text style={styles.sub}>{TOKEN_ENDPOINT_HINT}</Text>
         <TouchableOpacity style={styles.endBtn} onPress={() => onStreamEnd?.()}>
           <Text style={styles.endBtnText}>Close</Text>
         </TouchableOpacity>
