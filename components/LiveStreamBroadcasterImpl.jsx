@@ -86,11 +86,8 @@ function BroadcasterMeetingInner({
   const everConnectedRef = useRef(false);
   const meetingJoinedRef = useRef(false);
   const connectedRef = useRef(false);
-  const runHostBroadcastPipelineRef = useRef(null);
-  /** If CONNECTED never fires (SDK event ordering), open the gate once after this delay. */
-  const CONNECTED_GATE_FALLBACK_MS = 20000;
-  const connectedGateTimerRef = useRef(null);
-  const connectedGateFallbackUsedRef = useRef(false);
+  const tryStartHLSRef = useRef(null);
+  const HLS_START_DELAY_MS = 2000;
   const withTimeout = useCallback(async (promiseLike, timeoutMs, timeoutMessage) => {
     let timeoutId = null;
     try {
@@ -168,24 +165,7 @@ function BroadcasterMeetingInner({
           connected: connectedRef.current,
         });
       }
-      if (
-        !connectedRef.current &&
-        !connectedGateFallbackUsedRef.current &&
-        !connectedGateTimerRef.current
-      ) {
-        connectedGateTimerRef.current = setTimeout(() => {
-          connectedGateTimerRef.current = null;
-          if (endedRef.current || hlsStartRequestedRef.current || connectedRef.current) return;
-          connectedGateFallbackUsedRef.current = true;
-          connectedRef.current = true;
-          console.warn(
-            '[LiveBroadcast] CONNECTED not received within ' +
-              `${CONNECTED_GATE_FALLBACK_MS}ms — opening gate once and attempting HLS (SDK event ordering fallback).`
-          );
-          runHostBroadcastPipelineRef.current?.();
-        }, CONNECTED_GATE_FALLBACK_MS);
-      }
-      runHostBroadcastPipelineRef.current?.();
+      tryStartHLSRef.current?.();
     },
     onHlsStarted: () => {
       if (__DEV__) {
@@ -244,19 +224,11 @@ function BroadcasterMeetingInner({
           : meetingState?.status || meetingState?.state || JSON.stringify(meetingState);
       setLastSdkState(stateText);
       if (stateText === 'CONNECTED') {
-        if (connectedGateTimerRef.current) {
-          clearTimeout(connectedGateTimerRef.current);
-          connectedGateTimerRef.current = null;
-        }
         everConnectedRef.current = true;
         connectedRef.current = true;
-        runHostBroadcastPipelineRef.current?.();
+        tryStartHLSRef.current?.();
       }
       if (stateText === 'CLOSED') {
-        if (connectedGateTimerRef.current) {
-          clearTimeout(connectedGateTimerRef.current);
-          connectedGateTimerRef.current = null;
-        }
         hlsStartRequestedRef.current = false;
         if (endedRef.current) return;
         const closedAfterConnect = everConnectedRef.current;
@@ -280,7 +252,7 @@ function BroadcasterMeetingInner({
   actionsRef.current.stopHls = stopHls;
   actionsRef.current.leave = leave;
 
-  const runHostBroadcastPipeline = useCallback(async () => {
+  const tryStartHLS = useCallback(async () => {
     if (endedRef.current || hlsStartRequestedRef.current) {
       return;
     }
@@ -295,7 +267,7 @@ function BroadcasterMeetingInner({
     }
 
     try {
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, HLS_START_DELAY_MS));
       let pinTarget = 'CAM';
       if (liveMode === 'screen') {
         try {
@@ -318,7 +290,7 @@ function BroadcasterMeetingInner({
         }
       }
 
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 1500));
       try {
         const lp = localParticipantRef.current;
         lp?.pin?.(pinTarget);
@@ -379,7 +351,7 @@ function BroadcasterMeetingInner({
         }, 20000);
       }
     } catch (e) {
-      console.error('runHostBroadcastPipeline failed', e);
+      console.error('tryStartHLS failed', e);
       hlsStartedRef.current = false;
       hlsStartRequestedRef.current = false;
       setErrorMessage(e?.message || 'Could not start live stream');
@@ -403,15 +375,30 @@ function BroadcasterMeetingInner({
   ]);
 
   useEffect(() => {
-    runHostBroadcastPipelineRef.current = runHostBroadcastPipeline;
+    tryStartHLSRef.current = tryStartHLS;
     return () => {
-      runHostBroadcastPipelineRef.current = null;
-      if (connectedGateTimerRef.current) {
-        clearTimeout(connectedGateTimerRef.current);
-        connectedGateTimerRef.current = null;
-      }
+      tryStartHLSRef.current = null;
     };
-  }, [runHostBroadcastPipeline]);
+  }, [tryStartHLS]);
+
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('CHECK STATE:', {
+        joined: meetingJoinedRef.current,
+        connected: connectedRef.current,
+        sdk: lastSdkState,
+      });
+    }
+    if (meetingJoinedRef.current && connectedRef.current) {
+      if (__DEV__) {
+        console.log('🎯 FINAL TRIGGER HLS');
+      }
+      const timer = setTimeout(() => {
+        tryStartHLSRef.current?.();
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastSdkState]);
 
   useEffect(() => {
     let cancelled = false;
