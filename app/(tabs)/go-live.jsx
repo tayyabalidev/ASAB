@@ -114,6 +114,7 @@ const GoLive = () => {
         params: {
           streamId: liveStream.$id,
           roomId: liveStream.videosdkRoomId,
+          hostToken: liveStream.videosdkHostToken,
           quality: selectedQuality,
           liveMode: selectedLiveMode,
         }

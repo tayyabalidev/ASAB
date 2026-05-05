@@ -1,21 +1,27 @@
 /**
- * Appwrite Function — VideoSDK JWT for ASAB calls.
+ * Appwrite Function — VideoSDK room + token service for ASAB.
  *
- * Contract (matches lib/videosdkHelper.js):
- *   GET /?roomId=<room>&participantId=<optional>
- *   Response: { "token": "<jwt>" }
+ * Contracts:
+ *   POST /?participantId=<optional>  -> { meetingId, token, debug? }
+ *   GET /?roomId=<required>&participantId=<optional> -> { token, debug? } (viewer/backward-compatible)
  *
- * Function env (Appwrite console): VIDEOSDK_API_KEY, VIDEOSDK_SECRET_KEY
+ * Required env vars:
+ *   VIDEOSDK_API_KEY
+ *   VIDEOSDK_SECRET_KEY
  *
- * Must `return` every res.* (Appwrite requirement).
+ * Notes:
+ * - No separate VIDEOSDK_AUTH_TOKEN variable required.
+ * - Function internally generates a short-lived auth token from API key + secret for /v2/rooms.
+ * - Must `return` every res.* (Appwrite requirement).
  */
 'use strict';
 
 const jwt = require('jsonwebtoken');
+const VIDEOSDK_ROOMS_URL = 'https://api.videosdk.live/v2/rooms';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Accept',
 };
 
@@ -51,18 +57,81 @@ function parseQuery(req) {
   };
 }
 
+function buildRoomAuthToken(apiKey, secretKey) {
+  return jwt.sign(
+    {
+      apikey: apiKey,
+      permissions: ['allow_join', 'allow_mod'],
+      version: 2,
+    },
+    secretKey,
+    {
+      algorithm: 'HS256',
+      expiresIn: '15m',
+    }
+  );
+}
+
+function buildMeetingToken({ apiKey, secretKey, roomId, participantId }) {
+  const payload = {
+    apikey: apiKey,
+    permissions: ['allow_join', 'allow_mod'],
+    version: 2,
+    roles: ['rtc'],
+    roomId,
+  };
+  if (participantId) payload.participantId = participantId;
+  return jwt.sign(payload, secretKey, {
+    expiresIn: '2h',
+    algorithm: 'HS256',
+  });
+}
+
+async function createRoom(apiKey, secretKey) {
+  const authToken = buildRoomAuthToken(apiKey, secretKey);
+  const response = await fetch(VIDEOSDK_ROOMS_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: authToken,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  });
+
+  const rawBody = await response.text();
+  let data = null;
+  try {
+    data = rawBody ? JSON.parse(rawBody) : null;
+  } catch (_) {
+    data = rawBody;
+  }
+
+  if (!response.ok) {
+    const err = new Error('Room creation failed');
+    err.status = response.status || 500;
+    err.details = data || rawBody || null;
+    throw err;
+  }
+
+  const roomId = data?.roomId || data?.room_id || data?.id || data?.meetingId || '';
+  if (!roomId) {
+    const err = new Error('Room API response missing roomId');
+    err.status = 502;
+    err.details = data || null;
+    throw err;
+  }
+  return String(roomId);
+}
+
 module.exports = async ({ req, res, log }) => {
   try {
-    // Appwrite may pass lowercase "get" / "options" — strict !== "GET" causes false 405s.
-    const method = String(req.method || "GET").toUpperCase();
+    const method = String(req.method || 'GET').toUpperCase();
 
-    if (method === "OPTIONS") {
+    if (method === 'OPTIONS') {
       return res.send('', 204, cors);
     }
-
-    if (method !== "GET") {
-      return res.json({ error: 'Method not allowed' }, 405, cors);
-    }
+    if (method !== 'GET' && method !== 'POST') return res.json({ error: 'Method not allowed' }, 405, cors);
 
     const apiKey = String(process.env.VIDEOSDK_API_KEY || '').trim();
     const secretKey = String(process.env.VIDEOSDK_SECRET_KEY || '').trim();
@@ -88,7 +157,7 @@ module.exports = async ({ req, res, log }) => {
           videoSdkKeysPresent: Boolean(apiKey && secretKey),
           hint: !apiKey || !secretKey
             ? 'Add VIDEOSDK_API_KEY and VIDEOSDK_SECRET_KEY to this function (Settings → Variables), save, redeploy.'
-            : 'Keys present; use ?roomId=...&participantId=... for token.',
+            : 'Keys present; POST for room+token, GET ?roomId=... for token-only.',
         },
         200,
         cors
@@ -108,49 +177,70 @@ module.exports = async ({ req, res, log }) => {
       );
     }
 
-    if (!roomId) {
-      return res.json(
-        { error: 'roomId is required' },
-        400,
-        cors
-      );
+    if (method === 'GET') {
+      if (!roomId) return res.json({ error: 'roomId is required' }, 400, cors);
+      const token = buildMeetingToken({
+        apiKey,
+        secretKey,
+        roomId: String(roomId),
+        participantId,
+      });
+      const claims = safeDecodeJwtNoVerify(token) || {};
+      const debug = {
+        requestedRoomId: roomId,
+        participantId: participantId || null,
+        tokenRoomId: claims.roomId || null,
+        tokenApiKey: claims.apikey || null,
+        tokenPermissions: Array.isArray(claims.permissions) ? claims.permissions : [],
+      };
+      if (debugRequested) log(`videosdk-token GET debug ${JSON.stringify(debug)}`);
+      return res.json({ token, debug }, 200, {
+        ...cors,
+        'Content-Type': 'application/json',
+      });
     }
 
-    const payload = {
-      apikey: apiKey,
-      permissions: ['allow_join', 'allow_mod', 'ask_join'],
-      version: 2,
-      roles: ['rtc'],
-    };
-    payload.roomId = roomId;
-    if (participantId) payload.participantId = participantId;
-
-    const token = jwt.sign(payload, secretKey, {
-      expiresIn: '2h',
-      algorithm: 'HS256',
+    // POST: create room + token atomically
+    const createdMeetingId = await createRoom(apiKey, secretKey);
+    const token = buildMeetingToken({
+      apiKey,
+      secretKey,
+      roomId: createdMeetingId,
+      participantId,
     });
     const claims = safeDecodeJwtNoVerify(token) || {};
     const debug = {
-      requestedRoomId: roomId,
+      requestedRoomId: createdMeetingId,
       participantId: participantId || null,
       tokenRoomId: claims.roomId || null,
       tokenApiKey: claims.apikey || null,
       tokenPermissions: Array.isArray(claims.permissions) ? claims.permissions : [],
     };
-    if (debugRequested) {
-      log(`videosdk-token debug ${JSON.stringify(debug)}`);
-    }
-
-    return res.json({ token, debug }, 200, {
+    if (debugRequested) log(`videosdk-token POST debug ${JSON.stringify(debug)}`);
+    return res.json({ meetingId: createdMeetingId, token, debug }, 200, {
       ...cors,
       'Content-Type': 'application/json',
     });
   } catch (e) {
+    if (e && e.message === 'Room creation failed') {
+      return res.json(
+        { error: 'Room creation failed', details: e.details || null },
+        e.status || 500,
+        cors
+      );
+    }
+    if (e && e.message === 'Room API response missing roomId') {
+      return res.json(
+        { error: 'Room API missing roomId', details: e.details || null },
+        e.status || 502,
+        cors
+      );
+    }
     try {
       log(String(e && e.message ? e.message : e));
     } catch (_) {}
     return res.json(
-      { error: 'Token generation failed', message: e.message || 'unknown' },
+      { error: 'create-room-and-token failed', message: e.message || 'unknown' },
       500,
       cors
     );

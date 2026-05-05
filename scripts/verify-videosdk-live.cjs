@@ -64,26 +64,37 @@ async function main() {
     throw new Error('Missing EXPO_PUBLIC_VIDEOSDK_TOKEN_URL or EXPO_PUBLIC_VIDEOSDK_ROOM_URL');
   }
 
-  const roomUrl = `${roomBase}${roomPath.startsWith('/') || !roomPath ? roomPath : `/${roomPath}`}`;
-  const roomResponse = await readJson(roomUrl, 'POST');
-  const roomId = roomResponse?.roomId || roomResponse?.id || roomResponse?.room_id;
-  if (!roomId) {
-    throw new Error(`Room API did not return roomId: ${JSON.stringify(roomResponse)}`);
-  }
-
   const participantId = process.env.VIDEOSDK_VERIFY_PARTICIPANT_ID || 'verify-host';
-  const tokenUrlBase = `${tokenBase}${tokenPath.startsWith('/') || !tokenPath ? tokenPath : `/${tokenPath}`}`;
-  const tokenUrl = `${tokenUrlBase}?roomId=${encodeURIComponent(roomId)}&participantId=${encodeURIComponent(participantId)}&debug=1`;
-  const tokenResponse = await readJson(tokenUrl, 'GET');
-  const token = tokenResponse?.token;
-  if (!token) {
-    throw new Error(`Token API did not return token: ${JSON.stringify(tokenResponse)}`);
+  const roomUrlBase = `${roomBase}${roomPath.startsWith('/') || !roomPath ? roomPath : `/${roomPath}`}`;
+  const combinedUrl = `${roomUrlBase}?participantId=${encodeURIComponent(participantId)}&debug=1`;
+
+  let roomResponse = null;
+  let tokenResponse = null;
+  let roomId = '';
+  let token = '';
+  const verificationMode = 'single-endpoint';
+
+  const combinedResponse = await readJson(combinedUrl, 'POST');
+  roomId =
+    combinedResponse?.meetingId ||
+    combinedResponse?.roomId ||
+    combinedResponse?.id ||
+    combinedResponse?.room_id ||
+    '';
+  token = typeof combinedResponse?.token === 'string' ? combinedResponse.token : '';
+  if (!roomId || !token) {
+    throw new Error(
+      `Combined endpoint missing fields (meetingId/token): ${JSON.stringify(combinedResponse)}`
+    );
   }
+  roomResponse = combinedResponse;
+  tokenResponse = combinedResponse;
 
   const claims = decodeJwtPayload(token) || {};
   const perms = Array.isArray(claims.permissions) ? claims.permissions : [];
 
   console.log('--- VideoSDK Live Verification ---');
+  console.log(`mode: ${verificationMode}`);
   console.log(`roomBase: ${roomBase}`);
   console.log(`tokenBase: ${tokenBase}`);
   console.log(`roomId: ${roomId}`);

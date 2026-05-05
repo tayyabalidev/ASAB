@@ -11,7 +11,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
-import { getVideoSDKToken } from '../lib/videosdkHelper';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { mapLiveQualityToHls } from '../lib/videosdkLiveQuality';
 import { endLiveStream } from '../lib/livestream';
@@ -528,6 +527,7 @@ function BroadcasterMeetingInner({
 export default function LiveStreamBroadcasterImpl({
   streamId,
   roomId,
+  initialToken,
   hostUserId,
   hostDisplayName,
   quality = 'auto',
@@ -556,7 +556,12 @@ export default function LiveStreamBroadcasterImpl({
             }.`
           );
         }
-        const t = await getVideoSDKToken(effectiveRoomId, hostUserId);
+        const t = typeof initialToken === 'string' ? initialToken.trim() : '';
+        if (!t) {
+          throw new Error(
+            'Missing host token from create-room-and-token response. Ensure backend returns both meetingId and token in one call.'
+          );
+        }
         if (cancelled) return;
         if (t) {
           try {
@@ -628,7 +633,7 @@ export default function LiveStreamBroadcasterImpl({
     return () => {
       cancelled = true;
     };
-  }, [effectiveRoomId, hostUserId, roomId, streamId]);
+  }, [effectiveRoomId, hostUserId, initialToken, roomId, streamId]);
 
   if (loading) {
     return (
