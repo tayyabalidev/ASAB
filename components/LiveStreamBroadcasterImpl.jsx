@@ -79,6 +79,8 @@ function BroadcasterMeetingInner({
   const endedRef = useRef(false);
   const actionsRef = useRef({});
   const hlsStartTriggeredRef = useRef(false);
+  const hlsStartTimerRef = useRef(null);
+  const joinOnceRef = useRef(false);
 
   useEffect(() => {
     if (__DEV__) {
@@ -127,6 +129,8 @@ function BroadcasterMeetingInner({
     startHls,
     stopHls,
     enableWebcam,
+    startScreenShare,
+    enableScreenShare,
   } = useMeeting({
     onMeetingJoined: () => {
       console.log('✅ JOINED');
@@ -162,10 +166,20 @@ function BroadcasterMeetingInner({
       if (stateText === 'CONNECTED' && !hlsStartTriggeredRef.current) {
         hlsStartTriggeredRef.current = true;
         console.log('🎯 NOW SAFE TO START HLS');
-        setTimeout(async () => {
+        hlsStartTimerRef.current = setTimeout(async () => {
           if (endedRef.current) return;
           try {
-            enableWebcam();
+            if (liveMode === 'screen') {
+              const startScreen =
+                (typeof startScreenShare === 'function' && startScreenShare) ||
+                (typeof enableScreenShare === 'function' && enableScreenShare);
+              if (!startScreen) {
+                throw new Error('Screen share is not available in this build');
+              }
+              await Promise.resolve(startScreen());
+            } else {
+              enableWebcam();
+            }
             await new Promise((r) => setTimeout(r, 1000));
             console.log('🚀 Starting HLS...');
             startHls({
@@ -184,11 +198,19 @@ function BroadcasterMeetingInner({
         }, 2000);
       }
       if (stateText === 'CLOSED') {
+        if (hlsStartTimerRef.current) {
+          clearTimeout(hlsStartTimerRef.current);
+          hlsStartTimerRef.current = null;
+        }
         setErrorMessage('Meeting closed by SDK');
         setPhase('error');
       }
     },
     onError: (err) => {
+      if (hlsStartTimerRef.current) {
+        clearTimeout(hlsStartTimerRef.current);
+        hlsStartTimerRef.current = null;
+      }
       console.error('❌ SDK ERROR:', err);
       setErrorMessage(err?.message || 'Meeting error');
       setPhase('error');
@@ -201,10 +223,17 @@ function BroadcasterMeetingInner({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const ok = await ensureCallMediaPermissions('video');
+      if (joinOnceRef.current) return;
+      joinOnceRef.current = true;
+      const ok = await ensureCallMediaPermissions(liveMode === 'screen' ? 'audio' : 'video');
       if (cancelled) return;
       if (!ok) {
-        Alert.alert('Permissions required');
+        Alert.alert(
+          'Permissions required',
+          liveMode === 'screen'
+            ? 'Microphone permission is required for screen live streaming.'
+            : 'Camera and microphone permissions are required for camera live streaming.'
+        );
         return;
       }
       try {
@@ -220,12 +249,16 @@ function BroadcasterMeetingInner({
     })();
     return () => {
       cancelled = true;
+      if (hlsStartTimerRef.current) {
+        clearTimeout(hlsStartTimerRef.current);
+        hlsStartTimerRef.current = null;
+      }
       try {
         if (hlsStartedRef.current) stopHls();
         leave();
       } catch (_) {}
     };
-  }, []);
+  }, [join, leave, liveMode, stopHls]);
 
   useEffect(() => {
     if (phase !== 'joining') return undefined;
@@ -238,22 +271,6 @@ function BroadcasterMeetingInner({
     }, 75000);
     return () => clearTimeout(t);
   }, [phase, lastSdkState]);
-
-  useEffect(() => {
-    return () => {
-      if (endedRef.current) return;
-      endedRef.current = true;
-      const act = actionsRef.current;
-      try {
-        if (hlsStartedRef.current) act.stopHls?.();
-      } catch (_) {}
-      try {
-        act.leave?.();
-      } catch (_) {}
-      hlsStartedRef.current = false;
-      endLiveStream(streamId).catch(() => {});
-    };
-  }, [streamId, hlsStartedRef]);
 
   const handleEndPress = () => {
     finalizeEnd(true);
@@ -325,6 +342,7 @@ export default function LiveStreamBroadcasterImpl({
   const hlsStartedRef = useRef(false);
   // Host must always join using the real VideoSDK room id (not Appwrite stream id).
   const effectiveRoomId = typeof roomId === 'string' ? roomId.trim() : '';
+  const effectiveParticipantId = `${hostUserId || 'host'}-${streamId || Date.now()}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -474,7 +492,7 @@ export default function LiveStreamBroadcasterImpl({
     <MeetingProvider
       config={{
         meetingId: effectiveRoomId,
-        participantId: hostUserId,
+        participantId: effectiveParticipantId,
         micEnabled: true,
         webcamEnabled: liveMode !== 'screen',
         name: hostDisplayName || hostUserId || 'Host',

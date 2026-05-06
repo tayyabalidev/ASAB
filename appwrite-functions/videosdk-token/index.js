@@ -72,10 +72,10 @@ function buildRoomAuthToken(apiKey, secretKey) {
   );
 }
 
-function buildMeetingToken({ apiKey, secretKey, roomId, participantId }) {
+function buildMeetingToken({ apiKey, secretKey, roomId, participantId, permissions }) {
   const payload = {
     apikey: apiKey,
-    permissions: ['allow_join', 'allow_mod'],
+    permissions: Array.isArray(permissions) && permissions.length > 0 ? permissions : ['allow_join'],
     version: 2,
     roles: ['rtc'],
     roomId,
@@ -184,6 +184,7 @@ module.exports = async ({ req, res, log }) => {
         secretKey,
         roomId: String(roomId),
         participantId,
+        permissions: ['allow_join'],
       });
       const claims = safeDecodeJwtNoVerify(token) || {};
       const debug = {
@@ -207,6 +208,7 @@ module.exports = async ({ req, res, log }) => {
       secretKey,
       roomId: createdMeetingId,
       participantId,
+      permissions: ['allow_join', 'allow_mod'],
     });
     const claims = safeDecodeJwtNoVerify(token) || {};
     const debug = {
