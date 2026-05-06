@@ -62,9 +62,12 @@ const VideoSDKCallInner = ({
   const durationIntervalRef = useRef(null);
   const callIdRef = useRef(callId);
   const participantsRef = useRef(new Map());
+  const meetingJoinedRef = useRef(false);
   const connectedReportedRef = useRef(false);
   const endingRef = useRef(false);
   const joinTimeoutRef = useRef(null);
+  const joinFnRef = useRef(null);
+  const leaveFnRef = useRef(null);
 
   useEffect(() => {
     callIdRef.current = callId;
@@ -78,10 +81,12 @@ const VideoSDKCallInner = ({
         clearTimeout(joinTimeoutRef.current);
         joinTimeoutRef.current = null;
       }
+      meetingJoinedRef.current = true;
       setMeetingJoined(true);
     },
     onMeetingLeft: () => {
       console.log('👋 Left VideoSDK meeting');
+      meetingJoinedRef.current = false;
       if (!endingRef.current) {
         handleCallEnd();
       }
@@ -105,6 +110,8 @@ const VideoSDKCallInner = ({
   });
 
   participantsRef.current = participants;
+  joinFnRef.current = join;
+  leaveFnRef.current = leave;
 
   // VideoSDK participant ids are not Appwrite user ids — exclude local by SDK localParticipant
   const localId = localParticipant?.id;
@@ -118,6 +125,11 @@ const VideoSDKCallInner = ({
   useEffect(() => {
     if (!remoteConnected || !callIdRef.current || connectedReportedRef.current) return;
     connectedReportedRef.current = true;
+    console.log('[CALL_REMOTE_CONNECTED]', {
+      callId: callIdRef.current,
+      roomId,
+      remoteCount: remoteParticipants.length,
+    });
     updateCallStatus(callIdRef.current, CallState.CONNECTED).catch(console.error);
   }, [remoteConnected]);
 
@@ -155,6 +167,12 @@ const VideoSDKCallInner = ({
     let cancelled = false;
     const joinMeeting = async () => {
       try {
+        console.log('[CALL_JOIN_START]', {
+          roomId,
+          callType,
+          callId: callIdRef.current,
+          userId: currentUserId || null,
+        });
         const allowed = await ensureCallMediaPermissions(callType);
         if (cancelled) return;
         if (!allowed) {
@@ -169,13 +187,17 @@ const VideoSDKCallInner = ({
         }
 
         joinTimeoutRef.current = setTimeout(() => {
-          if (!cancelled && !meetingJoined && !endingRef.current) {
+          if (!cancelled && !meetingJoinedRef.current && !endingRef.current) {
             const timeoutError = new Error('Joining room timed out. Check token, roomId, or network.');
             if (onError) onError(timeoutError);
           }
         }, 45000);
 
-        await join();
+        await joinFnRef.current?.();
+        console.log('[CALL_JOIN_REQUESTED]', {
+          roomId,
+          callId: callIdRef.current,
+        });
       } catch (error) {
         if (cancelled || endingRef.current) return;
         console.error('Error joining VideoSDK meeting:', error);
@@ -192,10 +214,15 @@ const VideoSDKCallInner = ({
         joinTimeoutRef.current = null;
       }
     };
-  }, [roomId, join, callType, onError]);
+  }, [roomId, callType, onError]);
 
   const handleCallEnd = async () => {
     if (endingRef.current) return;
+    console.log('[CALL_END_START]', {
+      roomId,
+      callId: callIdRef.current,
+      userId: currentUserId || null,
+    });
     endingRef.current = true;
     connectedReportedRef.current = false;
     setMeetingJoined(false);
@@ -215,6 +242,10 @@ const VideoSDKCallInner = ({
     } catch (e) {
       console.warn('Error leaving meeting:', e);
     }
+    console.log('[CALL_END_DONE]', {
+      roomId,
+      callId: callIdRef.current,
+    });
     try {
       if (onCallEnd) onCallEnd();
     } catch (e) {
@@ -235,11 +266,11 @@ const VideoSDKCallInner = ({
       if (!endingRef.current) {
         endingRef.current = true;
         try {
-          leave();
+          leaveFnRef.current?.();
         } catch (_) {}
       }
     };
-  }, [leave]);
+  }, []);
 
   const toggleMute = async () => {
     try {

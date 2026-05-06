@@ -219,6 +219,7 @@ function BroadcasterMeetingInner({
 
   actionsRef.current.stopHls = stopHls;
   actionsRef.current.leave = leave;
+  actionsRef.current.join = join;
 
   useEffect(() => {
     let cancelled = false;
@@ -238,7 +239,7 @@ function BroadcasterMeetingInner({
       }
       try {
         console.log('📞 Joining meeting...');
-        await join();
+        await actionsRef.current.join?.();
       } catch (e) {
         if (!cancelled) {
           console.error('❌ JOIN FAILED:', e);
@@ -255,10 +256,10 @@ function BroadcasterMeetingInner({
       }
       try {
         if (hlsStartedRef.current) stopHls();
-        leave();
+        actionsRef.current.leave?.();
       } catch (_) {}
     };
-  }, [join, leave, liveMode, stopHls]);
+  }, []);
 
   useEffect(() => {
     if (phase !== 'joining') return undefined;
