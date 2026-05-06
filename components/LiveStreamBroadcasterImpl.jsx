@@ -12,7 +12,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
-import { mapLiveQualityToHls } from '../lib/videosdkLiveQuality';
 import { endLiveStream } from '../lib/livestream';
 
 const { width, height } = Dimensions.get('window');
@@ -79,25 +78,7 @@ function BroadcasterMeetingInner({
   const [lastSdkState, setLastSdkState] = useState('INIT');
   const endedRef = useRef(false);
   const actionsRef = useRef({});
-  /** HLS start is event-driven; do not rely solely on startHls()'s promise resolving. */
-  const hlsStartRequestedRef = useRef(false);
-  const joinRequestedRef = useRef(false);
-  const everConnectedRef = useRef(false);
-  const meetingJoinedRef = useRef(false);
-  const connectedRef = useRef(false);
-  const tryStartHLSRef = useRef(null);
-  const HLS_START_DELAY_MS = 2000;
-  const withTimeout = useCallback(async (promiseLike, timeoutMs, timeoutMessage) => {
-    let timeoutId = null;
-    try {
-      const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-      });
-      return await Promise.race([Promise.resolve(promiseLike), timeoutPromise]);
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
-  }, []);
+  const hlsStartTriggeredRef = useRef(false);
 
   useEffect(() => {
     if (__DEV__) {
@@ -140,308 +121,111 @@ function BroadcasterMeetingInner({
     [streamId, stopMeeting, onStreamEnd, hlsStartedRef]
   );
 
-  const finalizeEndRef = useRef(finalizeEnd);
-  finalizeEndRef.current = finalizeEnd;
-
-  const localParticipantRef = useRef(null);
   const {
     join,
     leave,
     startHls,
     stopHls,
-    localParticipant,
     enableWebcam,
-    startScreenShare,
-    enableScreenShare,
   } = useMeeting({
     onMeetingJoined: () => {
-      meetingJoinedRef.current = true;
-      if (__DEV__) {
-        console.log('[LiveBroadcast] onMeetingJoined', {
-          meetingId: roomDebug || null,
-          phase,
-          sdkState: lastSdkState,
-          connected: connectedRef.current,
-        });
-      }
-      tryStartHLSRef.current?.();
+      console.log('✅ JOINED');
     },
     onHlsStarted: () => {
-      if (__DEV__) {
-        console.log('[LiveBroadcast] onHlsStarted');
-      }
+      console.log('🔥 HLS STARTED');
       if (endedRef.current) return;
       hlsStartedRef.current = true;
-      setPhase((p) => (p === 'error' ? p : 'live'));
+      setPhase('live');
     },
-    onHlsStateChanged: (state) => {
-      if (!state || endedRef.current) return;
-      const statusText = String(state?.status || '');
+    onHlsStateChanged: (data) => {
+      if (!data || endedRef.current) return;
+      const statusText = String(data?.status || '');
+      console.log('📡 HLS STATE:', data?.status);
       setLastSdkState(statusText);
-      if (__DEV__) {
-        console.log('[LiveBroadcast] onHlsStateChanged', statusText, state);
-      }
       if (statusText === 'HLS_STARTED' || statusText === 'HLS_PLAYABLE') {
         hlsStartedRef.current = true;
-        setPhase((p) => (p === 'error' ? p : 'live'));
+        setPhase('live');
       }
-      const failed =
-        statusText.includes('FAILED') || statusText.includes('ERROR') || statusText === 'HLS_FAILED';
-      if (failed) {
-        hlsStartRequestedRef.current = false;
-        const reason =
-          state?.error ||
-          state?.message ||
-          state?.reason ||
-          state?.details ||
-          null;
-        setErrorMessage(
-          reason
-            ? `Live stream failed: ${String(reason)}`
-            : 'Live stream could not start. Check VideoSDK HLS / dashboard settings.'
-        );
+      if (statusText.includes('FAILED')) {
+        setErrorMessage('HLS failed to start');
         setPhase('error');
       }
     },
-    onError: (error = {}) => {
-      const message = error?.message || 'unknown';
-      if (__DEV__) {
-        console.error('[LiveBroadcast] sdk onError', {
-          message,
-          meetingId: roomDebug || null,
-          sdkState: lastSdkState,
-        });
-      }
-      setErrorMessage(message || 'Meeting error');
-      setPhase('error');
-    },
-    onMeetingStateChanged: (meetingState) => {
-      if (!meetingState) return;
+    onMeetingStateChanged: (state) => {
+      if (!state) return;
       const stateText =
-        typeof meetingState === 'string'
-          ? meetingState
-          : meetingState?.status || meetingState?.state || JSON.stringify(meetingState);
+        typeof state === 'string'
+          ? state
+          : state?.status || state?.state;
+      console.log('📡 MEETING STATE:', stateText);
       setLastSdkState(stateText);
-      if (stateText === 'CONNECTED') {
-        everConnectedRef.current = true;
-        connectedRef.current = true;
-        tryStartHLSRef.current?.();
+      if (stateText === 'CONNECTED' && !hlsStartTriggeredRef.current) {
+        hlsStartTriggeredRef.current = true;
+        console.log('🎯 NOW SAFE TO START HLS');
+        setTimeout(async () => {
+          if (endedRef.current) return;
+          try {
+            enableWebcam();
+            await new Promise((r) => setTimeout(r, 1000));
+            console.log('🚀 Starting HLS...');
+            startHls({
+              layout: {
+                type: 'SPOTLIGHT',
+                priority: 'PIN',
+              },
+              theme: 'DARK',
+              mode: 'video-and-audio',
+            });
+          } catch (err) {
+            console.error('❌ HLS START ERROR:', err);
+            setErrorMessage(err?.message || 'HLS start error');
+            setPhase('error');
+          }
+        }, 2000);
       }
       if (stateText === 'CLOSED') {
-        hlsStartRequestedRef.current = false;
-        if (endedRef.current) return;
-        const closedAfterConnect = everConnectedRef.current;
-        const closedMessage = closedAfterConnect
-          ? 'Meeting closed by SDK before HLS started. Most common cause is VideoSDK project mismatch (room created with one project and token signed for another), or host permissions/policy ending the meeting.'
-          : 'Meeting closed before becoming stable. Check token roomId, token permissions, and network.';
-        setErrorMessage(closedMessage);
+        setErrorMessage('Meeting closed by SDK');
         setPhase('error');
       }
-      if (__DEV__) {
-        console.log('[LiveBroadcast] onMeetingStateChanged', {
-          meetingId: roomDebug || null,
-          state: stateText,
-          raw: meetingState,
-        });
-      }
+    },
+    onError: (err) => {
+      console.error('❌ SDK ERROR:', err);
+      setErrorMessage(err?.message || 'Meeting error');
+      setPhase('error');
     },
   });
 
-  localParticipantRef.current = localParticipant;
   actionsRef.current.stopHls = stopHls;
   actionsRef.current.leave = leave;
-
-  const tryStartHLS = useCallback(async () => {
-    if (endedRef.current || hlsStartRequestedRef.current) {
-      return;
-    }
-    if (!meetingJoinedRef.current || !connectedRef.current) {
-      if (__DEV__) {
-        console.log('[LiveBroadcast] waiting for stable gate', {
-          meetingJoined: meetingJoinedRef.current,
-          connected: connectedRef.current,
-        });
-      }
-      return;
-    }
-
-    try {
-      await new Promise((r) => setTimeout(r, HLS_START_DELAY_MS));
-      let pinTarget = 'CAM';
-      if (liveMode === 'screen') {
-        try {
-          const startScreen =
-            (typeof startScreenShare === 'function' && startScreenShare) ||
-            (typeof enableScreenShare === 'function' && enableScreenShare);
-          if (!startScreen) {
-            throw new Error('Screen share is not available in this build');
-          }
-          await withTimeout(Promise.resolve(startScreen()), 8000, 'Screen share start timed out');
-          pinTarget = 'SHARE';
-        } catch (e) {
-          throw new Error(`Screen share failed: ${e?.message || String(e)}`);
-        }
-      } else {
-        try {
-          enableWebcam();
-        } catch (e) {
-          console.warn('Live broadcast: enableWebcam', e);
-        }
-      }
-
-      await new Promise((r) => setTimeout(r, 1500));
-      try {
-        const lp = localParticipantRef.current;
-        lp?.pin?.(pinTarget);
-      } catch (_) {}
-
-      const q = mapLiveQualityToHls(quality);
-      hlsStartRequestedRef.current = true;
-      if (__DEV__) {
-        console.log('[LiveBroadcast] startHls requested', {
-          meetingId: roomDebug || null,
-          quality: q,
-        });
-      }
-      const hlsPromise = startHls({
-        layout: {
-          type: 'SPOTLIGHT',
-          priority: 'PIN',
-          gridSize: 4,
-        },
-        theme: 'DARK',
-        mode: 'video-and-audio',
-        quality: q,
-      });
-      if (hlsPromise && typeof hlsPromise.then === 'function') {
-        withTimeout(
-          hlsPromise,
-          20000,
-          'HLS start timed out. Meeting joined but HLS did not become ready.'
-        )
-          .then(() => {
-            if (endedRef.current) return;
-            hlsStartedRef.current = true;
-            setPhase((p) => (p === 'error' ? p : 'live'));
-          })
-          .catch((e) => {
-            console.error('startHls failed', {
-              error: e?.message || String(e),
-              meetingId: roomDebug || null,
-              sdkState: lastSdkState,
-            });
-            hlsStartedRef.current = false;
-            hlsStartRequestedRef.current = false;
-            setErrorMessage(e?.message || 'Could not start live stream');
-            setPhase('error');
-            Alert.alert(
-              'Live stream',
-              'Failed to start HLS. Confirm interactive live streaming is enabled in VideoSDK, token includes allow_mod, and this meeting room belongs to the same VideoSDK project.'
-            );
-          });
-      } else {
-        // Some SDK builds return void and only emit events; fail fast if no state change arrives.
-        setTimeout(() => {
-          if (endedRef.current || hlsStartedRef.current) return;
-          setErrorMessage(
-            `HLS did not start (SDK state: ${lastSdkState || 'unknown'}). Verify VideoSDK interactive HLS, token permissions, and project keys.`
-          );
-          setPhase((p) => (p === 'joining' ? 'error' : p));
-        }, 20000);
-      }
-    } catch (e) {
-      console.error('tryStartHLS failed', e);
-      hlsStartedRef.current = false;
-      hlsStartRequestedRef.current = false;
-      setErrorMessage(e?.message || 'Could not start live stream');
-      setPhase('error');
-      Alert.alert(
-        'Live stream',
-        'Failed to start HLS. Confirm your VideoSDK project has interactive live streaming enabled and your token server is configured.'
-      );
-    }
-  }, [
-    liveMode,
-    enableScreenShare,
-    enableWebcam,
-    hlsStartedRef,
-    lastSdkState,
-    quality,
-    roomDebug,
-    startHls,
-    startScreenShare,
-    withTimeout,
-  ]);
-
-  useEffect(() => {
-    tryStartHLSRef.current = tryStartHLS;
-    return () => {
-      tryStartHLSRef.current = null;
-    };
-  }, [tryStartHLS]);
-
-  useEffect(() => {
-    if (__DEV__) {
-      console.log('CHECK STATE:', {
-        joined: meetingJoinedRef.current,
-        connected: connectedRef.current,
-        sdk: lastSdkState,
-      });
-    }
-    if (meetingJoinedRef.current && connectedRef.current) {
-      if (__DEV__) {
-        console.log('🎯 FINAL TRIGGER HLS');
-      }
-      const timer = setTimeout(() => {
-        tryStartHLSRef.current?.();
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [lastSdkState]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (joinRequestedRef.current) {
-        return;
-      }
-      const ok = await ensureCallMediaPermissions(liveMode === 'screen' ? 'audio' : 'video');
+      const ok = await ensureCallMediaPermissions('video');
       if (cancelled) return;
       if (!ok) {
-        const permissionMessage =
-          liveMode === 'screen'
-            ? 'Microphone permission is required to go live.'
-            : 'Camera and microphone are required to go live.';
-        Alert.alert('Permissions', permissionMessage);
-        await finalizeEndRef.current(true);
+        Alert.alert('Permissions required');
         return;
       }
       try {
-        joinRequestedRef.current = true;
-        if (__DEV__) {
-          console.log('[LiveBroadcast] permissions ok, joining room', {
-            meetingId: roomDebug || null,
-          });
-        }
+        console.log('📞 Joining meeting...');
         await join();
-        if (__DEV__ && !cancelled) {
-          console.log('[LiveBroadcast] join() resolved', {
-            meetingId: roomDebug || null,
-          });
-        }
       } catch (e) {
-        joinRequestedRef.current = false;
         if (!cancelled) {
-          console.error('[LiveBroadcast] join failed', e);
-          Alert.alert('Error', 'Could not join the live room.');
-          await finalizeEndRef.current(true);
+          console.error('❌ JOIN FAILED:', e);
+          setErrorMessage('Failed to join meeting');
+          setPhase('error');
         }
       }
     })();
     return () => {
       cancelled = true;
+      try {
+        if (hlsStartedRef.current) stopHls();
+        leave();
+      } catch (_) {}
     };
-  }, [join, liveMode, roomDebug]);
+  }, []);
 
   useEffect(() => {
     if (phase !== 'joining') return undefined;
@@ -567,6 +351,8 @@ export default function LiveStreamBroadcasterImpl({
           try {
             const claims = decodeJwtPayload(t);
             if (claims) {
+              console.log('TOKEN ROOM ID:', claims?.roomId);
+              console.log('JOINING ROOM ID:', effectiveRoomId);
               const perms = Array.isArray(claims?.permissions) ? claims.permissions : [];
               const tokenRoomId = claims?.roomId ? String(claims.roomId) : '';
               const expectedRoomId = String(effectiveRoomId || '');
