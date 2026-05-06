@@ -339,15 +339,20 @@ export default function LiveStreamBroadcasterImpl({
   const [loading, setLoading] = useState(true);
   const [tokenError, setTokenError] = useState(null);
   const [tokenDebug, setTokenDebug] = useState('token: n/a');
+  const [tokenParticipantId, setTokenParticipantId] = useState(null);
   const hlsStartedRef = useRef(false);
   // Host must always join using the real VideoSDK room id (not Appwrite stream id).
   const effectiveRoomId = typeof roomId === 'string' ? roomId.trim() : '';
-  const effectiveParticipantId = `${hostUserId || 'host'}-${streamId || Date.now()}`;
+  const effectiveParticipantId =
+    (typeof tokenParticipantId === 'string' && tokenParticipantId.trim()) ||
+    hostUserId ||
+    `${hostUserId || 'host'}-${streamId || Date.now()}`;
 
   useEffect(() => {
     let cancelled = false;
     setTokenError(null);
     setToken(null);
+    setTokenParticipantId(null);
     setLoading(true);
     (async () => {
       try {
@@ -371,6 +376,9 @@ export default function LiveStreamBroadcasterImpl({
             if (claims) {
               console.log('TOKEN ROOM ID:', claims?.roomId);
               console.log('JOINING ROOM ID:', effectiveRoomId);
+              if (claims?.participantId) {
+                setTokenParticipantId(String(claims.participantId));
+              }
               const perms = Array.isArray(claims?.permissions) ? claims.permissions : [];
               const tokenRoomId = claims?.roomId ? String(claims.roomId) : '';
               const expectedRoomId = String(effectiveRoomId || '');
