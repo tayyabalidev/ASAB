@@ -75,7 +75,9 @@ function BroadcasterMeetingInner({
   const insets = useSafeAreaInsets();
   const [phase, setPhase] = useState('joining');
   const [errorMessage, setErrorMessage] = useState(null);
+  const [errorDetail, setErrorDetail] = useState(null);
   const [lastSdkState, setLastSdkState] = useState('INIT');
+  const [debugLines, setDebugLines] = useState([]);
   const endedRef = useRef(false);
   const actionsRef = useRef({});
   const hlsStartTriggeredRef = useRef(false);
@@ -91,6 +93,28 @@ function BroadcasterMeetingInner({
         quality,
       });
     }
+  }, [streamId, roomDebug, liveMode, quality]);
+
+  useEffect(() => {
+    const addDebugLine = (label, value) => {
+      const text =
+        typeof value === 'string'
+          ? value
+          : (() => {
+              try {
+                return JSON.stringify(value);
+              } catch (_) {
+                return String(value);
+              }
+            })();
+      setDebugLines((prev) => {
+        const next = [`${new Date().toISOString()} ${label}: ${text}`, ...prev];
+        return next.slice(0, 20);
+      });
+    };
+
+    addDebugLine('INIT', { streamId, roomDebug, liveMode, quality });
+    return () => {};
   }, [streamId, roomDebug, liveMode, quality]);
 
   const stopMeeting = useCallback(() => {
@@ -145,6 +169,7 @@ function BroadcasterMeetingInner({
       if (!data || endedRef.current) return;
       const statusText = String(data?.status || '');
       console.log('📡 HLS STATE:', data?.status);
+      setDebugLines((prev) => [`HLS_STATE: ${String(data?.status || 'n/a')}`, ...prev].slice(0, 20));
       setLastSdkState(statusText);
       if (statusText === 'HLS_STARTED' || statusText === 'HLS_PLAYABLE') {
         hlsStartedRef.current = true;
@@ -152,6 +177,9 @@ function BroadcasterMeetingInner({
       }
       if (statusText.includes('FAILED')) {
         setErrorMessage('HLS failed to start');
+        setErrorDetail(
+          data?.message || data?.error || data?.reason || JSON.stringify(data || {})
+        );
         setPhase('error');
       }
     },
@@ -161,7 +189,16 @@ function BroadcasterMeetingInner({
         typeof state === 'string'
           ? state
           : state?.status || state?.state;
+      const stateReason =
+        (typeof state === 'object' &&
+          (state?.message || state?.reason || state?.error || state?.errorMessage)) ||
+        null;
       console.log('📡 MEETING STATE:', stateText);
+      setDebugLines((prev) => [`MEETING_STATE: ${String(stateText || 'n/a')}`, ...prev].slice(0, 20));
+      if (stateReason) {
+        console.log('📡 MEETING STATE REASON:', stateReason);
+        setDebugLines((prev) => [`MEETING_REASON: ${String(stateReason)}`, ...prev].slice(0, 20));
+      }
       setLastSdkState(stateText);
       if (stateText === 'CONNECTED' && !hlsStartTriggeredRef.current) {
         hlsStartTriggeredRef.current = true;
@@ -182,6 +219,7 @@ function BroadcasterMeetingInner({
             }
             await new Promise((r) => setTimeout(r, 1000));
             console.log('🚀 Starting HLS...');
+            setDebugLines((prev) => ['ACTION: startHls()', ...prev].slice(0, 20));
             startHls({
               layout: {
                 type: 'SPOTLIGHT',
@@ -189,9 +227,11 @@ function BroadcasterMeetingInner({
               },
               theme: 'DARK',
               mode: 'video-and-audio',
+              quality: quality,
             });
           } catch (err) {
             console.error('❌ HLS START ERROR:', err);
+            setDebugLines((prev) => [`HLS_START_ERROR: ${String(err?.message || err)}`, ...prev].slice(0, 20));
             setErrorMessage(err?.message || 'HLS start error');
             setPhase('error');
           }
@@ -202,7 +242,10 @@ function BroadcasterMeetingInner({
           clearTimeout(hlsStartTimerRef.current);
           hlsStartTimerRef.current = null;
         }
-        setErrorMessage('Meeting closed by SDK');
+        setErrorMessage(stateReason || 'Meeting closed by SDK');
+        setErrorDetail(
+          typeof state === 'object' ? JSON.stringify(state) : stateText || 'CLOSED'
+        );
         setPhase('error');
       }
     },
@@ -212,7 +255,11 @@ function BroadcasterMeetingInner({
         hlsStartTimerRef.current = null;
       }
       console.error('❌ SDK ERROR:', err);
-      setErrorMessage(err?.message || 'Meeting error');
+      setDebugLines((prev) => [`SDK_ERROR: ${String(err?.message || err?.reason || err)}`, ...prev].slice(0, 20));
+      const sdkMessage =
+        err?.message || err?.reason || err?.error || err?.errorMessage || 'Meeting error';
+      setErrorMessage(sdkMessage);
+      setErrorDetail(JSON.stringify(err || {}));
       setPhase('error');
     },
   });
@@ -281,6 +328,7 @@ function BroadcasterMeetingInner({
     return (
       <View style={styles.center}>
         <Text style={styles.err}>{errorMessage}</Text>
+        {errorDetail ? <Text style={styles.sub}>{errorDetail}</Text> : null}
         <TouchableOpacity style={styles.endBtn} onPress={handleEndPress}>
           <Text style={styles.endBtnText}>Close</Text>
         </TouchableOpacity>
@@ -315,6 +363,11 @@ function BroadcasterMeetingInner({
         <Text style={styles.statePanelText}>phase: {phase}</Text>
         <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
         <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
+        {debugLines.slice(0, 5).map((line, idx) => (
+          <Text key={`${idx}-${line}`} style={styles.statePanelText}>
+            {line}
+          </Text>
+        ))}
       </View>
       <TouchableOpacity
         style={[styles.endStream, { bottom: Math.max(insets.bottom, 16) + 16 }]}
