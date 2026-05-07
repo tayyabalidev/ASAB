@@ -93,7 +93,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0.3"
+        versionName "1.0.46"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -132,43 +132,6 @@ android {
     }
 }
 
-// VideoSDK dependency fix - exclude all problematic USB camera libraries globally
-// These libraries are not needed for mobile devices (only for USB cameras)
-configurations.all {
-    exclude group: 'com.github.jiangdongguo.AndroidUSBCamera'
-    
-    // Force Stripe to resolve from Maven Central only, never from JitPack
-    resolutionStrategy {
-        // Prefer project modules first
-        preferProjectModules()
-        
-        // Force repository resolution order - Maven Central first
-        // This prevents Stripe from trying to resolve from JitPack
-        eachDependency { DependencyResolveDetails details ->
-            if (details.requested.group == 'com.stripe') {
-                // Explicitly force Maven Central resolution
-                // This will prevent Gradle from checking JitPack
-                details.because 'Stripe must resolve from Maven Central to avoid JitPack timeout'
-            }
-        }
-    }
-}
-
-// Explicitly configure repositories for app module
-// This ensures Stripe resolves from Maven Central, not JitPack
-repositories {
-    google()
-    mavenCentral() {
-        // Prioritize Maven Central for Stripe dependencies
-        content {
-            includeGroup("com.stripe")
-            includeGroupByRegex("com\\.stripe\\..*")
-        }
-    }
-    // JitPack explicitly NOT added here to prevent Stripe timeout
-    // VideoSDK works fine without JitPack (USB camera code is patched)
-}
-
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
 // Accepts values in comma delimited lists, example:
 // android.packagingOptions.pickFirsts=/LICENSE,**/picasa.ini
@@ -187,16 +150,6 @@ repositories {
             android.packagingOptions[prop] += it
         }
     }
-}
-
-// Remove react-native-webrtc project if autolinking included it (duplicate WebRTCModulePackage with VideoSDK).
-// Primary fix is react-native.config.js; this is a Gradle safeguard.
-afterEvaluate {
-  configurations.all { config ->
-    config.dependencies.removeAll { dep ->
-      dep instanceof org.gradle.api.artifacts.ProjectDependency && dep.dependencyProject.name == 'react-native-webrtc'
-    }
-  }
 }
 
 dependencies {

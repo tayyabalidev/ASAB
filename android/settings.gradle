@@ -22,30 +22,6 @@ plugins {
   id("expo-autolinking-settings")
 }
 
-// Force Stripe to resolve from Maven Central only, never from JitPack
-// This prevents timeout issues when Gradle tries to check JitPack for Stripe
-dependencyResolutionManagement {
-  // PREFER_PROJECT allows both settings and project-level repositories
-  // This is needed for Expo modules which require project repositories
-  // Settings repositories (Maven Central) will still be checked first for Stripe
-  repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
-  repositories {
-    google()
-    mavenCentral() {
-      // Prioritize Maven Central for all dependencies, especially Stripe
-      content {
-        includeGroup("com.stripe")
-        includeGroupByRegex("com\\.stripe\\..*")
-      }
-    }
-    // JitPack explicitly NOT added here to prevent Stripe timeout
-    // VideoSDK works fine without JitPack (USB camera code is patched)
-  }
-}
-
-// WebRTC duplicate fix: react-native.config.js excludes react-native-webrtc from autolinking.
-// Only @videosdk.live/react-native-webrtc (VideoSDK) should be linked to avoid PackageList.java
-// "WebRTCModulePackage" name clash with com.oney.WebRTCModule.
 extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   if (System.getenv('EXPO_USE_COMMUNITY_AUTOLINKING') == '1') {
     ex.autolinkLibrariesFromCommand()

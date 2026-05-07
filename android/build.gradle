@@ -15,35 +15,8 @@ buildscript {
 allprojects {
   repositories {
     google()
-    mavenCentral() {
-      // Prioritize Maven Central for Stripe dependencies
-      content {
-        includeGroup("com.stripe")
-        includeGroupByRegex("com\\.stripe\\..*")
-      }
-    }
-    // JitPack REMOVED - USB camera code is patched, dependencies excluded
-    // This prevents Stripe timeout issue (Stripe tries to resolve from JitPack)
-    // VideoSDK will work fine without JitPack since USB camera support is disabled
-  }
-  
-  // VideoSDK dependency fix - exclude all problematic USB camera libraries
-  // These libraries are not needed for mobile devices (only for USB cameras)
-  configurations.all {
-    exclude group: 'com.github.jiangdongguo.AndroidUSBCamera'
-    // Exclude standalone react-native-webrtc (com.oney) if pulled in transitively; we use VideoSDK's WebRTC only.
-    exclude group: 'com.oney.WebRTCModule', module: 'react-native-webrtc'
-    
-    // Force Stripe to resolve from Maven Central only
-    resolutionStrategy {
-      preferProjectModules()
-      // Force Maven Central resolution order for Stripe
-      eachDependency { details ->
-        if (details.requested.group == 'com.stripe') {
-          details.because 'Stripe must resolve from Maven Central, not JitPack'
-        }
-      }
-    }
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
   }
 }
 
