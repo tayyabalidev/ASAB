@@ -227,7 +227,6 @@ function BroadcasterMeetingInner({
               },
               theme: 'DARK',
               mode: 'video-and-audio',
-              quality: quality,
             });
           } catch (err) {
             console.error('❌ HLS START ERROR:', err);
@@ -286,7 +285,7 @@ function BroadcasterMeetingInner({
       }
       try {
         console.log('📞 Joining meeting...');
-        await actionsRef.current.join?.();
+        actionsRef.current.join?.();
       } catch (e) {
         if (!cancelled) {
           console.error('❌ JOIN FAILED:', e);
@@ -397,10 +396,6 @@ export default function LiveStreamBroadcasterImpl({
   const hlsStartedRef = useRef(false);
   // Host must always join using the real VideoSDK room id (not Appwrite stream id).
   const effectiveRoomId = typeof roomId === 'string' ? roomId.trim() : '';
-  const effectiveParticipantId =
-    (typeof tokenParticipantId === 'string' && tokenParticipantId.trim()) ||
-    hostUserId ||
-    `${hostUserId || 'host'}-${streamId || Date.now()}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -428,6 +423,9 @@ export default function LiveStreamBroadcasterImpl({
           try {
             const claims = decodeJwtPayload(t);
             if (claims) {
+              console.log('TOKEN ROOM:', claims?.roomId);
+              console.log('MEETING ROOM:', effectiveRoomId);
+              console.log('TOKEN PARTICIPANT:', claims?.participantId);
               console.log('TOKEN ROOM ID:', claims?.roomId);
               console.log('JOINING ROOM ID:', effectiveRoomId);
               if (claims?.participantId) {
@@ -554,7 +552,6 @@ export default function LiveStreamBroadcasterImpl({
     <MeetingProvider
       config={{
         meetingId: effectiveRoomId,
-        participantId: effectiveParticipantId,
         micEnabled: true,
         webcamEnabled: liveMode !== 'screen',
         name: hostDisplayName || hostUserId || 'Host',
