@@ -91,10 +91,7 @@
     "extra": {
       "router": {},
       "videosdkTokenBaseUrl": "",
-      "videosdkRoomBaseUrl": "",
-      "eas": {
-        "projectId": "129a242c-3d7b-4d68-b716-f31a09c908a3"
-      }
+      "videosdkRoomBaseUrl": ""
     }
   }
 }
