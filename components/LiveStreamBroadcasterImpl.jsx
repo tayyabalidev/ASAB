@@ -83,38 +83,43 @@ function BroadcasterMeetingInner({
   const hlsStartTriggeredRef = useRef(false);
   const hlsStartTimerRef = useRef(null);
   const joinOnceRef = useRef(false);
+  const sessionIdRef = useRef(`LS-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`);
+  const hlsStartAttemptRef = useRef(0);
+  const cameraReadyRef = useRef(false);
 
-  useEffect(() => {
-    if (__DEV__) {
-      console.log('[LiveBroadcast] init', {
-        streamId,
-        roomId: roomDebug || null,
-        liveMode,
-        quality,
-      });
+  const stringifyValue = useCallback((value) => {
+    if (typeof value === 'string') return value;
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return String(value);
     }
-  }, [streamId, roomDebug, liveMode, quality]);
+  }, []);
+
+  const pushDebugLine = useCallback(
+    (label, value) => {
+      const line = `${new Date().toISOString()} [${sessionIdRef.current}] ${label}: ${stringifyValue(value)}`;
+      setDebugLines((prev) => [line, ...prev].slice(0, 40));
+    },
+    [stringifyValue]
+  );
+
+  const logEvent = useCallback(
+    (label, value) => {
+      const payload = value == null ? '' : stringifyValue(value);
+      console.log(`[LiveBroadcast][${sessionIdRef.current}] ${label}`, payload);
+      pushDebugLine(label, value == null ? '' : value);
+    },
+    [pushDebugLine, stringifyValue]
+  );
 
   useEffect(() => {
-    const addDebugLine = (label, value) => {
-      const text =
-        typeof value === 'string'
-          ? value
-          : (() => {
-              try {
-                return JSON.stringify(value);
-              } catch (_) {
-                return String(value);
-              }
-            })();
-      setDebugLines((prev) => {
-        const next = [`${new Date().toISOString()} ${label}: ${text}`, ...prev];
-        return next.slice(0, 20);
-      });
-    };
-
-    addDebugLine('INIT', { streamId, roomDebug, liveMode, quality });
-    return () => {};
+    logEvent('INIT', {
+      streamId,
+      roomId: roomDebug || null,
+      liveMode,
+      quality,
+    });
   }, [streamId, roomDebug, liveMode, quality]);
 
   const stopMeeting = useCallback(() => {
@@ -155,12 +160,14 @@ function BroadcasterMeetingInner({
     enableWebcam,
     startScreenShare,
     enableScreenShare,
+    localWebcamOn,
+    localWebcamStream,
   } = useMeeting({
     onMeetingJoined: () => {
-      console.log('✅ JOINED');
+      logEvent('MEETING_JOINED');
     },
     onHlsStarted: () => {
-      console.log('🔥 HLS STARTED');
+      logEvent('HLS_STARTED');
       if (endedRef.current) return;
       hlsStartedRef.current = true;
       setPhase('live');
@@ -168,8 +175,7 @@ function BroadcasterMeetingInner({
     onHlsStateChanged: (data) => {
       if (!data || endedRef.current) return;
       const statusText = String(data?.status || '');
-      console.log('📡 HLS STATE:', data?.status);
-      setDebugLines((prev) => [`HLS_STATE: ${String(data?.status || 'n/a')}`, ...prev].slice(0, 20));
+      logEvent('HLS_STATE', data);
       setLastSdkState(statusText);
       if (statusText === 'HLS_STARTED' || statusText === 'HLS_PLAYABLE') {
         hlsStartedRef.current = true;
@@ -193,16 +199,15 @@ function BroadcasterMeetingInner({
         (typeof state === 'object' &&
           (state?.message || state?.reason || state?.error || state?.errorMessage)) ||
         null;
-      console.log('📡 MEETING STATE:', stateText);
-      setDebugLines((prev) => [`MEETING_STATE: ${String(stateText || 'n/a')}`, ...prev].slice(0, 20));
-      if (stateReason) {
-        console.log('📡 MEETING STATE REASON:', stateReason);
-        setDebugLines((prev) => [`MEETING_REASON: ${String(stateReason)}`, ...prev].slice(0, 20));
-      }
+      logEvent('MEETING_STATE', state);
       setLastSdkState(stateText);
       if (stateText === 'CONNECTED' && !hlsStartTriggeredRef.current) {
         hlsStartTriggeredRef.current = true;
-        console.log('🎯 NOW SAFE TO START HLS');
+        hlsStartAttemptRef.current += 1;
+        logEvent('CONNECTED_READY_FOR_HLS', {
+          attempt: hlsStartAttemptRef.current,
+          liveMode,
+        });
         hlsStartTimerRef.current = setTimeout(async () => {
           if (endedRef.current) return;
           try {
@@ -215,11 +220,21 @@ function BroadcasterMeetingInner({
               }
               await Promise.resolve(startScreen());
             } else {
-              enableWebcam();
+              await Promise.resolve(enableWebcam?.());
+              const waitStart = Date.now();
+              while (Date.now() - waitStart < 8000) {
+                if (cameraReadyRef.current || endedRef.current) break;
+                await new Promise((resolve) => setTimeout(resolve, 200));
+              }
+              logEvent('WEBCAM_READY_CHECK', {
+                cameraReady: cameraReadyRef.current,
+                waitedMs: Date.now() - waitStart,
+              });
             }
-            await new Promise((r) => setTimeout(r, 1000));
-            console.log('🚀 Starting HLS...');
-            setDebugLines((prev) => ['ACTION: startHls()', ...prev].slice(0, 20));
+            logEvent('ACTION_START_HLS', {
+              attempt: hlsStartAttemptRef.current,
+              liveMode,
+            });
             startHls({
               layout: {
                 type: 'SPOTLIGHT',
@@ -229,12 +244,11 @@ function BroadcasterMeetingInner({
               mode: 'video-and-audio',
             });
           } catch (err) {
-            console.error('❌ HLS START ERROR:', err);
-            setDebugLines((prev) => [`HLS_START_ERROR: ${String(err?.message || err)}`, ...prev].slice(0, 20));
+            logEvent('HLS_START_ERROR', err);
             setErrorMessage(err?.message || 'HLS start error');
             setPhase('error');
           }
-        }, 2000);
+        }, 250);
       }
       if (stateText === 'CLOSED') {
         if (hlsStartTimerRef.current) {
@@ -253,8 +267,7 @@ function BroadcasterMeetingInner({
         clearTimeout(hlsStartTimerRef.current);
         hlsStartTimerRef.current = null;
       }
-      console.error('❌ SDK ERROR:', err);
-      setDebugLines((prev) => [`SDK_ERROR: ${String(err?.message || err?.reason || err)}`, ...prev].slice(0, 20));
+      logEvent('SDK_ERROR', err);
       const sdkMessage =
         err?.message || err?.reason || err?.error || err?.errorMessage || 'Meeting error';
       setErrorMessage(sdkMessage);
@@ -268,6 +281,17 @@ function BroadcasterMeetingInner({
   actionsRef.current.join = join;
 
   useEffect(() => {
+    const cameraReady = Boolean(localWebcamOn && localWebcamStream);
+    cameraReadyRef.current = cameraReady;
+    if (liveMode !== 'screen') {
+      logEvent('WEBCAM_STATE', {
+        on: Boolean(localWebcamOn),
+        hasStream: Boolean(localWebcamStream),
+      });
+    }
+  }, [localWebcamOn, localWebcamStream, liveMode, logEvent]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       if (joinOnceRef.current) return;
@@ -275,6 +299,7 @@ function BroadcasterMeetingInner({
       const ok = await ensureCallMediaPermissions(liveMode === 'screen' ? 'audio' : 'video');
       if (cancelled) return;
       if (!ok) {
+        logEvent('PERMISSION_DENIED', { liveMode });
         Alert.alert(
           'Permissions required',
           liveMode === 'screen'
@@ -284,11 +309,11 @@ function BroadcasterMeetingInner({
         return;
       }
       try {
-        console.log('📞 Joining meeting...');
+        logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
         actionsRef.current.join?.();
       } catch (e) {
         if (!cancelled) {
-          console.error('❌ JOIN FAILED:', e);
+          logEvent('JOIN_FAILED', e);
           setErrorMessage('Failed to join meeting');
           setPhase('error');
         }
@@ -303,9 +328,10 @@ function BroadcasterMeetingInner({
       try {
         if (hlsStartedRef.current) stopHls();
         actionsRef.current.leave?.();
+        logEvent('CLEANUP_LEAVE');
       } catch (_) {}
     };
-  }, []);
+  }, [liveMode, roomDebug, logEvent, hlsStartedRef, stopHls]);
 
   useEffect(() => {
     if (phase !== 'joining') return undefined;
@@ -314,10 +340,11 @@ function BroadcasterMeetingInner({
       setErrorMessage(
         `Stream is taking too long (SDK state: ${lastSdkState}). Confirm VideoSDK interactive HLS is enabled, your JWT token URL works, and the device has a stable connection.`
       );
+      logEvent('TIMEOUT_JOINING', { lastSdkState });
       setPhase((current) => (current === 'joining' ? 'error' : current));
     }, 75000);
     return () => clearTimeout(t);
-  }, [phase, lastSdkState]);
+  }, [phase, lastSdkState, logEvent]);
 
   const handleEndPress = () => {
     finalizeEnd(true);
@@ -362,7 +389,8 @@ function BroadcasterMeetingInner({
         <Text style={styles.statePanelText}>phase: {phase}</Text>
         <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
         <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
-        {debugLines.slice(0, 5).map((line, idx) => (
+        <Text style={styles.statePanelText}>session: {sessionIdRef.current}</Text>
+        {debugLines.slice(0, 12).map((line, idx) => (
           <Text key={`${idx}-${line}`} style={styles.statePanelText}>
             {line}
           </Text>
