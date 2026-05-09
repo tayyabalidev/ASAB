@@ -86,6 +86,9 @@ function BroadcasterMeetingInner({
   const sessionIdRef = useRef(`LS-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`);
   const hlsStartAttemptRef = useRef(0);
   const cameraReadyRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef(null);
+  const connectedOnceRef = useRef(false);
 
   const stringifyValue = useCallback((value) => {
     if (typeof value === 'string') return value;
@@ -202,6 +205,8 @@ function BroadcasterMeetingInner({
       logEvent('MEETING_STATE', state);
       setLastSdkState(stateText);
       if (stateText === 'CONNECTED' && !hlsStartTriggeredRef.current) {
+        connectedOnceRef.current = true;
+        reconnectAttemptsRef.current = 0;
         hlsStartTriggeredRef.current = true;
         hlsStartAttemptRef.current += 1;
         logEvent('CONNECTED_READY_FOR_HLS', {
@@ -250,10 +255,52 @@ function BroadcasterMeetingInner({
           }
         }, 250);
       }
+      if (stateText === 'DISCONNECTED' && !endedRef.current) {
+        const nextAttempt = reconnectAttemptsRef.current + 1;
+        if (nextAttempt <= 3) {
+          reconnectAttemptsRef.current = nextAttempt;
+          const waitMs = nextAttempt * 1200;
+          logEvent('DISCONNECTED_RETRY_SCHEDULED', {
+            attempt: nextAttempt,
+            waitMs,
+            connectedOnce: connectedOnceRef.current,
+          });
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
+          reconnectTimerRef.current = setTimeout(() => {
+            if (endedRef.current) return;
+            try {
+              logEvent('DISCONNECTED_RETRY_JOIN', {
+                attempt: nextAttempt,
+                roomId: roomDebug || null,
+              });
+              actionsRef.current.join?.();
+            } catch (retryError) {
+              logEvent('DISCONNECTED_RETRY_JOIN_ERROR', retryError);
+            }
+          }, waitMs);
+        } else {
+          logEvent('DISCONNECTED_RETRY_EXHAUSTED', {
+            attempts: reconnectAttemptsRef.current,
+            connectedOnce: connectedOnceRef.current,
+          });
+          setErrorMessage('Connection dropped before live started');
+          setErrorDetail(
+            'Meeting disconnected repeatedly while joining. Please check network stability and VideoSDK iOS release logs.'
+          );
+          setPhase('error');
+        }
+      }
       if (stateText === 'CLOSED') {
         if (hlsStartTimerRef.current) {
           clearTimeout(hlsStartTimerRef.current);
           hlsStartTimerRef.current = null;
+        }
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
         }
         setErrorMessage(stateReason || 'Meeting closed by SDK');
         setErrorDetail(
@@ -324,6 +371,10 @@ function BroadcasterMeetingInner({
       if (hlsStartTimerRef.current) {
         clearTimeout(hlsStartTimerRef.current);
         hlsStartTimerRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
       try {
         if (hlsStartedRef.current) stopHls();
