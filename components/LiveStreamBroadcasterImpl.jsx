@@ -19,6 +19,13 @@ const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'mis
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
 
+function buildHealthUrl(baseUrl) {
+  const raw = String(baseUrl || '').trim();
+  if (!raw) return '';
+  const joiner = raw.includes('?') ? '&' : '?';
+  return `${raw}${joiner}health=1&debug=1`;
+}
+
 function decodeJwtPayload(token) {
   try {
     const payloadPart = String(token || '').split('.')[1] || '';
@@ -484,6 +491,39 @@ export default function LiveStreamBroadcasterImpl({
     setLoading(true);
     (async () => {
       try {
+        // Non-blocking backend health probe for TestFlight diagnostics.
+        try {
+          const healthUrl = buildHealthUrl(VIDEOSDK_CONFIG.tokenServerUrl);
+          if (healthUrl) {
+            const response = await fetch(healthUrl, { method: 'GET', headers: { Accept: 'application/json' } });
+            const raw = await response.text();
+            let payload = null;
+            try {
+              payload = raw ? JSON.parse(raw) : null;
+            } catch (_) {
+              payload = raw;
+            }
+            console.log('[LiveBroadcast] token-backend health', {
+              url: healthUrl,
+              status: response.status,
+              ok: response.ok,
+              payload,
+            });
+            if (payload && typeof payload === 'object') {
+              const keysPresent =
+                payload.videoSdkKeysPresent === true ||
+                payload.keysPresent === true ||
+                payload.ok === true;
+              setTokenDebug((prev) => `${prev} health:${response.status} keys:${keysPresent ? 'yes' : 'no'}`);
+            } else {
+              setTokenDebug((prev) => `${prev} health:${response.status}`);
+            }
+          }
+        } catch (healthError) {
+          console.warn('[LiveBroadcast] token-backend health probe failed', healthError);
+          setTokenDebug((prev) => `${prev} health:probe-failed`);
+        }
+
         if (!effectiveRoomId) {
           throw new Error(
             `Missing videosdkRoomId for host broadcast. streamId=${streamId || 'n/a'}, roomId=${
