@@ -447,6 +447,8 @@ function BroadcasterMeetingInner({
         <Text style={styles.statePanelText}>phase: {phase}</Text>
         <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
         <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
+        <Text style={styles.statePanelText}>token: {tokenDebug || 'n/a'}</Text>
+        <Text style={styles.statePanelText}>participant: {tokenParticipantId || 'n/a'}</Text>
         <Text style={styles.statePanelText}>session: {sessionIdRef.current}</Text>
         {debugLines.slice(0, 12).map((line, idx) => (
           <Text key={`${idx}-${line}`} style={styles.statePanelText}>
@@ -677,7 +679,8 @@ export default function LiveStreamBroadcasterImpl({
         meetingId: effectiveRoomId,
         participantId: effectiveParticipantId,
         micEnabled: true,
-        webcamEnabled: liveMode !== 'screen',
+        // Keep webcam off during initial join; enable it only after CONNECTED.
+        webcamEnabled: false,
         name: hostDisplayName || hostUserId || 'Host',
         mode: 'CONFERENCE',
         defaultCamera: 'front',
