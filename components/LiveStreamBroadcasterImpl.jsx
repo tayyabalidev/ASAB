@@ -604,6 +604,10 @@ export default function LiveStreamBroadcasterImpl({
   }
 
   const authToken = token;
+  const effectiveParticipantId =
+    (typeof tokenParticipantId === 'string' && tokenParticipantId.trim()) ||
+    (typeof hostUserId === 'string' && hostUserId.trim()) ||
+    undefined;
 
   if (!authToken) {
     return (
@@ -631,6 +635,7 @@ export default function LiveStreamBroadcasterImpl({
     <MeetingProvider
       config={{
         meetingId: effectiveRoomId,
+        participantId: effectiveParticipantId,
         micEnabled: true,
         webcamEnabled: liveMode !== 'screen',
         name: hostDisplayName || hostUserId || 'Host',
