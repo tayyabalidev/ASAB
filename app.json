@@ -2,7 +2,7 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.0.49",
+    "version": "1.0.50",
     "orientation": "portrait",
     "icon": "./assets/images/asab.png",
     "userInterfaceStyle": "dark",
