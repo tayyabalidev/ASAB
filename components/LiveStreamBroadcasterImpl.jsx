@@ -77,6 +77,7 @@ function BroadcasterMeetingInner({
   onStreamEnd,
   hlsStartedRef,
   tokenDebug,
+  tokenParticipantId,
   roomDebug,
 }) {
   const insets = useSafeAreaInsets();
@@ -698,6 +699,7 @@ export default function LiveStreamBroadcasterImpl({
         onStreamEnd={onStreamEnd}
         hlsStartedRef={hlsStartedRef}
         tokenDebug={tokenDebug}
+        tokenParticipantId={tokenParticipantId}
         roomDebug={effectiveRoomId}
       />
     </MeetingProvider>
