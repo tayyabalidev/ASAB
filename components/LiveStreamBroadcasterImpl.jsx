@@ -78,6 +78,8 @@ function BroadcasterMeetingInner({
   hlsStartedRef,
   tokenDebug,
   tokenParticipantId,
+  hostUserId,
+  meetingParticipantId,
   roomDebug,
 }) {
   const insets = useSafeAreaInsets();
@@ -449,7 +451,9 @@ function BroadcasterMeetingInner({
         <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
         <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
         <Text style={styles.statePanelText}>token: {tokenDebug || 'n/a'}</Text>
-        <Text style={styles.statePanelText}>participant: {tokenParticipantId || 'n/a'}</Text>
+        <Text style={styles.statePanelText}>
+          meetingPid: {meetingParticipantId || '(omit)'} host: {hostUserId || 'n/a'}
+        </Text>
         <Text style={styles.statePanelText}>session: {sessionIdRef.current}</Text>
         {debugLines.slice(0, 12).map((line, idx) => (
           <Text key={`${idx}-${line}`} style={styles.statePanelText}>
@@ -647,10 +651,12 @@ export default function LiveStreamBroadcasterImpl({
   }
 
   const authToken = token;
-  const effectiveParticipantId =
-    (typeof tokenParticipantId === 'string' && tokenParticipantId.trim()) ||
-    (typeof hostUserId === 'string' && hostUserId.trim()) ||
-    undefined;
+  // Only pass participantId when the JWT includes it. Minting without participantId but joining
+  // with hostUserId causes CONNECTING -> DISCONNECTED on many VideoSDK deployments.
+  const meetingParticipantId =
+    typeof tokenParticipantId === 'string' && tokenParticipantId.trim()
+      ? tokenParticipantId.trim()
+      : undefined;
 
   if (!authToken) {
     return (
@@ -678,7 +684,7 @@ export default function LiveStreamBroadcasterImpl({
     <MeetingProvider
       config={{
         meetingId: effectiveRoomId,
-        participantId: effectiveParticipantId,
+        ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
         micEnabled: true,
         // Keep webcam off during initial join; enable it only after CONNECTED.
         webcamEnabled: false,
@@ -700,6 +706,8 @@ export default function LiveStreamBroadcasterImpl({
         hlsStartedRef={hlsStartedRef}
         tokenDebug={tokenDebug}
         tokenParticipantId={tokenParticipantId}
+        hostUserId={hostUserId}
+        meetingParticipantId={meetingParticipantId}
         roomDebug={effectiveRoomId}
       />
     </MeetingProvider>
