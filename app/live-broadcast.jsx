@@ -5,6 +5,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { LiveStreamBroadcaster, LiveChatPanel, LiveReactions } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { useTranslation } from 'react-i18next';
+import { peekLiveHostSession, clearLiveHostSession } from '../lib/pendingLiveBroadcast';
 
 const { height } = Dimensions.get('window');
 
@@ -18,15 +19,18 @@ function firstRouteParam(value) {
 const LiveBroadcast = () => {
   const params = useLocalSearchParams();
   const streamId = firstRouteParam(params.streamId);
-  const roomId = firstRouteParam(params.roomId);
-  const hostToken = firstRouteParam(params.hostToken);
-  const quality = firstRouteParam(params.quality);
-  const liveMode = firstRouteParam(params.liveMode);
+  /** Full JWT must not live in URL params (iOS can truncate); use in-memory stash from go-live when present. */
+  const stashed = streamId ? peekLiveHostSession(streamId) : null;
+  const roomId = stashed?.roomId || firstRouteParam(params.roomId);
+  const hostToken = stashed?.hostToken || firstRouteParam(params.hostToken);
+  const quality = stashed?.quality ?? firstRouteParam(params.quality);
+  const liveMode = stashed?.liveMode ?? firstRouteParam(params.liveMode);
   const { user } = useGlobalContext();
   const [showChat, setShowChat] = useState(false);
   const { t } = useTranslation();
 
   const handleStreamEnd = () => {
+    if (streamId) clearLiveHostSession(streamId);
     Alert.alert(t('liveBroadcast.endedTitle'), t('liveBroadcast.endedMessage'));
     router.replace('/home');
   };
@@ -42,11 +46,21 @@ const LiveBroadcast = () => {
         t('common.error'),
         'Missing videosdkRoomId for this live stream. Please start a new stream and try again.'
       );
+      if (streamId) clearLiveHostSession(streamId);
+      router.replace('/home');
+      return;
+    }
+    if (!hostToken) {
+      Alert.alert(
+        t('common.error'),
+        'Missing VideoSDK host token. Start again from Go Live (do not open this URL manually).'
+      );
+      clearLiveHostSession(streamId);
       router.replace('/home');
     }
-  }, [streamId, roomId, t]);
+  }, [streamId, roomId, hostToken, t]);
 
-  if (!streamId || !roomId) {
+  if (!streamId || !roomId || !hostToken) {
     return null;
   }
 

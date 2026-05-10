@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { useGlobalContext } from '../../context/GlobalProvider';
 import { createLiveStream } from '../../lib/livestream';
+import { stashLiveHostSession } from '../../lib/pendingLiveBroadcast';
 import { CustomButton } from '../../components';
 import { useTranslation } from 'react-i18next';
 
@@ -108,13 +109,21 @@ const GoLive = () => {
       // Close preview
       setShowPreview(false);
 
+      // Keep host JWT out of the URL — long tokens break on some iOS / router serializations.
+      stashLiveHostSession({
+        streamId: liveStream.$id,
+        roomId: liveStream.videosdkRoomId,
+        hostToken: liveStream.videosdkHostToken,
+        quality: selectedQuality,
+        liveMode: selectedLiveMode,
+      });
+
       // Navigate to broadcaster screen
       router.push({
         pathname: '/live-broadcast',
         params: {
           streamId: liveStream.$id,
           roomId: liveStream.videosdkRoomId,
-          hostToken: liveStream.videosdkHostToken,
           quality: selectedQuality,
           liveMode: selectedLiveMode,
         }
