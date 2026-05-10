@@ -281,15 +281,22 @@ function BroadcasterMeetingInner({
           }
           reconnectTimerRef.current = setTimeout(() => {
             if (endedRef.current) return;
-            try {
-              logEvent('DISCONNECTED_RETRY_JOIN', {
-                attempt: nextAttempt,
-                roomId: roomDebug || null,
-              });
-              actionsRef.current.join?.();
-            } catch (retryError) {
-              logEvent('DISCONNECTED_RETRY_JOIN_ERROR', retryError);
-            }
+            (async () => {
+              try {
+                // Each join() calls initMeeting(); without leave(), retries leave a broken socket/session.
+                logEvent('DISCONNECTED_RETRY_LEAVE', { attempt: nextAttempt });
+                actionsRef.current.leave?.();
+                await new Promise((r) => setTimeout(r, 500));
+                if (endedRef.current) return;
+                logEvent('DISCONNECTED_RETRY_JOIN', {
+                  attempt: nextAttempt,
+                  roomId: roomDebug || null,
+                });
+                actionsRef.current.join?.();
+              } catch (retryError) {
+                logEvent('DISCONNECTED_RETRY_JOIN_ERROR', retryError);
+              }
+            })();
           }, waitMs);
         } else {
           logEvent('DISCONNECTED_RETRY_EXHAUSTED', {
@@ -689,7 +696,6 @@ export default function LiveStreamBroadcasterImpl({
         // Keep webcam off during initial join; enable it only after CONNECTED.
         webcamEnabled: false,
         name: hostDisplayName || hostUserId || 'Host',
-        mode: 'CONFERENCE',
         defaultCamera: 'front',
         notification: {
           title: 'ASAB Live',

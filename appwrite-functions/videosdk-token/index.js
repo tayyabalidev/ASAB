@@ -1,17 +1,24 @@
 /**
- * Appwrite Function — VideoSDK room + token service for ASAB.
+ * Appwrite Function — VideoSDK room + token service for ASAB (single endpoint, two verbs).
  *
- * Contracts:
- *   POST /?participantId=<optional>  -> { meetingId, token, debug? }
- *   GET /?roomId=<required>&participantId=<optional> -> { token, debug? } (viewer/backward-compatible)
+ * POST — create meeting + mint host JWT (live broadcast start):
+ *   URL:  POST https://...appwrite.run/...?[participantId=<hostAppwriteUserId>]&debug=1
+ *   Body: ignored
+ *   Returns: { meetingId, token, debug? }
+ *   If participantId is present in the query, it is embedded in the JWT (`participantId` claim).
+ *   The RN app must pass the same id to MeetingProvider (repo does this via decoded JWT).
+ *
+ * GET — mint viewer (or caller) JWT for an existing room (watch live / backward-compatible):
+ *   URL:  GET ...?roomId=<required>&participantId=<optional>
+ *   Returns: { token, debug? }
+ *   Viewer tokens use permissions: ['allow_join'] only.
  *
  * Required env vars:
  *   VIDEOSDK_API_KEY
  *   VIDEOSDK_SECRET_KEY
  *
  * Notes:
- * - No separate VIDEOSDK_AUTH_TOKEN variable required.
- * - Function internally generates a short-lived auth token from API key + secret for /v2/rooms.
+ * - Room creation calls VideoSDK POST https://api.videosdk.live/v2/rooms with a short JWT auth header.
  * - Must `return` every res.* (Appwrite requirement).
  */
 'use strict';
@@ -190,6 +197,7 @@ module.exports = async ({ req, res, log }) => {
       const debug = {
         requestedRoomId: roomId,
         participantId: participantId || null,
+        tokenParticipantId: claims.participantId || null,
         tokenRoomId: claims.roomId || null,
         tokenApiKey: claims.apikey || null,
         tokenPermissions: Array.isArray(claims.permissions) ? claims.permissions : [],
@@ -203,18 +211,22 @@ module.exports = async ({ req, res, log }) => {
 
     // POST: create room + token atomically
     const createdMeetingId = await createRoom(apiKey, secretKey);
+    // When client passes ?participantId= (live host id), embed it in JWT and use the same id in
+    // MeetingProvider — same pattern as GET /get-token + calls. Omit param => open token (no participantId claim).
     const token = buildMeetingToken({
       apiKey,
       secretKey,
       roomId: createdMeetingId,
-      // Do not participant-bind host live tokens; strict participant binding can reject
-      // joins on production clients when client-side participant resolution diverges.
+      participantId: participantId || '',
       permissions: ['allow_join', 'allow_mod'],
     });
     const claims = safeDecodeJwtNoVerify(token) || {};
     const debug = {
       requestedRoomId: createdMeetingId,
-      participantId: participantId || null,
+      /** Query param echoed (may be '' if client omitted). */
+      queryParticipantId: participantId || null,
+      /** Present in JWT only when query had non-empty participantId. */
+      tokenParticipantId: claims.participantId || null,
       tokenRoomId: claims.roomId || null,
       tokenApiKey: claims.apikey || null,
       tokenPermissions: Array.isArray(claims.permissions) ? claims.permissions : [],
