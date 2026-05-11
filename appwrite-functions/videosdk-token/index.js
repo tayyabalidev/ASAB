@@ -84,7 +84,6 @@ function buildMeetingToken({ apiKey, secretKey, roomId, participantId, permissio
     apikey: apiKey,
     permissions: Array.isArray(permissions) && permissions.length > 0 ? permissions : ['allow_join'],
     version: 2,
-    roles: ['rtc'],
     roomId,
   };
   if (participantId) payload.participantId = participantId;

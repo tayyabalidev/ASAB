@@ -7,6 +7,7 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
@@ -287,6 +288,10 @@ function BroadcasterMeetingInner({
                 logEvent('DISCONNECTED_RETRY_LEAVE', { attempt: nextAttempt });
                 actionsRef.current.leave?.();
                 await new Promise((r) => setTimeout(r, 500));
+                await new Promise((resolve) =>
+                  InteractionManager.runAfterInteractions(() => resolve(undefined))
+                );
+                await new Promise((r) => setTimeout(r, 400));
                 if (endedRef.current) return;
                 logEvent('DISCONNECTED_RETRY_JOIN', {
                   attempt: nextAttempt,
@@ -373,6 +378,11 @@ function BroadcasterMeetingInner({
         return;
       }
       try {
+        await new Promise((resolve) =>
+          InteractionManager.runAfterInteractions(() => resolve(undefined))
+        );
+        await new Promise((r) => setTimeout(r, 400));
+        if (cancelled) return;
         logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
         actionsRef.current.join?.();
       } catch (e) {
@@ -691,9 +701,9 @@ export default function LiveStreamBroadcasterImpl({
     <MeetingProvider
       config={{
         meetingId: effectiveRoomId,
+        mode: 'SEND_AND_RECV',
         ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
         micEnabled: true,
-        // Keep webcam off during initial join; enable it only after CONNECTED.
         webcamEnabled: false,
         name: hostDisplayName || hostUserId || 'Host',
         defaultCamera: 'front',
