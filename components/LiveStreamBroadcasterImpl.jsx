@@ -100,6 +100,10 @@ function BroadcasterMeetingInner({
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef(null);
   const connectedOnceRef = useRef(false);
+  const webcamEnableAttemptedRef = useRef(false);
+  const enableWebcamTimerRef = useRef(null);
+  const localParticipantRef = useRef(null);
+  const pinAttemptedRef = useRef(false);
 
   const stringifyValue = useCallback((value) => {
     if (typeof value === 'string') return value;
@@ -133,8 +137,20 @@ function BroadcasterMeetingInner({
       roomId: roomDebug || null,
       liveMode,
       quality,
+      hostUserId: hostUserId || null,
+      meetingParticipantId: meetingParticipantId || null,
+      tokenParticipantId: tokenParticipantId || null,
     });
-  }, [streamId, roomDebug, liveMode, quality]);
+  }, [
+    streamId,
+    roomDebug,
+    liveMode,
+    quality,
+    hostUserId,
+    meetingParticipantId,
+    tokenParticipantId,
+    logEvent,
+  ]);
 
   const stopMeeting = useCallback(() => {
     const act = actionsRef.current;
@@ -184,7 +200,21 @@ function BroadcasterMeetingInner({
       logEvent('MEETING_JOINED', {
         sdkMeetingId: sdkMeetingId || null,
         expected: roomDebug || null,
+        localParticipantId: localParticipantRef.current?.id || null,
+        localParticipantMode: localParticipantRef.current?.mode || null,
       });
+      // SPOTLIGHT + priority:'PIN' HLS layout only renders pinned participants.
+      // Without this pin, HLS has nothing to composite and the pipeline rejects/empties.
+      try {
+        const lp = localParticipantRef.current;
+        if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
+          lp.pin();
+          pinAttemptedRef.current = true;
+          logEvent('LOCAL_PARTICIPANT_PINNED', { id: lp.id });
+        }
+      } catch (e) {
+        logEvent('PIN_ERROR', e);
+      }
     },
     onMeetingLeft: () => {
       logEvent('MEETING_LEFT');
@@ -254,8 +284,14 @@ function BroadcasterMeetingInner({
       }
 
       if (stateText === 'DISCONNECTED' && !endedRef.current) {
-        // Allow HLS to be re-attempted after a clean reconnect.
+        // Allow HLS, webcam, and pin to be re-attempted after a clean reconnect.
         hlsStartTriggeredRef.current = false;
+        webcamEnableAttemptedRef.current = false;
+        pinAttemptedRef.current = false;
+        if (enableWebcamTimerRef.current) {
+          clearTimeout(enableWebcamTimerRef.current);
+          enableWebcamTimerRef.current = null;
+        }
         const nextAttempt = reconnectAttemptsRef.current + 1;
         if (nextAttempt <= 3) {
           reconnectAttemptsRef.current = nextAttempt;
@@ -340,6 +376,41 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableWebcam = enableWebcam;
   actionsRef.current.startScreenShare = startScreenShare;
   actionsRef.current.enableScreenShare = enableScreenShare;
+  localParticipantRef.current = localParticipant || null;
+
+  // After CONNECTED, turn the webcam on explicitly. Doing this at join time (webcamEnabled: true)
+  // makes the SDK race the camera-acquisition during the signaling handshake and on iOS this often
+  // ends in CONNECTING -> DISCONNECTED before CONNECTED ever fires. Enabling here is reliable.
+  useEffect(() => {
+    if (endedRef.current) return undefined;
+    if (lastSdkState !== 'CONNECTED') return undefined;
+    if (liveMode === 'screen') return undefined;
+    if (webcamEnableAttemptedRef.current) return undefined;
+    if (localWebcamOn) {
+      webcamEnableAttemptedRef.current = true;
+      return undefined;
+    }
+
+    webcamEnableAttemptedRef.current = true;
+    // Tiny stabilization wait so the WebRTC PC is fully wired up before we add a video track.
+    enableWebcamTimerRef.current = setTimeout(() => {
+      if (endedRef.current) return;
+      try {
+        logEvent('ACTION_ENABLE_WEBCAM');
+        actionsRef.current.enableWebcam?.();
+      } catch (e) {
+        logEvent('ENABLE_WEBCAM_ERROR', e);
+        webcamEnableAttemptedRef.current = false;
+      }
+    }, 500);
+
+    return () => {
+      if (enableWebcamTimerRef.current) {
+        clearTimeout(enableWebcamTimerRef.current);
+        enableWebcamTimerRef.current = null;
+      }
+    };
+  }, [lastSdkState, liveMode, localWebcamOn, logEvent]);
 
   // Dedicated HLS trigger: runs only when SDK is CONNECTED *and* a real producer is ready.
   // Decoupling from onMeetingStateChanged eliminates the captured-stale-closure race that
@@ -367,6 +438,19 @@ function BroadcasterMeetingInner({
     hlsStartTriggeredRef.current = true;
     hlsStartAttemptRef.current += 1;
     const attempt = hlsStartAttemptRef.current;
+
+    // Fallback pin: if onMeetingJoined fired before localParticipant was materialized,
+    // pin now. SPOTLIGHT + PIN layout requires at least one pinned participant.
+    try {
+      const lp = localParticipant || localParticipantRef.current;
+      if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
+        lp.pin();
+        pinAttemptedRef.current = true;
+        logEvent('LOCAL_PARTICIPANT_PINNED_FALLBACK', { id: lp.id });
+      }
+    } catch (e) {
+      logEvent('PIN_FALLBACK_ERROR', e);
+    }
 
     // Tiny stabilization delay so the first RTP packet has been transmitted.
     hlsStartTimerRef.current = setTimeout(async () => {
@@ -485,6 +569,10 @@ function BroadcasterMeetingInner({
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
+      }
+      if (enableWebcamTimerRef.current) {
+        clearTimeout(enableWebcamTimerRef.current);
+        enableWebcamTimerRef.current = null;
       }
       try {
         if (hlsStartedRef.current) actionsRef.current.stopHls?.();
@@ -779,19 +867,20 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
-  // HLS host MUST be in CONFERENCE mode with at least one producer publishing,
-  // otherwise VideoSDK silently disconnects the host shortly after CONNECTED.
-  // Screen-share live mode joins with webcam off and turns on screen share after CONNECTED.
-  const joinWithWebcam = liveMode !== 'screen';
-
+  // Join with audio-only. On iOS, requesting webcam during the join handshake makes the
+  // SDK go CONNECTING -> DISCONNECTED before CONNECTED if camera acquisition stalls.
+  // We enable the webcam explicitly after CONNECTED (see effect in BroadcasterMeetingInner).
   return (
     <MeetingProvider
       config={{
         meetingId: effectiveRoomId,
-        mode: 'CONFERENCE',
+        mode: 'SEND_AND_RECV',
         ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
         micEnabled: true,
-        webcamEnabled: joinWithWebcam,
+        webcamEnabled: false,
+        // VideoSDK RN config key is lowercase 's'. Required for ILS hosts so the
+        // pipeline receives simulcast layers usable by HLS.
+        multistream: true,
         name: hostDisplayName || hostUserId || 'Host',
         defaultCamera: 'front',
         notification: {
