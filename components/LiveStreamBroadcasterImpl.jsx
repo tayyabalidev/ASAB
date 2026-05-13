@@ -176,15 +176,44 @@ function BroadcasterMeetingInner({
     enableScreenShare,
     localWebcamOn,
     localWebcamStream,
+    localMicOn,
+    localParticipant,
+    meetingId: sdkMeetingId,
   } = useMeeting({
     onMeetingJoined: () => {
-      logEvent('MEETING_JOINED');
+      logEvent('MEETING_JOINED', {
+        sdkMeetingId: sdkMeetingId || null,
+        expected: roomDebug || null,
+      });
     },
-    onHlsStarted: () => {
-      logEvent('HLS_STARTED');
+    onMeetingLeft: () => {
+      logEvent('MEETING_LEFT');
+    },
+    onConnectionOpen: () => logEvent('CONNECTION_OPEN'),
+    onConnectionClose: (e) => logEvent('CONNECTION_CLOSE', e),
+    onParticipantJoined: (p) => {
+      logEvent('PARTICIPANT_JOINED', { id: p?.id, mode: p?.mode });
+    },
+    onParticipantLeft: (p) => {
+      logEvent('PARTICIPANT_LEFT', { id: p?.id });
+    },
+    onWebcamRequested: ({ accept }) => {
+      logEvent('WEBCAM_REQUESTED');
+      accept?.();
+    },
+    onMicRequested: ({ accept }) => {
+      logEvent('MIC_REQUESTED');
+      accept?.();
+    },
+    onHlsStarted: (e) => {
+      logEvent('HLS_STARTED', e || {});
       if (endedRef.current) return;
       hlsStartedRef.current = true;
       setPhase('live');
+    },
+    onHlsStopped: (e) => {
+      logEvent('HLS_STOPPED', e || {});
+      hlsStartedRef.current = false;
     },
     onHlsStateChanged: (data) => {
       if (!data || endedRef.current) return;
@@ -195,12 +224,14 @@ function BroadcasterMeetingInner({
         hlsStartedRef.current = true;
         setPhase('live');
       }
-      if (statusText.includes('FAILED')) {
+      if (statusText.includes('FAILED') || statusText === 'HLS_REQUEST_FAILED') {
         setErrorMessage('HLS failed to start');
         setErrorDetail(
           data?.message || data?.error || data?.reason || JSON.stringify(data || {})
         );
         setPhase('error');
+        // Allow the trigger effect to retry on next CONNECTED if user reconnects manually.
+        hlsStartTriggeredRef.current = false;
       }
     },
     onMeetingStateChanged: (state) => {
@@ -215,58 +246,16 @@ function BroadcasterMeetingInner({
         null;
       logEvent('MEETING_STATE', state);
       setLastSdkState(stateText);
-      if (stateText === 'CONNECTED' && !hlsStartTriggeredRef.current) {
+
+      if (stateText === 'CONNECTED') {
         connectedOnceRef.current = true;
         reconnectAttemptsRef.current = 0;
-        hlsStartTriggeredRef.current = true;
-        hlsStartAttemptRef.current += 1;
-        logEvent('CONNECTED_READY_FOR_HLS', {
-          attempt: hlsStartAttemptRef.current,
-          liveMode,
-        });
-        hlsStartTimerRef.current = setTimeout(async () => {
-          if (endedRef.current) return;
-          try {
-            if (liveMode === 'screen') {
-              const startScreen =
-                (typeof startScreenShare === 'function' && startScreenShare) ||
-                (typeof enableScreenShare === 'function' && enableScreenShare);
-              if (!startScreen) {
-                throw new Error('Screen share is not available in this build');
-              }
-              await Promise.resolve(startScreen());
-            } else {
-              await Promise.resolve(enableWebcam?.());
-              const waitStart = Date.now();
-              while (Date.now() - waitStart < 8000) {
-                if (cameraReadyRef.current || endedRef.current) break;
-                await new Promise((resolve) => setTimeout(resolve, 200));
-              }
-              logEvent('WEBCAM_READY_CHECK', {
-                cameraReady: cameraReadyRef.current,
-                waitedMs: Date.now() - waitStart,
-              });
-            }
-            logEvent('ACTION_START_HLS', {
-              attempt: hlsStartAttemptRef.current,
-              liveMode,
-            });
-            startHls({
-              layout: {
-                type: 'SPOTLIGHT',
-                priority: 'PIN',
-              },
-              theme: 'DARK',
-              mode: 'video-and-audio',
-            });
-          } catch (err) {
-            logEvent('HLS_START_ERROR', err);
-            setErrorMessage(err?.message || 'HLS start error');
-            setPhase('error');
-          }
-        }, 250);
+        // HLS trigger lives in its own effect — keep this callback minimal.
       }
+
       if (stateText === 'DISCONNECTED' && !endedRef.current) {
+        // Allow HLS to be re-attempted after a clean reconnect.
+        hlsStartTriggeredRef.current = false;
         const nextAttempt = reconnectAttemptsRef.current + 1;
         if (nextAttempt <= 3) {
           reconnectAttemptsRef.current = nextAttempt;
@@ -284,14 +273,13 @@ function BroadcasterMeetingInner({
             if (endedRef.current) return;
             (async () => {
               try {
-                // Each join() calls initMeeting(); without leave(), retries leave a broken socket/session.
                 logEvent('DISCONNECTED_RETRY_LEAVE', { attempt: nextAttempt });
                 actionsRef.current.leave?.();
-                await new Promise((r) => setTimeout(r, 500));
+                await new Promise((r) => setTimeout(r, 800));
                 await new Promise((resolve) =>
                   InteractionManager.runAfterInteractions(() => resolve(undefined))
                 );
-                await new Promise((r) => setTimeout(r, 400));
+                await new Promise((r) => setTimeout(r, 500));
                 if (endedRef.current) return;
                 logEvent('DISCONNECTED_RETRY_JOIN', {
                   attempt: nextAttempt,
@@ -348,6 +336,94 @@ function BroadcasterMeetingInner({
   actionsRef.current.stopHls = stopHls;
   actionsRef.current.leave = leave;
   actionsRef.current.join = join;
+  actionsRef.current.startHls = startHls;
+  actionsRef.current.enableWebcam = enableWebcam;
+  actionsRef.current.startScreenShare = startScreenShare;
+  actionsRef.current.enableScreenShare = enableScreenShare;
+
+  // Dedicated HLS trigger: runs only when SDK is CONNECTED *and* a real producer is ready.
+  // Decoupling from onMeetingStateChanged eliminates the captured-stale-closure race that
+  // previously called startHls() against a half-torn meeting.
+  useEffect(() => {
+    if (endedRef.current) return undefined;
+    if (lastSdkState !== 'CONNECTED') return undefined;
+    if (hlsStartTriggeredRef.current) return undefined;
+
+    const producerReady =
+      liveMode === 'screen'
+        ? Boolean(localMicOn)
+        : Boolean(localWebcamOn && localWebcamStream);
+
+    if (!producerReady) {
+      logEvent('HLS_TRIGGER_WAIT_PRODUCER', {
+        liveMode,
+        localWebcamOn: Boolean(localWebcamOn),
+        hasStream: Boolean(localWebcamStream),
+        localMicOn: Boolean(localMicOn),
+      });
+      return undefined;
+    }
+
+    hlsStartTriggeredRef.current = true;
+    hlsStartAttemptRef.current += 1;
+    const attempt = hlsStartAttemptRef.current;
+
+    // Tiny stabilization delay so the first RTP packet has been transmitted.
+    hlsStartTimerRef.current = setTimeout(async () => {
+      if (endedRef.current) return;
+      try {
+        if (liveMode === 'screen') {
+          const startScreen =
+            (typeof actionsRef.current.startScreenShare === 'function' &&
+              actionsRef.current.startScreenShare) ||
+            (typeof actionsRef.current.enableScreenShare === 'function' &&
+              actionsRef.current.enableScreenShare);
+          if (!startScreen) {
+            throw new Error('Screen share is not available in this build');
+          }
+          await Promise.resolve(startScreen());
+        }
+        logEvent('ACTION_START_HLS', {
+          attempt,
+          liveMode,
+          localParticipantId: localParticipant?.id || null,
+          sdkMeetingId: sdkMeetingId || null,
+        });
+        actionsRef.current.startHls?.({
+          layout: {
+            type: 'SPOTLIGHT',
+            priority: 'PIN',
+            gridSize: 4,
+          },
+          theme: 'DARK',
+          mode: 'video-and-audio',
+          quality: 'high',
+          orientation: 'portrait',
+        });
+      } catch (err) {
+        logEvent('HLS_START_ERROR', err);
+        setErrorMessage(err?.message || 'HLS start error');
+        setPhase('error');
+        hlsStartTriggeredRef.current = false;
+      }
+    }, 600);
+
+    return () => {
+      if (hlsStartTimerRef.current) {
+        clearTimeout(hlsStartTimerRef.current);
+        hlsStartTimerRef.current = null;
+      }
+    };
+  }, [
+    lastSdkState,
+    liveMode,
+    localWebcamOn,
+    localWebcamStream,
+    localMicOn,
+    localParticipant,
+    sdkMeetingId,
+    logEvent,
+  ]);
 
   useEffect(() => {
     const cameraReady = Boolean(localWebcamOn && localWebcamStream);
@@ -360,6 +436,10 @@ function BroadcasterMeetingInner({
     }
   }, [localWebcamOn, localWebcamStream, liveMode, logEvent]);
 
+  // Join exactly once after permissions + interactions settle. Deps intentionally empty:
+  // re-running this effect (and therefore its cleanup) on every SDK render would call
+  // leave() mid-join and tear down the meeting (root cause of "closes shortly after join").
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -375,6 +455,8 @@ function BroadcasterMeetingInner({
             ? 'Microphone permission is required for screen live streaming.'
             : 'Camera and microphone permissions are required for camera live streaming.'
         );
+        setErrorMessage('Permissions denied');
+        setPhase('error');
         return;
       }
       try {
@@ -393,6 +475,7 @@ function BroadcasterMeetingInner({
         }
       }
     })();
+    // Unmount-only cleanup. NEVER re-run this effect.
     return () => {
       cancelled = true;
       if (hlsStartTimerRef.current) {
@@ -404,12 +487,12 @@ function BroadcasterMeetingInner({
         reconnectTimerRef.current = null;
       }
       try {
-        if (hlsStartedRef.current) stopHls();
+        if (hlsStartedRef.current) actionsRef.current.stopHls?.();
         actionsRef.current.leave?.();
         logEvent('CLEANUP_LEAVE');
       } catch (_) {}
     };
-  }, [liveMode, roomDebug, logEvent, hlsStartedRef, stopHls]);
+  }, []);
 
   useEffect(() => {
     if (phase !== 'joining') return undefined;
@@ -510,7 +593,6 @@ export default function LiveStreamBroadcasterImpl({
   useEffect(() => {
     let cancelled = false;
     setTokenError(null);
-    setToken(null);
     setTokenParticipantId(null);
     setLoading(true);
     (async () => {
@@ -640,7 +722,7 @@ export default function LiveStreamBroadcasterImpl({
     return () => {
       cancelled = true;
     };
-  }, [effectiveRoomId, hostUserId, initialToken, roomId, streamId]);
+  }, [effectiveRoomId, initialToken]);
 
   if (loading) {
     return (
@@ -697,14 +779,19 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
+  // HLS host MUST be in CONFERENCE mode with at least one producer publishing,
+  // otherwise VideoSDK silently disconnects the host shortly after CONNECTED.
+  // Screen-share live mode joins with webcam off and turns on screen share after CONNECTED.
+  const joinWithWebcam = liveMode !== 'screen';
+
   return (
     <MeetingProvider
       config={{
         meetingId: effectiveRoomId,
-        mode: 'SEND_AND_RECV',
+        mode: 'CONFERENCE',
         ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
         micEnabled: true,
-        webcamEnabled: false,
+        webcamEnabled: joinWithWebcam,
         name: hostDisplayName || hostUserId || 'Host',
         defaultCamera: 'front',
         notification: {
