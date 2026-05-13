@@ -473,10 +473,15 @@ function BroadcasterMeetingInner({
           localParticipantId: localParticipant?.id || null,
           sdkMeetingId: sdkMeetingId || null,
         });
+        // Use GRID + SPEAKER to match the project's dashboard defaults (HLS Streaming
+        // Settings -> Layout Style: Grid, Who to Prioritize: Active Speaker). This avoids
+        // the SPOTLIGHT+PIN requirement that the local participant be pinned (which has
+        // failed silently when the pin call doesn't apply in time), and matches the layout
+        // the dashboard is provisioned for. `portrait` is kept for the mobile UX.
         actionsRef.current.startHls?.({
           layout: {
-            type: 'SPOTLIGHT',
-            priority: 'PIN',
+            type: 'GRID',
+            priority: 'SPEAKER',
             gridSize: 4,
           },
           theme: 'DARK',
@@ -870,17 +875,18 @@ export default function LiveStreamBroadcasterImpl({
   // Join with audio-only. On iOS, requesting webcam during the join handshake makes the
   // SDK go CONNECTING -> DISCONNECTED before CONNECTED if camera acquisition stalls.
   // We enable the webcam explicitly after CONNECTED (see effect in BroadcasterMeetingInner).
+  // NOTE: This config exactly matches the one that previously reached CONNECTED on iOS.
+  // Do NOT add `multistream` or `participantId` here without testing — both have caused
+  // silent CONNECTING -> DISCONNECTED loops on @videosdk.live/react-native-sdk@0.10.x iOS.
+  // VideoSDK auto-generates a participantId when omitted. Auth is via apikey + permissions
+  // in the JWT (signed by your Appwrite function).
   return (
     <MeetingProvider
       config={{
         meetingId: effectiveRoomId,
         mode: 'SEND_AND_RECV',
-        ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
         micEnabled: true,
         webcamEnabled: false,
-        // VideoSDK RN config key is lowercase 's'. Required for ILS hosts so the
-        // pipeline receives simulcast layers usable by HLS.
-        multistream: true,
         name: hostDisplayName || hostUserId || 'Host',
         defaultCamera: 'front',
         notification: {
