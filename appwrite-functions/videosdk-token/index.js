@@ -5,20 +5,28 @@
  *   URL:  POST https://...appwrite.run/...?[participantId=<hostAppwriteUserId>]&debug=1
  *   Body: ignored
  *   Returns: { meetingId, token, debug? }
- *   If participantId is present in the query, it is embedded in the JWT (`participantId` claim).
- *   The RN app must pass the same id to MeetingProvider (repo does this via decoded JWT).
+ *   Host JWT claims: { apikey, permissions:['allow_join','allow_mod'] } — minimal proven shape.
+ *   `participantId` query param is logged for debug only — NOT embedded in the JWT.
  *
- * GET — mint viewer (or caller) JWT for an existing room (watch live / backward-compatible):
+ * GET — mint viewer/caller JWT for an existing room (watch live / 1:1 audio-video):
  *   URL:  GET ...?roomId=<required>&participantId=<optional>
  *   Returns: { token, debug? }
- *   Viewer tokens use permissions: ['allow_join'] only.
+ *   Viewer JWT claims: { apikey, permissions:['allow_join'] } — minimal proven shape.
  *
  * Required env vars:
  *   VIDEOSDK_API_KEY
  *   VIDEOSDK_SECRET_KEY
  *
  * Notes:
- * - Room creation calls VideoSDK POST https://api.videosdk.live/v2/rooms with a short JWT auth header.
+ * - Room creation calls VideoSDK POST https://api.videosdk.live/v2/rooms with a short crawler JWT
+ *   (this token DOES require `version: 2` + `roles: ['crawler']` per VideoSDK docs).
+ * - Meeting/viewer tokens, by contrast, intentionally OMIT `version`, `roomId`, `roles`, and
+ *   `participantId` claims. Empirically on @videosdk.live/react-native-sdk@0.10.x with the
+ *   matching native pods (react-native-webrtc 0.0.24 / WebRTC-SDK 125.6422.07), adding those
+ *   claims causes signaling to silently reject the join handshake: the SDK sees
+ *   CONNECTING → DISCONNECTED in a loop, `connectedOnce` stays false, dashboard shows
+ *   "Session Initiating time: 0 ms" with no traces and no error events. Keep this payload
+ *   minimal until VideoSDK explicitly documents otherwise for v0.10.x React Native SDK.
  * - Must `return` every res.* (Appwrite requirement).
  */
 'use strict';
@@ -65,11 +73,14 @@ function parseQuery(req) {
 }
 
 function buildRoomAuthToken(apiKey, secretKey) {
+  // Short-lived JWT used only against `POST https://api.videosdk.live/v2/rooms`.
+  // `roles: ['crawler']` is VideoSDK's server-side management role for room operations.
   return jwt.sign(
     {
       apikey: apiKey,
       permissions: ['allow_join', 'allow_mod'],
       version: 2,
+      roles: ['crawler'],
     },
     secretKey,
     {
@@ -79,18 +90,27 @@ function buildRoomAuthToken(apiKey, secretKey) {
   );
 }
 
-function buildMeetingToken({ apiKey, secretKey, roomId, participantId, permissions }) {
-  // VideoSDK validates JWT by apikey + signature + permissions. Embedding `participantId`
-  // here makes the SDK treat that id as authoritative; combined with MeetingProvider passing
-  // its own participantId, this has produced silent CONNECTING -> DISCONNECTED loops on
-  // @videosdk.live/react-native-sdk@0.10.x (iOS). Keep the payload minimal and proven.
-  // `roomId` / `participantId` are accepted as args for forward-compat but intentionally NOT
-  // written to the JWT. The function still consumes ?participantId=... for log/debug only.
+function buildMeetingToken({ apiKey, secretKey, roomId, permissions }) {
+  // Minimal proven payload for @videosdk.live/react-native-sdk@0.10.x with
+  // @videosdk.live/react-native-webrtc@0.0.24 + WebRTC-SDK 125.6422.07.
+  //
+  // We previously tried adding `version: 2`, `roomId`, and `roles: ['rtc']` claims
+  // (per a community recommendation). On the iPhone X TestFlight build with the
+  // matching new native pods, that payload caused VideoSDK signaling to silently
+  // reject every join — CONNECTING → DISCONNECTED in <2s, `connectedOnce: false`,
+  // dashboard "Session Initiating time: 0 ms", no traces, no error events.
+  // Reverting to just { apikey, permissions } restores joinability.
+  //
+  // `roomId` is still accepted as an arg (and validated) so call sites stay
+  // self-documenting; it is intentionally NOT serialized into the JWT.
+  if (!roomId || typeof roomId !== 'string' || !roomId.trim()) {
+    throw new Error('buildMeetingToken: roomId is required');
+  }
   void roomId;
-  void participantId;
   const payload = {
     apikey: apiKey,
-    permissions: Array.isArray(permissions) && permissions.length > 0 ? permissions : ['allow_join'],
+    permissions:
+      Array.isArray(permissions) && permissions.length > 0 ? permissions : ['allow_join'],
   };
   return jwt.sign(payload, secretKey, {
     expiresIn: '2h',
@@ -194,17 +214,19 @@ module.exports = async ({ req, res, log }) => {
         apiKey,
         secretKey,
         roomId: String(roomId),
-        participantId,
         permissions: ['allow_join'],
       });
       const claims = safeDecodeJwtNoVerify(token) || {};
       const debug = {
+        flow: 'viewer-or-caller',
         requestedRoomId: roomId,
-        participantId: participantId || null,
-        tokenParticipantId: claims.participantId || null,
+        queryParticipantId: participantId || null,
         tokenRoomId: claims.roomId || null,
         tokenApiKey: claims.apikey || null,
         tokenPermissions: Array.isArray(claims.permissions) ? claims.permissions : [],
+        tokenVersion: typeof claims.version === 'number' ? claims.version : null,
+        tokenRoles: Array.isArray(claims.roles) ? claims.roles : [],
+        tokenParticipantId: claims.participantId || null,
       };
       if (debugRequested) log(`videosdk-token GET debug ${JSON.stringify(debug)}`);
       return res.json({ token, debug }, 200, {
@@ -213,27 +235,26 @@ module.exports = async ({ req, res, log }) => {
       });
     }
 
-    // POST: create room + token atomically
+    // POST: create room + mint host token atomically.
     const createdMeetingId = await createRoom(apiKey, secretKey);
-    // When client passes ?participantId= (live host id), embed it in JWT and use the same id in
-    // MeetingProvider — same pattern as GET /get-token + calls. Omit param => open token (no participantId claim).
     const token = buildMeetingToken({
       apiKey,
       secretKey,
       roomId: createdMeetingId,
-      participantId: participantId || '',
       permissions: ['allow_join', 'allow_mod'],
     });
     const claims = safeDecodeJwtNoVerify(token) || {};
     const debug = {
+      flow: 'live-host',
       requestedRoomId: createdMeetingId,
-      /** Query param echoed (may be '' if client omitted). */
+      /** Query param echoed for log correlation; never embedded in the JWT. */
       queryParticipantId: participantId || null,
-      /** Present in JWT only when query had non-empty participantId. */
-      tokenParticipantId: claims.participantId || null,
       tokenRoomId: claims.roomId || null,
       tokenApiKey: claims.apikey || null,
       tokenPermissions: Array.isArray(claims.permissions) ? claims.permissions : [],
+      tokenVersion: typeof claims.version === 'number' ? claims.version : null,
+      tokenRoles: Array.isArray(claims.roles) ? claims.roles : [],
+      tokenParticipantId: claims.participantId || null,
     };
     if (debugRequested) log(`videosdk-token POST debug ${JSON.stringify(debug)}`);
     return res.json({ meetingId: createdMeetingId, token, debug }, 200, {
