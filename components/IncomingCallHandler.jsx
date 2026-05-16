@@ -108,8 +108,8 @@ const IncomingCallHandler = () => {
       }
     };
 
-    // Poll every 5 seconds (reduced frequency to prevent spam)
-    pollingIntervalRef.current = setInterval(pollForIncomingCalls, 5000);
+    // Poll every 2s so callee sees the ring UI sooner after caller starts a call
+    pollingIntervalRef.current = setInterval(pollForIncomingCalls, 2000);
 
     // Also check immediately
     pollForIncomingCalls();

@@ -42,6 +42,9 @@ const UI = {
   accentVoice: '#818cf8',
 };
 
+/** How long to wait for the other person after we joined the room (no auto-hangup before this). */
+const WAIT_FOR_PEER_MS = 120000;
+
 // Inner component that uses VideoSDK hooks
 const VideoSDKCallInner = ({
   roomId,
@@ -66,6 +69,7 @@ const VideoSDKCallInner = ({
   const connectedReportedRef = useRef(false);
   const endingRef = useRef(false);
   const joinTimeoutRef = useRef(null);
+  const waitForPeerTimeoutRef = useRef(null);
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
 
@@ -86,8 +90,10 @@ const VideoSDKCallInner = ({
     },
     onMeetingLeft: () => {
       console.log('👋 Left VideoSDK meeting');
+      const hadJoined = meetingJoinedRef.current;
       meetingJoinedRef.current = false;
-      if (!endingRef.current) {
+      // Ignore transient disconnects while still joining; only end after a successful join.
+      if (!endingRef.current && hadJoined) {
         handleCallEnd();
       }
     },
@@ -102,7 +108,10 @@ const VideoSDKCallInner = ({
     onParticipantLeft: (participant) => {
       console.log('👋 Participant left:', participant.id);
       setTimeout(() => {
-        if (participantsRef.current.size === 0) {
+        if (endingRef.current || !connectedReportedRef.current) return;
+        const parts = participantsRef.current;
+        const count = parts instanceof Map ? parts.size : 0;
+        if (count <= 1) {
           handleCallEnd();
         }
       }, 400);
@@ -149,18 +158,36 @@ const VideoSDKCallInner = ({
     };
   }, [remoteConnected]);
 
+  // Wait for peer after we joined — do not hang up after a few seconds (iOS token/permissions often take longer).
   useEffect(() => {
-    if (meetingJoined && remoteConnected) return;
-    if (meetingJoined && !remoteConnected) {
-      const t = setTimeout(() => {
-        if (!endingRef.current && participantsRef.current.size <= 1) {
-          handleCallEnd();
-        }
-      }, 3500);
-      return () => clearTimeout(t);
+    if (waitForPeerTimeoutRef.current) {
+      clearTimeout(waitForPeerTimeoutRef.current);
+      waitForPeerTimeoutRef.current = null;
     }
-    return undefined;
-  }, [meetingJoined, remoteConnected]);
+    if (!meetingJoined || remoteConnected) return undefined;
+
+    waitForPeerTimeoutRef.current = setTimeout(() => {
+      if (endingRef.current || connectedReportedRef.current) return;
+      const parts = participantsRef.current;
+      const count = parts instanceof Map ? parts.size : 0;
+      if (count > 1) return;
+      Alert.alert(
+        'Still waiting',
+        `${peerDisplayName || 'The other person'} has not joined yet. Keep waiting or end the call.`,
+        [
+          { text: 'Keep waiting', style: 'cancel' },
+          { text: 'End call', style: 'destructive', onPress: () => handleCallEnd() },
+        ]
+      );
+    }, WAIT_FOR_PEER_MS);
+
+    return () => {
+      if (waitForPeerTimeoutRef.current) {
+        clearTimeout(waitForPeerTimeoutRef.current);
+        waitForPeerTimeoutRef.current = null;
+      }
+    };
+  }, [meetingJoined, remoteConnected, peerDisplayName]);
 
   useEffect(() => {
     // Join meeting when component mounts
@@ -258,6 +285,10 @@ const VideoSDKCallInner = ({
       if (joinTimeoutRef.current) {
         clearTimeout(joinTimeoutRef.current);
         joinTimeoutRef.current = null;
+      }
+      if (waitForPeerTimeoutRef.current) {
+        clearTimeout(waitForPeerTimeoutRef.current);
+        waitForPeerTimeoutRef.current = null;
       }
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
