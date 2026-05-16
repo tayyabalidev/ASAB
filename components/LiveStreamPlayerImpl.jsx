@@ -200,7 +200,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
     setTokenLoading(true);
     (async () => {
       try {
-        const t = await getVideoSDKToken(effectiveRoomId, user.$id);
+        const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'viewer' });
         if (cancelled) return;
         if (t) {
           const claims = decodeJwtPayload(t);
