@@ -117,8 +117,15 @@ function BroadcasterMeetingInner({
   const localParticipantRef = useRef(null);
   const pinAttemptedRef = useRef(false);
   const meetingJoinedRef = useRef(false);
+  const joinCompletedRef = useRef(false);
   const joinStartedAtRef = useRef(0);
   const disconnectFatalTimerRef = useRef(null);
+  const liveModeRef = useRef(liveMode);
+  const [joinCompleted, setJoinCompleted] = useState(false);
+
+  useEffect(() => {
+    liveModeRef.current = liveMode;
+  }, [liveMode]);
 
   const stringifyValue = useCallback((value) => {
     if (typeof value === 'string') return value;
@@ -215,6 +222,8 @@ function BroadcasterMeetingInner({
     onMeetingJoined: () => {
       meetingJoinedRef.current = true;
       connectedOnceRef.current = true;
+      joinCompletedRef.current = true;
+      setJoinCompleted(true);
       setLastSdkState('MEETING_JOINED');
       logEvent('MEETING_JOINED', {
         sdkMeetingId: sdkMeetingId || null,
@@ -222,6 +231,20 @@ function BroadcasterMeetingInner({
         localParticipantId: localParticipantRef.current?.id || null,
         localParticipantMode: localParticipantRef.current?.mode || null,
       });
+      // Enable webcam only after the SDK confirms meeting join (not when a stale VIEWER participant appears).
+      if (liveModeRef.current !== 'screen' && !webcamEnableAttemptedRef.current) {
+        webcamEnableAttemptedRef.current = true;
+        enableWebcamTimerRef.current = setTimeout(() => {
+          if (endedRef.current) return;
+          try {
+            logEvent('ACTION_ENABLE_WEBCAM_AFTER_JOIN');
+            actionsRef.current.enableWebcam?.();
+          } catch (e) {
+            logEvent('ENABLE_WEBCAM_AFTER_JOIN_ERROR', e);
+            webcamEnableAttemptedRef.current = false;
+          }
+        }, 600);
+      }
       // SPOTLIGHT + priority:'PIN' HLS layout only renders pinned participants.
       // Without this pin, HLS has nothing to composite and the pipeline rejects/empties.
       try {
@@ -295,8 +318,10 @@ function BroadcasterMeetingInner({
 
       if (stateText === 'CONNECTED') {
         connectedOnceRef.current = true;
+        meetingJoinedRef.current = true;
+        joinCompletedRef.current = true;
+        setJoinCompleted(true);
         reconnectAttemptsRef.current = 0;
-        // HLS trigger lives in its own effect — keep this callback minimal.
       }
 
       if (stateText === 'DISCONNECTED' && !endedRef.current) {
@@ -424,61 +449,17 @@ function BroadcasterMeetingInner({
 
   const participantCount = countRoomParticipants(participants, localParticipant);
 
-  const hostCanPublish =
+  const localMode = String(localParticipant?.mode || '').toUpperCase();
+  const isBroadcasterMode =
+    localMode === 'SEND_AND_RECV' || localMode === 'CONFERENCE';
+
+  const hostInRoom =
+    joinCompleted &&
+    meetingJoinedRef.current &&
     Boolean(localParticipant?.id) &&
-    (meetingJoinedRef.current ||
-      connectedOnceRef.current ||
-      lastSdkState === 'CONNECTED' ||
-      lastSdkState === 'MEETING_JOINED');
+    isBroadcasterMode;
 
-  useEffect(() => {
-    if (!localParticipant?.id) return;
-    if (!meetingJoinedRef.current && !connectedOnceRef.current) {
-      meetingJoinedRef.current = true;
-      connectedOnceRef.current = true;
-    }
-    if (lastSdkState === 'INIT') {
-      setLastSdkState('MEETING_JOINED');
-    }
-    logEvent('LOCAL_PARTICIPANT_READY', {
-      id: localParticipant.id,
-      mode: localParticipant.mode || null,
-      participantCount,
-    });
-  }, [localParticipant?.id, localParticipant?.mode, participantCount, logEvent, lastSdkState]);
-
-  // Enable webcam after the host is in the room (onMeetingJoined / localParticipant), not only
-  // when onMeetingStateChanged fires CONNECTED — on some builds that event never updates sdk state.
-  useEffect(() => {
-    if (endedRef.current) return undefined;
-    if (!hostCanPublish) return undefined;
-    if (liveMode === 'screen') return undefined;
-    if (webcamEnableAttemptedRef.current) return undefined;
-    if (localWebcamOn) {
-      webcamEnableAttemptedRef.current = true;
-      return undefined;
-    }
-
-    webcamEnableAttemptedRef.current = true;
-    // Tiny stabilization wait so the WebRTC PC is fully wired up before we add a video track.
-    enableWebcamTimerRef.current = setTimeout(() => {
-      if (endedRef.current) return;
-      try {
-        logEvent('ACTION_ENABLE_WEBCAM');
-        actionsRef.current.enableWebcam?.();
-      } catch (e) {
-        logEvent('ENABLE_WEBCAM_ERROR', e);
-        webcamEnableAttemptedRef.current = false;
-      }
-    }, 500);
-
-    return () => {
-      if (enableWebcamTimerRef.current) {
-        clearTimeout(enableWebcamTimerRef.current);
-        enableWebcamTimerRef.current = null;
-      }
-    };
-  }, [hostCanPublish, liveMode, localWebcamOn, logEvent]);
+  const hostCanPublish = hostInRoom;
 
   // If in-room but the camera track never appears, retry enableWebcam once.
   useEffect(() => {
@@ -496,6 +477,17 @@ function BroadcasterMeetingInner({
     }, 3500);
     return () => clearTimeout(t);
   }, [hostCanPublish, liveMode, localWebcamOn, logEvent]);
+
+  useEffect(() => {
+    if (!localParticipant?.id) return;
+    logEvent('LOCAL_PARTICIPANT_READY', {
+      id: localParticipant.id,
+      mode: localParticipant.mode || null,
+      participantCount,
+      joinCompleted: joinCompletedRef.current,
+      meetingJoined: meetingJoinedRef.current,
+    });
+  }, [localParticipant?.id, localParticipant?.mode, participantCount, joinCompleted, logEvent]);
 
   // Start HLS once the host is in-room and publishing audio/video (or screen+audio).
   useEffect(() => {
@@ -630,12 +622,6 @@ function BroadcasterMeetingInner({
         return;
       }
       try {
-        await new Promise((resolve) =>
-          InteractionManager.runAfterInteractions(() => resolve(undefined))
-        );
-        await new Promise((r) => setTimeout(r, 400));
-        if (cancelled) return;
-
         // Wait until useMeeting() exposes join (avoids silent no-op on first paint).
         const joinReadyDeadline = Date.now() + 8000;
         while (!cancelled && Date.now() < joinReadyDeadline) {
@@ -650,6 +636,8 @@ function BroadcasterMeetingInner({
         joinStartedAtRef.current = Date.now();
         logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
         await Promise.resolve(actionsRef.current.join());
+        joinCompletedRef.current = true;
+        setJoinCompleted(true);
       } catch (e) {
         if (!cancelled) {
           logEvent('JOIN_FAILED', e);
@@ -729,18 +717,18 @@ function BroadcasterMeetingInner({
           <View
             style={[
               styles.livePill,
-              phase !== 'live' && !hostCanPublish && styles.connectingPill,
-              phase !== 'live' && hostCanPublish && styles.inRoomPill,
+              phase !== 'live' && !hostInRoom && styles.connectingPill,
+              phase !== 'live' && hostInRoom && styles.inRoomPill,
             ]}
           >
             <View style={styles.dot} />
             <Text style={styles.liveText}>
-              {phase === 'live' ? 'LIVE' : hostCanPublish ? 'IN ROOM' : 'CONNECTING'}
+              {phase === 'live' ? 'LIVE' : hostInRoom ? 'IN ROOM' : 'CONNECTING'}
             </Text>
           </View>
           <View style={styles.participantPill}>
             <Text style={styles.participantPillText}>
-              👤 {participantCount > 0 ? participantCount : '…'}
+              👤 {hostInRoom ? participantCount || 1 : '…'}
             </Text>
           </View>
         </View>
