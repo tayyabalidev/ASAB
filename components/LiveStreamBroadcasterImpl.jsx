@@ -261,7 +261,13 @@ function BroadcasterMeetingInner({
     onMeetingLeft: () => {
       logEvent('MEETING_LEFT');
     },
-    onConnectionOpen: () => logEvent('CONNECTION_OPEN'),
+    onConnectionOpen: () => {
+      connectedOnceRef.current = true;
+      meetingJoinedRef.current = true;
+      joinCompletedRef.current = true;
+      setJoinCompleted(true);
+      logEvent('CONNECTION_OPEN');
+    },
     onConnectionClose: (e) => logEvent('CONNECTION_CLOSE', e),
     onParticipantJoined: (p) => {
       logEvent('PARTICIPANT_JOINED', { id: p?.id, mode: p?.mode });
@@ -455,11 +461,49 @@ function BroadcasterMeetingInner({
 
   const hostInRoom =
     joinCompleted &&
-    meetingJoinedRef.current &&
     Boolean(localParticipant?.id) &&
-    isBroadcasterMode;
+    isBroadcasterMode &&
+    (meetingJoinedRef.current ||
+      connectedOnceRef.current ||
+      lastSdkState === 'CONNECTED' ||
+      lastSdkState === 'MEETING_JOINED' ||
+      lastSdkState === 'CONNECTING');
 
   const hostCanPublish = hostInRoom;
+
+  // Some TestFlight / RN 0.10.x builds never fire onMeetingJoined but stay CONNECTING with SEND_AND_RECV.
+  useEffect(() => {
+    if (endedRef.current || liveMode === 'screen') return undefined;
+    if (!joinCompleted || !localParticipant?.id || !isBroadcasterMode) return undefined;
+    if (meetingJoinedRef.current || webcamEnableAttemptedRef.current) return undefined;
+
+    const t = setTimeout(() => {
+      if (endedRef.current || meetingJoinedRef.current || webcamEnableAttemptedRef.current) return;
+      meetingJoinedRef.current = true;
+      connectedOnceRef.current = true;
+      logEvent('WEBCAM_FALLBACK_AFTER_JOIN', {
+        sdk: lastSdkState,
+        mode: localParticipant?.mode || null,
+      });
+      webcamEnableAttemptedRef.current = true;
+      try {
+        actionsRef.current.enableWebcam?.();
+      } catch (e) {
+        logEvent('WEBCAM_FALLBACK_ERROR', e);
+        webcamEnableAttemptedRef.current = false;
+      }
+    }, 2500);
+
+    return () => clearTimeout(t);
+  }, [
+    joinCompleted,
+    localParticipant?.id,
+    localParticipant?.mode,
+    isBroadcasterMode,
+    liveMode,
+    lastSdkState,
+    logEvent,
+  ]);
 
   // If in-room but the camera track never appears, retry enableWebcam once.
   useEffect(() => {

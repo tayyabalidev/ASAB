@@ -24,10 +24,12 @@ import {
   createCall,
   acceptCall,
   rejectCall,
+  endCall,
   getCallById,
   subscribeCallUpdates,
 } from '../../lib/calls';
 import { CallState } from '../../lib/callHelper';
+import { stashCallSession, peekCallSession, clearCallSession } from '../../lib/pendingCallSession';
 import VideoSDKCallWrapper from '../../components/VideoSDKCallWrapper';
 
 const COLORS = {
@@ -59,6 +61,11 @@ function peerDisplayName(callData, isIncoming) {
     return callData.callerUsername || 'Someone';
   }
   return callData.receiverUsername || callData.receiverName || 'Your contact';
+}
+
+function callRoomId(callData) {
+  if (!callData) return '';
+  return String(callData.channelName || callData.roomName || '').trim();
 }
 
 const CallScreen = () => {
@@ -218,6 +225,15 @@ const CallScreen = () => {
       const call = await createCall(user.$id, receiverId, type, user.username);
       setCallData(call);
 
+      const roomId = callRoomId(call);
+      if (roomId && call.videosdkCallerToken) {
+        stashCallSession({
+          callId: call.$id,
+          roomId,
+          token: call.videosdkCallerToken,
+        });
+      }
+
       if (unsubscribeRef.current) unsubscribeRef.current();
       unsubscribeRef.current = subscribeCallUpdates(call.$id, ({ payload }) => {
         if (payload.status === CallState.REJECTED) {
@@ -267,8 +283,16 @@ const CallScreen = () => {
     }
   };
 
-  const handleCallEnd = () => {
+  const handleCallEnd = async () => {
     try {
+      if (callData?.$id) {
+        clearCallSession(callData.$id);
+        try {
+          await endCall(callData.$id, user.$id);
+        } catch (e) {
+          console.warn('Error ending call document:', e);
+        }
+      }
       if (unsubscribeRef.current) {
         try {
           unsubscribeRef.current();
@@ -312,6 +336,42 @@ const CallScreen = () => {
   const accent = callType === 'video' ? COLORS.accentVideo : COLORS.accentVoice;
   const isVideo = callType === 'video';
 
+  const roomId = callRoomId(callData);
+  const showActiveCallUi = callState === 'connecting' || callState === 'connected';
+  const showOutgoingPrecall = !isIncoming && callState === 'calling' && Boolean(roomId);
+  const showVideoSdk = Boolean(
+    roomId && callData?.$id && user?.$id && (showOutgoingPrecall || showActiveCallUi)
+  );
+  const sdkPhase = showOutgoingPrecall ? 'precall' : 'active';
+  const stashedCallToken = callData?.$id ? peekCallSession(callData.$id)?.token : null;
+
+  const renderVideoSdkLayer = () => {
+    if (!showVideoSdk) return null;
+    const peerId =
+      callData.receiverId === user.$id ? callData.callerId : callData.receiverId;
+    return (
+      <View
+        style={[styles.sdkLayer, sdkPhase === 'precall' && styles.sdkLayerPrecall]}
+        pointerEvents={sdkPhase === 'precall' ? 'none' : 'box-none'}
+      >
+        <VideoSDKCallWrapper
+          key={`call-sdk-${callData.$id}-${roomId}`}
+          phase={sdkPhase}
+          initialToken={stashedCallToken}
+          roomId={roomId}
+          callerId={callData.callerId}
+          receiverId={peerId}
+          currentUserId={user.$id}
+          callType={callType}
+          callId={callData.$id}
+          peerDisplayName={peerDisplayName(callData, isIncoming)}
+          onCallEnd={handleCallEnd}
+          onError={handleCallError}
+        />
+      </View>
+    );
+  };
+
   const renderShell = (children) => (
     <LinearGradient colors={[COLORS.bg0, COLORS.bg1, COLORS.bg2]} style={styles.gradient} start={{ x: 0.2, y: 0 }} end={{ x: 0.9, y: 1 }}>
       <StatusBar barStyle="light-content" />
@@ -319,6 +379,15 @@ const CallScreen = () => {
         {children}
       </SafeAreaView>
     </LinearGradient>
+  );
+
+  const renderCallRoot = (overlayContent) => (
+    <View style={styles.callRoot}>
+      {renderVideoSdkLayer()}
+      <View style={styles.callOverlay} pointerEvents="box-none">
+        {overlayContent}
+      </View>
+    </View>
   );
 
   if (error) {
@@ -348,6 +417,7 @@ const CallScreen = () => {
     const initial = peerInitial(callData, isIncoming, user?.$id);
 
     return renderShell(
+      renderCallRoot(
       <View style={styles.ringRoot}>
         <View style={styles.ringTopBar}>
           <TouchableOpacity onPress={handleCallEnd} hitSlop={12} style={styles.iconHit}>
@@ -423,10 +493,11 @@ const CallScreen = () => {
           )}
         </View>
       </View>
+      )
     );
   }
 
-  if (callState === 'connected' || callState === 'connecting') {
+  if (showActiveCallUi) {
     if (!callData) {
       return renderShell(
         <View style={styles.centerBlock}>
@@ -437,7 +508,7 @@ const CallScreen = () => {
       );
     }
 
-    if (!callData.channelName && !callData.roomName) {
+    if (!roomId) {
       return renderShell(
         <View style={styles.centerBlock}>
           <Feather name="wifi-off" size={40} color={COLORS.textMuted} />
@@ -450,35 +521,25 @@ const CallScreen = () => {
       );
     }
 
-    const roomId = callData.channelName || callData.roomName;
-    const receiverId = callData.receiverId === user.$id ? callData.callerId : callData.receiverId;
-
-    if (!roomId) {
+    if (!showVideoSdk) {
       return renderShell(
         <View style={styles.centerBlock}>
-          <Text style={styles.errorTitle}>Missing meeting</Text>
-          <Text style={styles.errorBody}>Could not join this call. Please try again.</Text>
-          <TouchableOpacity style={styles.primaryBtn} onPress={handleCallEnd}>
-            <Text style={styles.primaryBtnText}>Close</Text>
-          </TouchableOpacity>
+          <ActivityIndicator size="large" color={accent} />
+          <Text style={styles.connectingTitle}>Connecting</Text>
+          <Text style={styles.connectingHint}>Joining VideoSDK room…</Text>
         </View>
       );
     }
 
-    const peerName = peerDisplayName(callData, isIncoming);
-
-    return (
-      <VideoSDKCallWrapper
-        roomId={roomId}
-        callerId={callData.callerId}
-        receiverId={receiverId}
-        currentUserId={user.$id}
-        callType={callType}
-        callId={callData.$id}
-        peerDisplayName={peerName}
-        onCallEnd={handleCallEnd}
-        onError={handleCallError}
-      />
+    return renderShell(
+      renderCallRoot(
+        sdkPhase === 'active' ? null : (
+          <View style={styles.centerBlock}>
+            <ActivityIndicator size="large" color={accent} />
+            <Text style={styles.connectingHint}>Joining call…</Text>
+          </View>
+        )
+      )
     );
   }
 
@@ -548,6 +609,21 @@ const styles = StyleSheet.create({
   },
   ringRoot: {
     flex: 1,
+  },
+  callRoot: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  callOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+  },
+  sdkLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
+  sdkLayerPrecall: {
+    opacity: 0,
   },
   ringTopBar: {
     paddingHorizontal: 8,

@@ -27,8 +27,9 @@ import {
 } from '@videosdk.live/react-native-sdk';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken } from '../lib/videosdkHelper';
+import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
-import { updateCallStatus, endCall } from '../lib/calls';
+import { updateCallStatus } from '../lib/calls';
 import { CallState } from '../lib/callHelper';
 
 const { width, height } = Dimensions.get('window');
@@ -51,10 +52,12 @@ const VideoSDKCallInner = ({
   currentUserId,
   callType = 'video',
   callId = null,
+  phase = 'active',
   onCallEnd,
   onError,
   peerDisplayName = 'Participant',
 }) => {
+  const isPrecall = phase === 'precall';
   const insets = useSafeAreaInsets();
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(callType === 'video');
@@ -72,6 +75,11 @@ const VideoSDKCallInner = ({
   const waitForPeerTimeoutRef = useRef(null);
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
+  const phaseRef = useRef(phase);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   useEffect(() => {
     callIdRef.current = callId;
@@ -92,14 +100,16 @@ const VideoSDKCallInner = ({
       console.log('👋 Left VideoSDK meeting');
       const hadJoined = meetingJoinedRef.current;
       meetingJoinedRef.current = false;
-      // Ignore transient disconnects while still joining; only end after a successful join.
-      if (!endingRef.current && hadJoined) {
+      // Precall: stay on ring UI if signaling drops; active call ends when peer leaves.
+      if (!endingRef.current && hadJoined && phaseRef.current === 'active') {
         handleCallEnd();
       }
     },
     onError: (error) => {
       console.error('❌ VideoSDK error:', error);
-      Alert.alert('Call Error', error?.message || 'An error occurred during the call');
+      if (!isPrecall) {
+        Alert.alert('Call Error', error?.message || 'An error occurred during the call');
+      }
       if (onError) onError(error);
     },
     onParticipantJoined: (participant) => {
@@ -197,6 +207,7 @@ const VideoSDKCallInner = ({
         console.log('[CALL_JOIN_START]', {
           roomId,
           callType,
+          phase,
           callId: callIdRef.current,
           userId: currentUserId || null,
         });
@@ -216,7 +227,8 @@ const VideoSDKCallInner = ({
         joinTimeoutRef.current = setTimeout(() => {
           if (!cancelled && !meetingJoinedRef.current && !endingRef.current) {
             const timeoutError = new Error('Joining room timed out. Check token, roomId, or network.');
-            if (onError) onError(timeoutError);
+            console.warn('[CALL_JOIN_TIMEOUT]', { roomId, phase, callId: callIdRef.current });
+            if (!isPrecall && onError) onError(timeoutError);
           }
         }, 45000);
 
@@ -228,7 +240,9 @@ const VideoSDKCallInner = ({
       } catch (error) {
         if (cancelled || endingRef.current) return;
         console.error('Error joining VideoSDK meeting:', error);
-        Alert.alert('Error', 'Failed to join call. Please try again.');
+        if (!isPrecall) {
+          Alert.alert('Error', 'Failed to join call. Please try again.');
+        }
         if (onError) onError(error);
       }
     };
@@ -241,7 +255,7 @@ const VideoSDKCallInner = ({
         joinTimeoutRef.current = null;
       }
     };
-  }, [roomId, callType, onError]);
+  }, [roomId, callType, phase, onError]);
 
   const handleCallEnd = async () => {
     if (endingRef.current) return;
@@ -256,13 +270,6 @@ const VideoSDKCallInner = ({
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
-    }
-    try {
-      if (callIdRef.current) {
-        await endCall(callIdRef.current, currentUserId);
-      }
-    } catch (e) {
-      console.warn('Error updating call status:', e);
     }
     try {
       await leave();
@@ -341,6 +348,16 @@ const VideoSDKCallInner = ({
       : `Waiting for ${peerDisplayName || 'participant'}…`;
 
   const controlsBottom = Math.max(insets.bottom, 20) + 16;
+
+  if (isPrecall) {
+    return (
+      <View style={styles.precallHost} pointerEvents="none">
+        {__DEV__ && meetingJoined ? (
+          <Text style={styles.precallDevBadge}>In room (waiting)</Text>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -492,32 +509,63 @@ const VideoSDKCall = ({
   currentUserId,
   callType = 'video',
   callId = null,
+  phase = 'active',
+  initialToken = null,
   peerDisplayName,
   onCallEnd,
   onError,
 }) => {
   const [token, setToken] = useState(null);
+  const [meetingParticipantId, setMeetingParticipantId] = useState(undefined);
   const [loading, setLoading] = useState(true);
   const [tokenError, setTokenError] = useState(null);
   const normalizedRoomId = typeof roomId === 'string' ? roomId.trim() : '';
+  const isPrecall = phase === 'precall';
 
   useEffect(() => {
     let cancelled = false;
     setTokenError(null);
     setToken(null);
+    setMeetingParticipantId(undefined);
     setLoading(true);
+
+    const applyValidatedToken = (meetingToken) => {
+      const validation = validateMeetingToken(meetingToken, normalizedRoomId);
+      if (!validation.ok) {
+        setTokenError(validation.error);
+        return false;
+      }
+      if (validation.participantId) {
+        setMeetingParticipantId(validation.participantId);
+      }
+      setToken(meetingToken);
+      return true;
+    };
 
     const fetchToken = async () => {
       try {
         if (!normalizedRoomId) {
           throw new Error('Missing VideoSDK roomId for this call.');
         }
+
+        const prefilled =
+          typeof initialToken === 'string' && initialToken.trim() ? initialToken.trim() : '';
+        if (prefilled) {
+          if (cancelled) return;
+          if (applyValidatedToken(prefilled)) {
+            console.log('[CALL_TOKEN] using stashed caller token');
+            return;
+          }
+          if (cancelled) return;
+          setLoading(false);
+          return;
+        }
+
         const meetingToken = await getVideoSDKToken(normalizedRoomId, currentUserId);
 
         if (cancelled) return;
 
-        if (meetingToken) {
-          setToken(meetingToken);
+        if (meetingToken && applyValidatedToken(meetingToken)) {
           return;
         }
 
@@ -541,19 +589,25 @@ const VideoSDKCall = ({
         const msg = error?.message || 'Failed to get call token';
         console.error('Error fetching token:', error);
         setTokenError(msg);
-        // Keep user on call UI with inline error; do not replace whole screen via parent onError
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
+    if (!VIDEOSDK_CONFIG.tokenServerUrl && !initialToken) {
+      console.warn('[VideoSDK] tokenServerUrl missing at runtime');
+    }
+
     fetchToken();
     return () => {
       cancelled = true;
     };
-  }, [normalizedRoomId, currentUserId]);
+  }, [normalizedRoomId, currentUserId, initialToken]);
 
   if (loading) {
+    if (isPrecall) {
+      return <View style={styles.precallHost} pointerEvents="none" />;
+    }
     return (
       <View style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -564,6 +618,11 @@ const VideoSDKCall = ({
   }
 
   if (tokenError) {
+    if (isPrecall) {
+      console.warn('[CALL_PRECALL_TOKEN_ERROR]', tokenError);
+      if (onError) onError(tokenError);
+      return <View style={styles.precallHost} pointerEvents="none" />;
+    }
     return (
       <View style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -605,9 +664,8 @@ const VideoSDKCall = ({
   return (
     <MeetingProvider
       config={{
-        // VideoSDK SDK expects the key "meetingId", sourced from roomId.
         meetingId: normalizedRoomId,
-        participantId: currentUserId || undefined,
+        ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
         micEnabled: VIDEOSDK_CONFIG.meetingSettings.micEnabled,
         webcamEnabled: callType === 'video' && VIDEOSDK_CONFIG.meetingSettings.webcamEnabled,
         name: currentUserId || 'User',
@@ -623,6 +681,7 @@ const VideoSDKCall = ({
         currentUserId={currentUserId}
         callType={callType}
         callId={callId}
+        phase={phase}
         peerDisplayName={peerDisplayName}
         onCallEnd={onCallEnd}
         onError={onError}
@@ -818,6 +877,19 @@ const styles = StyleSheet.create({
   },
   endCallButton: {
     backgroundColor: UI.danger,
+  },
+  precallHost: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0,
+    overflow: 'hidden',
+  },
+  precallDevBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    fontSize: 10,
+    color: '#22c55e',
+    opacity: 0.9,
   },
 });
 
