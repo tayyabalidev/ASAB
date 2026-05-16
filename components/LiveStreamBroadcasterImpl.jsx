@@ -28,6 +28,30 @@ function buildHealthUrl(baseUrl) {
   return `${raw}${joiner}health=1&debug=1`;
 }
 
+/** VideoSDK may fire onMeetingJoined + localParticipant without a CONNECTED meeting-state event. */
+function normalizeMeetingState(state) {
+  const raw =
+    typeof state === 'string'
+      ? state
+      : state?.status || state?.state || state?.meetingState || '';
+  const upper = String(raw || '').trim().toUpperCase();
+  if (upper === 'CONNECTED' || upper === 'MEETING_JOINED' || upper === 'JOINED') {
+    return 'CONNECTED';
+  }
+  if (upper === 'CONNECTING' || upper === 'RECONNECTING') return 'CONNECTING';
+  if (upper === 'DISCONNECTED' || upper === 'CLOSED' || upper === 'FAILED') return upper;
+  return String(raw || 'INIT');
+}
+
+function countRoomParticipants(participants, localParticipant) {
+  const localId = localParticipant?.id;
+  if (!localId) {
+    return participants instanceof Map ? participants.size : 0;
+  }
+  if (!(participants instanceof Map) || participants.size === 0) return 1;
+  return participants.has(localId) ? Math.max(1, participants.size) : participants.size + 1;
+}
+
 function LocalPreview({ liveMode }) {
   const { localWebcamOn, localWebcamStream } = useMeeting();
 
@@ -92,6 +116,9 @@ function BroadcasterMeetingInner({
   const enableWebcamTimerRef = useRef(null);
   const localParticipantRef = useRef(null);
   const pinAttemptedRef = useRef(false);
+  const meetingJoinedRef = useRef(false);
+  const joinStartedAtRef = useRef(0);
+  const disconnectFatalTimerRef = useRef(null);
 
   const stringifyValue = useCallback((value) => {
     if (typeof value === 'string') return value;
@@ -186,6 +213,9 @@ function BroadcasterMeetingInner({
     meetingId: sdkMeetingId,
   } = useMeeting({
     onMeetingJoined: () => {
+      meetingJoinedRef.current = true;
+      connectedOnceRef.current = true;
+      setLastSdkState('MEETING_JOINED');
       logEvent('MEETING_JOINED', {
         sdkMeetingId: sdkMeetingId || null,
         expected: roomDebug || null,
@@ -255,10 +285,7 @@ function BroadcasterMeetingInner({
     },
     onMeetingStateChanged: (state) => {
       if (!state) return;
-      const stateText =
-        typeof state === 'string'
-          ? state
-          : state?.status || state?.state;
+      const stateText = normalizeMeetingState(state);
       const stateReason =
         (typeof state === 'object' &&
           (state?.message || state?.reason || state?.error || state?.errorMessage)) ||
@@ -273,22 +300,30 @@ function BroadcasterMeetingInner({
       }
 
       if (stateText === 'DISCONNECTED' && !endedRef.current) {
-        // Never reached CONNECTED — bad token/room config. Retrying leave+join here only spins
-        // CONNECTING → DISCONNECTED and the dashboard stays at 0 participants.
-        if (!connectedOnceRef.current) {
-          logEvent('DISCONNECTED_BEFORE_CONNECTED', {
+        const inRoom =
+          meetingJoinedRef.current ||
+          connectedOnceRef.current ||
+          Boolean(localParticipantRef.current?.id);
+
+        // Transient DISCONNECTED during handshake is common — do not error if host is already in-room.
+        if (inRoom) {
+          logEvent('DISCONNECTED_WHILE_IN_ROOM', {
             localParticipantId: localParticipantRef.current?.id || null,
           });
-          setErrorMessage('Could not join the live room');
-          setErrorDetail(
-            `VideoSDK disconnected before CONNECTED (sdk=${stateText || 'DISCONNECTED'}). ` +
-              'Redeploy videosdk-token (JWT: version 2 + roomId, no roles), start a NEW stream, ' +
-              `and confirm token URL matches your function: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}. ` +
-              'Decode the host JWT at jwt.io — must have roomId matching this room and must NOT include roles.'
-          );
-          setPhase('error');
+          if (disconnectFatalTimerRef.current) {
+            clearTimeout(disconnectFatalTimerRef.current);
+            disconnectFatalTimerRef.current = null;
+          }
           return;
         }
+
+        // Brief disconnect before MEETING_JOINED — wait and retry instead of failing immediately.
+        logEvent('DISCONNECTED_DURING_JOIN', {
+          localParticipantId: localParticipantRef.current?.id || null,
+          msSinceJoin: joinStartedAtRef.current
+            ? Date.now() - joinStartedAtRef.current
+            : null,
+        });
 
         // Allow HLS, webcam, and pin to be re-attempted after a clean reconnect.
         hlsStartTriggeredRef.current = false;
@@ -337,10 +372,13 @@ function BroadcasterMeetingInner({
           logEvent('DISCONNECTED_RETRY_EXHAUSTED', {
             attempts: reconnectAttemptsRef.current,
             connectedOnce: connectedOnceRef.current,
+            localParticipantId: localParticipantRef.current?.id || null,
           });
-          setErrorMessage('Connection dropped before live started');
+          setErrorMessage('Could not join the live room');
           setErrorDetail(
-            'Meeting disconnected repeatedly while joining. Please check network stability and VideoSDK iOS release logs.'
+            'VideoSDK disconnected before the host could stay in the room. Start a NEW live stream (do not reuse an old room id). ' +
+              'Confirm videosdk-token is deployed (JWT: version 2, roomId, no roles) and ' +
+              `token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}.`
           );
           setPhase('error');
         }
@@ -384,24 +422,36 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableScreenShare = enableScreenShare;
   localParticipantRef.current = localParticipant || null;
 
-  const participantCount =
-    participants instanceof Map ? participants.size : localParticipant?.id ? 1 : 0;
+  const participantCount = countRoomParticipants(participants, localParticipant);
+
+  const hostCanPublish =
+    Boolean(localParticipant?.id) &&
+    (meetingJoinedRef.current ||
+      connectedOnceRef.current ||
+      lastSdkState === 'CONNECTED' ||
+      lastSdkState === 'MEETING_JOINED');
 
   useEffect(() => {
     if (!localParticipant?.id) return;
+    if (!meetingJoinedRef.current && !connectedOnceRef.current) {
+      meetingJoinedRef.current = true;
+      connectedOnceRef.current = true;
+    }
+    if (lastSdkState === 'INIT') {
+      setLastSdkState('MEETING_JOINED');
+    }
     logEvent('LOCAL_PARTICIPANT_READY', {
       id: localParticipant.id,
       mode: localParticipant.mode || null,
       participantCount,
     });
-  }, [localParticipant?.id, localParticipant?.mode, participantCount, logEvent]);
+  }, [localParticipant?.id, localParticipant?.mode, participantCount, logEvent, lastSdkState]);
 
-  // After CONNECTED, turn the webcam on explicitly. Doing this at join time (webcamEnabled: true)
-  // makes the SDK race the camera-acquisition during the signaling handshake and on iOS this often
-  // ends in CONNECTING -> DISCONNECTED before CONNECTED ever fires. Enabling here is reliable.
+  // Enable webcam after the host is in the room (onMeetingJoined / localParticipant), not only
+  // when onMeetingStateChanged fires CONNECTED — on some builds that event never updates sdk state.
   useEffect(() => {
     if (endedRef.current) return undefined;
-    if (lastSdkState !== 'CONNECTED') return undefined;
+    if (!hostCanPublish) return undefined;
     if (liveMode === 'screen') return undefined;
     if (webcamEnableAttemptedRef.current) return undefined;
     if (localWebcamOn) {
@@ -428,12 +478,12 @@ function BroadcasterMeetingInner({
         enableWebcamTimerRef.current = null;
       }
     };
-  }, [lastSdkState, liveMode, localWebcamOn, logEvent]);
+  }, [hostCanPublish, liveMode, localWebcamOn, logEvent]);
 
-  // If CONNECTED but the camera track never appears, retry enableWebcam once.
+  // If in-room but the camera track never appears, retry enableWebcam once.
   useEffect(() => {
     if (endedRef.current || liveMode === 'screen') return undefined;
-    if (lastSdkState !== 'CONNECTED' || localWebcamOn) return undefined;
+    if (!hostCanPublish || localWebcamOn) return undefined;
     const t = setTimeout(() => {
       if (endedRef.current || localWebcamOn) return;
       logEvent('ENABLE_WEBCAM_RETRY');
@@ -445,14 +495,12 @@ function BroadcasterMeetingInner({
       }
     }, 3500);
     return () => clearTimeout(t);
-  }, [lastSdkState, liveMode, localWebcamOn, logEvent]);
+  }, [hostCanPublish, liveMode, localWebcamOn, logEvent]);
 
-  // Dedicated HLS trigger: runs only when SDK is CONNECTED *and* a real producer is ready.
-  // Decoupling from onMeetingStateChanged eliminates the captured-stale-closure race that
-  // previously called startHls() against a half-torn meeting.
+  // Start HLS once the host is in-room and publishing audio/video (or screen+audio).
   useEffect(() => {
     if (endedRef.current) return undefined;
-    if (lastSdkState !== 'CONNECTED') return undefined;
+    if (!hostCanPublish) return undefined;
     if (hlsStartTriggeredRef.current) return undefined;
 
     const producerReady =
@@ -539,7 +587,7 @@ function BroadcasterMeetingInner({
       }
     };
   }, [
-    lastSdkState,
+    hostCanPublish,
     liveMode,
     localWebcamOn,
     localWebcamStream,
@@ -599,6 +647,7 @@ function BroadcasterMeetingInner({
           throw new Error('VideoSDK join() was not ready');
         }
 
+        joinStartedAtRef.current = Date.now();
         logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
         await Promise.resolve(actionsRef.current.join());
       } catch (e) {
@@ -618,6 +667,10 @@ function BroadcasterMeetingInner({
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
+      }
+      if (disconnectFatalTimerRef.current) {
+        clearTimeout(disconnectFatalTimerRef.current);
+        disconnectFatalTimerRef.current = null;
       }
       if (enableWebcamTimerRef.current) {
         clearTimeout(enableWebcamTimerRef.current);
@@ -672,9 +725,24 @@ function BroadcasterMeetingInner({
         </View>
       ) : null}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        <View style={[styles.livePill, phase !== 'live' && styles.connectingPill]}>
-          <View style={styles.dot} />
-          <Text style={styles.liveText}>{phase === 'live' ? 'LIVE' : 'CONNECTING'}</Text>
+        <View style={styles.topBarRow}>
+          <View
+            style={[
+              styles.livePill,
+              phase !== 'live' && !hostCanPublish && styles.connectingPill,
+              phase !== 'live' && hostCanPublish && styles.inRoomPill,
+            ]}
+          >
+            <View style={styles.dot} />
+            <Text style={styles.liveText}>
+              {phase === 'live' ? 'LIVE' : hostCanPublish ? 'IN ROOM' : 'CONNECTING'}
+            </Text>
+          </View>
+          <View style={styles.participantPill}>
+            <Text style={styles.participantPillText}>
+              👤 {participantCount > 0 ? participantCount : '…'}
+            </Text>
+          </View>
         </View>
       </View>
       {phase === 'joining' && (
@@ -1004,6 +1072,26 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
   },
+  topBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  participantPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  participantPillText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
+  },
   livePill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1014,6 +1102,9 @@ const styles = StyleSheet.create({
   },
   connectingPill: {
     backgroundColor: 'rgba(80, 80, 90, 0.95)',
+  },
+  inRoomPill: {
+    backgroundColor: 'rgba(46, 125, 50, 0.92)',
   },
   dot: {
     width: 8,
