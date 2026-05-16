@@ -945,13 +945,12 @@ app.get('/get-token', (req, res) => {
     });
   }
 
-  // Match Appwrite videosdk-token — version:2 + roles:rtc required for dashboard session participants.
+  // Match Appwrite videosdk-token (version:2 + roomId; no roles — rtc breaks RN SDK join).
   const payload = {
     apikey: apiKey,
     permissions: ['allow_join', 'allow_mod'],
     version: 2,
     roomId,
-    roles: ['rtc'],
   };
   if (participantId) payload.participantId = participantId;
 

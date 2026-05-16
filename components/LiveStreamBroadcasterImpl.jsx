@@ -281,7 +281,10 @@ function BroadcasterMeetingInner({
           });
           setErrorMessage('Could not join the live room');
           setErrorDetail(
-            'VideoSDK disconnected before CONNECTED. Redeploy the videosdk-token Appwrite function (JWT must include roomId), start a new stream, and confirm EXPO_PUBLIC_VIDEOSDK_* URLs match that function.'
+            `VideoSDK disconnected before CONNECTED (sdk=${stateText || 'DISCONNECTED'}). ` +
+              'Redeploy videosdk-token (JWT: version 2 + roomId, no roles), start a NEW stream, ' +
+              `and confirm token URL matches your function: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}. ` +
+              'Decode the host JWT at jwt.io — must have roomId matching this room and must NOT include roles.'
           );
           setPhase('error');
           return;
@@ -825,22 +828,22 @@ export default function LiveStreamBroadcasterImpl({
               }
               if (claims.version !== 2) {
                 setTokenError(
-                  'VideoSDK token missing version:2. Redeploy videosdk-token — without it the dashboard session shows 0 participants.'
+                  'VideoSDK token missing version:2. Redeploy the latest videosdk-token function, then start a new live stream.'
                 );
                 setLoading(false);
                 return;
               }
               const roles = Array.isArray(claims.roles) ? claims.roles : [];
-              if (!roles.includes('rtc')) {
+              if (roles.includes('rtc') || roles.includes('crawler')) {
                 setTokenError(
-                  'VideoSDK token missing roles:rtc. Redeploy videosdk-token so the host appears in the dashboard session.'
+                  'VideoSDK token must not include roles (rtc/crawler) for mobile join. Redeploy videosdk-token and start a new stream.'
                 );
                 setLoading(false);
                 return;
               }
 
               setTokenDebug(
-                `key:${claims?.apikey || 'n/a'} v2 rtc perms:${perms.join('|')} room:${tokenRoomId}`
+                `key:${claims?.apikey || 'n/a'} v2 perms:${perms.join('|')} room:${tokenRoomId}`
               );
               if (__DEV__) {
                 console.log('[LiveBroadcast] token-room check', {
@@ -912,9 +915,9 @@ export default function LiveStreamBroadcasterImpl({
   // Only pass participantId when the JWT includes it. Minting without participantId but joining
   // with hostUserId causes CONNECTING -> DISCONNECTED on many VideoSDK deployments.
   const meetingParticipantId =
-    (typeof tokenParticipantId === 'string' && tokenParticipantId.trim()) ||
-    (typeof hostUserId === 'string' && hostUserId.trim()) ||
-    undefined;
+    typeof tokenParticipantId === 'string' && tokenParticipantId.trim()
+      ? tokenParticipantId.trim()
+      : undefined;
 
   if (!authToken) {
     return (
@@ -954,7 +957,7 @@ export default function LiveStreamBroadcasterImpl({
       title: 'ASAB Live',
       message: 'You are broadcasting',
     },
-    participantId: meetingParticipantId,
+    ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
   };
 
   return (
