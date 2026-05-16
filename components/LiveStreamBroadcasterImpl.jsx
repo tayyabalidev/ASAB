@@ -14,6 +14,7 @@ import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-nativ
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { endLiveStream } from '../lib/livestream';
+import { decodeJwtPayload } from '../lib/videosdkHelper';
 
 const { width, height } = Dimensions.get('window');
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
@@ -25,18 +26,6 @@ function buildHealthUrl(baseUrl) {
   if (!raw) return '';
   const joiner = raw.includes('?') ? '&' : '?';
   return `${raw}${joiner}health=1&debug=1`;
-}
-
-function decodeJwtPayload(token) {
-  try {
-    const payloadPart = String(token || '').split('.')[1] || '';
-    if (!payloadPart) return null;
-    const normalized = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
-    return JSON.parse(atob(padded));
-  } catch (_) {
-    return null;
-  }
 }
 
 function LocalPreview({ liveMode }) {
@@ -93,7 +82,6 @@ function BroadcasterMeetingInner({
   const actionsRef = useRef({});
   const hlsStartTriggeredRef = useRef(false);
   const hlsStartTimerRef = useRef(null);
-  const joinOnceRef = useRef(false);
   const sessionIdRef = useRef(`LS-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`);
   const hlsStartAttemptRef = useRef(0);
   const cameraReadyRef = useRef(false);
@@ -194,6 +182,7 @@ function BroadcasterMeetingInner({
     localWebcamStream,
     localMicOn,
     localParticipant,
+    participants,
     meetingId: sdkMeetingId,
   } = useMeeting({
     onMeetingJoined: () => {
@@ -284,6 +273,20 @@ function BroadcasterMeetingInner({
       }
 
       if (stateText === 'DISCONNECTED' && !endedRef.current) {
+        // Never reached CONNECTED — bad token/room config. Retrying leave+join here only spins
+        // CONNECTING → DISCONNECTED and the dashboard stays at 0 participants.
+        if (!connectedOnceRef.current) {
+          logEvent('DISCONNECTED_BEFORE_CONNECTED', {
+            localParticipantId: localParticipantRef.current?.id || null,
+          });
+          setErrorMessage('Could not join the live room');
+          setErrorDetail(
+            'VideoSDK disconnected before CONNECTED. Redeploy the videosdk-token Appwrite function (JWT must include roomId), start a new stream, and confirm EXPO_PUBLIC_VIDEOSDK_* URLs match that function.'
+          );
+          setPhase('error');
+          return;
+        }
+
         // Allow HLS, webcam, and pin to be re-attempted after a clean reconnect.
         hlsStartTriggeredRef.current = false;
         webcamEnableAttemptedRef.current = false;
@@ -378,6 +381,18 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableScreenShare = enableScreenShare;
   localParticipantRef.current = localParticipant || null;
 
+  const participantCount =
+    participants instanceof Map ? participants.size : localParticipant?.id ? 1 : 0;
+
+  useEffect(() => {
+    if (!localParticipant?.id) return;
+    logEvent('LOCAL_PARTICIPANT_READY', {
+      id: localParticipant.id,
+      mode: localParticipant.mode || null,
+      participantCount,
+    });
+  }, [localParticipant?.id, localParticipant?.mode, participantCount, logEvent]);
+
   // After CONNECTED, turn the webcam on explicitly. Doing this at join time (webcamEnabled: true)
   // makes the SDK race the camera-acquisition during the signaling handshake and on iOS this often
   // ends in CONNECTING -> DISCONNECTED before CONNECTED ever fires. Enabling here is reliable.
@@ -410,6 +425,23 @@ function BroadcasterMeetingInner({
         enableWebcamTimerRef.current = null;
       }
     };
+  }, [lastSdkState, liveMode, localWebcamOn, logEvent]);
+
+  // If CONNECTED but the camera track never appears, retry enableWebcam once.
+  useEffect(() => {
+    if (endedRef.current || liveMode === 'screen') return undefined;
+    if (lastSdkState !== 'CONNECTED' || localWebcamOn) return undefined;
+    const t = setTimeout(() => {
+      if (endedRef.current || localWebcamOn) return;
+      logEvent('ENABLE_WEBCAM_RETRY');
+      webcamEnableAttemptedRef.current = false;
+      try {
+        actionsRef.current.enableWebcam?.();
+      } catch (e) {
+        logEvent('ENABLE_WEBCAM_RETRY_ERROR', e);
+      }
+    }, 3500);
+    return () => clearTimeout(t);
   }, [lastSdkState, liveMode, localWebcamOn, logEvent]);
 
   // Dedicated HLS trigger: runs only when SDK is CONNECTED *and* a real producer is ready.
@@ -532,8 +564,6 @@ function BroadcasterMeetingInner({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (joinOnceRef.current) return;
-      joinOnceRef.current = true;
       const ok = await ensureCallMediaPermissions(liveMode === 'screen' ? 'audio' : 'video');
       if (cancelled) return;
       if (!ok) {
@@ -554,8 +584,20 @@ function BroadcasterMeetingInner({
         );
         await new Promise((r) => setTimeout(r, 400));
         if (cancelled) return;
+
+        // Wait until useMeeting() exposes join (avoids silent no-op on first paint).
+        const joinReadyDeadline = Date.now() + 8000;
+        while (!cancelled && Date.now() < joinReadyDeadline) {
+          if (typeof actionsRef.current.join === 'function') break;
+          await new Promise((r) => setTimeout(r, 80));
+        }
+        if (cancelled) return;
+        if (typeof actionsRef.current.join !== 'function') {
+          throw new Error('VideoSDK join() was not ready');
+        }
+
         logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
-        actionsRef.current.join?.();
+        await Promise.resolve(actionsRef.current.join());
       } catch (e) {
         if (!cancelled) {
           logEvent('JOIN_FAILED', e);
@@ -564,7 +606,6 @@ function BroadcasterMeetingInner({
         }
       }
     })();
-    // Unmount-only cleanup. NEVER re-run this effect.
     return () => {
       cancelled = true;
       if (hlsStartTimerRef.current) {
@@ -644,6 +685,9 @@ function BroadcasterMeetingInner({
         <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
         <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
         <Text style={styles.statePanelText}>token: {tokenDebug || 'n/a'}</Text>
+        <Text style={styles.statePanelText}>
+          participants: {participantCount} local: {localParticipant?.id || 'none'}
+        </Text>
         <Text style={styles.statePanelText}>
           meetingPid: {meetingParticipantId || '(omit)'} host: {hostUserId || 'n/a'}
         </Text>
@@ -753,6 +797,13 @@ export default function LiveStreamBroadcasterImpl({
               const tokenRoomId = claims?.roomId ? String(claims.roomId) : '';
               const expectedRoomId = String(effectiveRoomId || '');
 
+              if (!tokenRoomId) {
+                setTokenError(
+                  'VideoSDK host token is missing roomId. Redeploy the videosdk-token Appwrite function, then start a new live stream.'
+                );
+                setLoading(false);
+                return;
+              }
               if (tokenRoomId && expectedRoomId && tokenRoomId !== expectedRoomId) {
                 setTokenError(
                   `VideoSDK token room mismatch: token=${tokenRoomId}, expected=${expectedRoomId}.`
@@ -772,9 +823,24 @@ export default function LiveStreamBroadcasterImpl({
                 setLoading(false);
                 return;
               }
+              if (claims.version !== 2) {
+                setTokenError(
+                  'VideoSDK token missing version:2. Redeploy videosdk-token — without it the dashboard session shows 0 participants.'
+                );
+                setLoading(false);
+                return;
+              }
+              const roles = Array.isArray(claims.roles) ? claims.roles : [];
+              if (!roles.includes('rtc')) {
+                setTokenError(
+                  'VideoSDK token missing roles:rtc. Redeploy videosdk-token so the host appears in the dashboard session.'
+                );
+                setLoading(false);
+                return;
+              }
 
               setTokenDebug(
-                `key:${claims?.apikey || 'n/a'} perms:${Array.isArray(perms) ? perms.join('|') : 'n/a'}`
+                `key:${claims?.apikey || 'n/a'} v2 rtc perms:${perms.join('|')} room:${tokenRoomId}`
               );
               if (__DEV__) {
                 console.log('[LiveBroadcast] token-room check', {
@@ -815,7 +881,7 @@ export default function LiveStreamBroadcasterImpl({
     return () => {
       cancelled = true;
     };
-  }, [effectiveRoomId, initialToken]);
+  }, [effectiveRoomId, initialToken, hostUserId, streamId, roomId]);
 
   if (loading) {
     return (
@@ -846,9 +912,9 @@ export default function LiveStreamBroadcasterImpl({
   // Only pass participantId when the JWT includes it. Minting without participantId but joining
   // with hostUserId causes CONNECTING -> DISCONNECTED on many VideoSDK deployments.
   const meetingParticipantId =
-    typeof tokenParticipantId === 'string' && tokenParticipantId.trim()
-      ? tokenParticipantId.trim()
-      : undefined;
+    (typeof tokenParticipantId === 'string' && tokenParticipantId.trim()) ||
+    (typeof hostUserId === 'string' && hostUserId.trim()) ||
+    undefined;
 
   if (!authToken) {
     return (
@@ -872,30 +938,27 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
-  // Join with audio-only. On iOS, requesting webcam during the join handshake makes the
-  // SDK go CONNECTING -> DISCONNECTED before CONNECTED if camera acquisition stalls.
-  // We enable the webcam explicitly after CONNECTED (see effect in BroadcasterMeetingInner).
-  // NOTE: This config exactly matches the one that previously reached CONNECTED on iOS.
-  // Do NOT add `multistream` or `participantId` here without testing — both have caused
-  // silent CONNECTING -> DISCONNECTED loops on @videosdk.live/react-native-sdk@0.10.x iOS.
-  // VideoSDK auto-generates a participantId when omitted. Auth is via apikey + permissions
-  // in the JWT (signed by your Appwrite function).
+  // Join with audio-only; enable webcam after CONNECTED (see BroadcasterMeetingInner).
+  // Pass participantId only when the JWT includes the same claim (Node /get-token). Omitting
+  // it when the JWT has no participantId lets VideoSDK auto-generate a stable local id.
+  // participantId must match JWT when present (host Appwrite user id from POST ?participantId=).
+  const meetingConfig = {
+    meetingId: effectiveRoomId,
+    mode: 'SEND_AND_RECV',
+    micEnabled: true,
+    webcamEnabled: false,
+    name: hostDisplayName || hostUserId || 'Host',
+    defaultCamera: 'front',
+    debugMode: __DEV__,
+    notification: {
+      title: 'ASAB Live',
+      message: 'You are broadcasting',
+    },
+    participantId: meetingParticipantId,
+  };
+
   return (
-    <MeetingProvider
-      config={{
-        meetingId: effectiveRoomId,
-        mode: 'SEND_AND_RECV',
-        micEnabled: true,
-        webcamEnabled: false,
-        name: hostDisplayName || hostUserId || 'Host',
-        defaultCamera: 'front',
-        notification: {
-          title: 'ASAB Live',
-          message: 'You are broadcasting',
-        },
-      }}
-      token={authToken}
-    >
+    <MeetingProvider config={meetingConfig} token={authToken}>
       <BroadcasterMeetingInner
         streamId={streamId}
         quality={quality}

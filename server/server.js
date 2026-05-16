@@ -945,13 +945,14 @@ app.get('/get-token', (req, res) => {
     });
   }
 
+  // Match Appwrite videosdk-token — version:2 + roles:rtc required for dashboard session participants.
   const payload = {
     apikey: apiKey,
-    permissions: ['allow_join', 'allow_mod', 'ask_join'],
+    permissions: ['allow_join', 'allow_mod'],
     version: 2,
+    roomId,
     roles: ['rtc'],
   };
-  payload.roomId = roomId;
   if (participantId) payload.participantId = participantId;
 
   try {

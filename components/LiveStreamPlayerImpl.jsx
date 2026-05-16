@@ -20,7 +20,7 @@ import {
   getFollowerCount,
 } from '../lib/livestream';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
-import { getVideoSDKToken } from '../lib/videosdkHelper';
+import { decodeJwtPayload, getVideoSDKToken } from '../lib/videosdkHelper';
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
@@ -41,6 +41,8 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
   const [hlsUrl, setHlsUrl] = useState(null);
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
   const [waitSeconds, setWaitSeconds] = useState(0);
+  const joinOnceRef = useRef(false);
+  const actionsRef = useRef({});
   const player = useVideoPlayer(null, (p) => {
     p.loop = false;
     p.muted = false;
@@ -92,18 +94,24 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
     };
   }, [hlsUrl, player]);
 
+  actionsRef.current.join = join;
+  actionsRef.current.leave = leave;
+
+  // Join once — re-running on every `join` identity change called leave() mid-handshake.
   useEffect(() => {
-    Promise.resolve(join()).catch((e) => {
+    if (joinOnceRef.current) return undefined;
+    joinOnceRef.current = true;
+    Promise.resolve(actionsRef.current.join?.()).catch((e) => {
       console.error('[LiveViewer] join failed', e);
       setHlsStateText('ERROR');
       onPlaybackEnded?.();
     });
     return () => {
       try {
-        leave();
+        actionsRef.current.leave?.();
       } catch (_) {}
     };
-  }, [join, leave]);
+  }, [onPlaybackEnded]);
 
   useEffect(() => {
     if (hlsUrl) return;
@@ -147,6 +155,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
   const [token, setToken] = useState(null);
   const [tokenLoading, setTokenLoading] = useState(true);
   const [tokenError, setTokenError] = useState(null);
+  const [meetingParticipantId, setMeetingParticipantId] = useState(undefined);
   const playbackEndedRef = useRef(false);
 
   useEffect(() => {
@@ -187,12 +196,17 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
     let cancelled = false;
     setTokenError(null);
     setToken(null);
+    setMeetingParticipantId(undefined);
     setTokenLoading(true);
     (async () => {
       try {
         const t = await getVideoSDKToken(effectiveRoomId, user.$id);
         if (cancelled) return;
         if (t) {
+          const claims = decodeJwtPayload(t);
+          if (claims?.participantId) {
+            setMeetingParticipantId(String(claims.participantId));
+          }
           setToken(t);
           return;
         }
@@ -299,7 +313,6 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
         <MeetingProvider
           config={{
             meetingId: effectiveRoomId,
-            participantId: user.$id,
             micEnabled: false,
             webcamEnabled: false,
             name: user.username || user.$id || 'Viewer',
@@ -308,6 +321,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
               title: 'ASAB Live',
               message: 'Watching live',
             },
+            ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
           }}
           token={authToken}
         >
