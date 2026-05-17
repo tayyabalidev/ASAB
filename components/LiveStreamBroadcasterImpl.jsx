@@ -14,7 +14,7 @@ import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-nativ
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { endLiveStream } from '../lib/livestream';
-import { decodeJwtPayload } from '../lib/videosdkHelper';
+import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 
 const { width, height } = Dimensions.get('window');
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
@@ -117,11 +117,13 @@ function BroadcasterMeetingInner({
   const localParticipantRef = useRef(null);
   const pinAttemptedRef = useRef(false);
   const meetingJoinedRef = useRef(false);
-  const joinCompletedRef = useRef(false);
+  const joinRequestedRef = useRef(false);
   const joinStartedAtRef = useRef(0);
   const disconnectFatalTimerRef = useRef(null);
   const liveModeRef = useRef(liveMode);
-  const [joinCompleted, setJoinCompleted] = useState(false);
+  const joinFnRef = useRef(null);
+  const leaveFnRef = useRef(null);
+  const [meetingJoined, setMeetingJoined] = useState(false);
 
   useEffect(() => {
     liveModeRef.current = liveMode;
@@ -222,8 +224,7 @@ function BroadcasterMeetingInner({
     onMeetingJoined: () => {
       meetingJoinedRef.current = true;
       connectedOnceRef.current = true;
-      joinCompletedRef.current = true;
-      setJoinCompleted(true);
+      setMeetingJoined(true);
       setLastSdkState('MEETING_JOINED');
       logEvent('MEETING_JOINED', {
         sdkMeetingId: sdkMeetingId || null,
@@ -264,9 +265,35 @@ function BroadcasterMeetingInner({
     onConnectionOpen: () => {
       connectedOnceRef.current = true;
       meetingJoinedRef.current = true;
-      joinCompletedRef.current = true;
-      setJoinCompleted(true);
-      logEvent('CONNECTION_OPEN');
+      setMeetingJoined(true);
+      setLastSdkState('CONNECTED');
+      reconnectAttemptsRef.current = 0;
+      logEvent('CONNECTION_OPEN', {
+        localParticipantId: localParticipantRef.current?.id || null,
+      });
+      if (liveModeRef.current !== 'screen' && !webcamEnableAttemptedRef.current) {
+        webcamEnableAttemptedRef.current = true;
+        enableWebcamTimerRef.current = setTimeout(() => {
+          if (endedRef.current) return;
+          try {
+            logEvent('ACTION_ENABLE_WEBCAM_AFTER_CONNECTION');
+            actionsRef.current.enableWebcam?.();
+          } catch (e) {
+            logEvent('ENABLE_WEBCAM_AFTER_CONNECTION_ERROR', e);
+            webcamEnableAttemptedRef.current = false;
+          }
+        }, 400);
+      }
+      try {
+        const lp = localParticipantRef.current;
+        if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
+          lp.pin();
+          pinAttemptedRef.current = true;
+          logEvent('LOCAL_PARTICIPANT_PINNED_ON_CONNECTION', { id: lp.id });
+        }
+      } catch (e) {
+        logEvent('PIN_ON_CONNECTION_ERROR', e);
+      }
     },
     onConnectionClose: (e) => logEvent('CONNECTION_CLOSE', e),
     onParticipantJoined: (p) => {
@@ -325,30 +352,51 @@ function BroadcasterMeetingInner({
       if (stateText === 'CONNECTED') {
         connectedOnceRef.current = true;
         meetingJoinedRef.current = true;
-        joinCompletedRef.current = true;
-        setJoinCompleted(true);
+        setMeetingJoined(true);
         reconnectAttemptsRef.current = 0;
+        if (liveModeRef.current !== 'screen' && !webcamEnableAttemptedRef.current) {
+          webcamEnableAttemptedRef.current = true;
+          enableWebcamTimerRef.current = setTimeout(() => {
+            if (endedRef.current) return;
+            try {
+              logEvent('ACTION_ENABLE_WEBCAM_AFTER_CONNECTED');
+              actionsRef.current.enableWebcam?.();
+            } catch (e) {
+              logEvent('ENABLE_WEBCAM_AFTER_CONNECTED_ERROR', e);
+              webcamEnableAttemptedRef.current = false;
+            }
+          }, 400);
+        }
       }
 
       if (stateText === 'DISCONNECTED' && !endedRef.current) {
-        const inRoom =
-          meetingJoinedRef.current ||
-          connectedOnceRef.current ||
-          Boolean(localParticipantRef.current?.id);
+        // Only treat as "in room" after VideoSDK confirmed join — not when join() promise resolved.
+        const sessionEstablished =
+          meetingJoinedRef.current &&
+          (connectedOnceRef.current ||
+            lastSdkState === 'CONNECTED' ||
+            lastSdkState === 'MEETING_JOINED');
 
-        // Transient DISCONNECTED during handshake is common — do not error if host is already in-room.
-        if (inRoom) {
-          logEvent('DISCONNECTED_WHILE_IN_ROOM', {
+        if (sessionEstablished) {
+          logEvent('DISCONNECTED_AFTER_ESTABLISHED', {
             localParticipantId: localParticipantRef.current?.id || null,
           });
+          setMeetingJoined(false);
+          meetingJoinedRef.current = false;
           if (disconnectFatalTimerRef.current) {
             clearTimeout(disconnectFatalTimerRef.current);
-            disconnectFatalTimerRef.current = null;
           }
+          disconnectFatalTimerRef.current = setTimeout(() => {
+            if (endedRef.current || meetingJoinedRef.current) return;
+            setErrorMessage('Lost connection to the live room');
+            setErrorDetail(
+              'VideoSDK disconnected after join. Start a new live stream and check network permissions.'
+            );
+            setPhase('error');
+          }, 4000);
           return;
         }
 
-        // Brief disconnect before MEETING_JOINED — wait and retry instead of failing immediately.
         logEvent('DISCONNECTED_DURING_JOIN', {
           localParticipantId: localParticipantRef.current?.id || null,
           msSinceJoin: joinStartedAtRef.current
@@ -364,10 +412,13 @@ function BroadcasterMeetingInner({
           clearTimeout(enableWebcamTimerRef.current);
           enableWebcamTimerRef.current = null;
         }
+        meetingJoinedRef.current = false;
+        setMeetingJoined(false);
+
         const nextAttempt = reconnectAttemptsRef.current + 1;
-        if (nextAttempt <= 3) {
+        if (nextAttempt <= 4) {
           reconnectAttemptsRef.current = nextAttempt;
-          const waitMs = nextAttempt * 1200;
+          const waitMs = nextAttempt === 1 ? 400 : nextAttempt * 1000;
           logEvent('DISCONNECTED_RETRY_SCHEDULED', {
             attempt: nextAttempt,
             waitMs,
@@ -382,7 +433,7 @@ function BroadcasterMeetingInner({
             (async () => {
               try {
                 logEvent('DISCONNECTED_RETRY_LEAVE', { attempt: nextAttempt });
-                actionsRef.current.leave?.();
+                leaveFnRef.current?.();
                 await new Promise((r) => setTimeout(r, 800));
                 await new Promise((resolve) =>
                   InteractionManager.runAfterInteractions(() => resolve(undefined))
@@ -393,7 +444,7 @@ function BroadcasterMeetingInner({
                   attempt: nextAttempt,
                   roomId: roomDebug || null,
                 });
-                actionsRef.current.join?.();
+                joinFnRef.current?.();
               } catch (retryError) {
                 logEvent('DISCONNECTED_RETRY_JOIN_ERROR', retryError);
               }
@@ -451,6 +502,8 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableWebcam = enableWebcam;
   actionsRef.current.startScreenShare = startScreenShare;
   actionsRef.current.enableScreenShare = enableScreenShare;
+  joinFnRef.current = join;
+  leaveFnRef.current = leave;
   localParticipantRef.current = localParticipant || null;
 
   const participantCount = countRoomParticipants(participants, localParticipant);
@@ -459,44 +512,50 @@ function BroadcasterMeetingInner({
   const isBroadcasterMode =
     localMode === 'SEND_AND_RECV' || localMode === 'CONFERENCE';
 
+  const signalingUp =
+    meetingJoined &&
+    lastSdkState !== 'DISCONNECTED' &&
+    lastSdkState !== 'CLOSED' &&
+    lastSdkState !== 'FAILED';
+
   const hostInRoom =
-    joinCompleted &&
-    Boolean(localParticipant?.id) &&
-    isBroadcasterMode &&
-    (meetingJoinedRef.current ||
-      connectedOnceRef.current ||
-      lastSdkState === 'CONNECTED' ||
-      lastSdkState === 'MEETING_JOINED' ||
-      lastSdkState === 'CONNECTING');
+    signalingUp && Boolean(localParticipant?.id) && isBroadcasterMode;
 
   const hostCanPublish = hostInRoom;
 
-  // Some TestFlight / RN 0.10.x builds never fire onMeetingJoined but stay CONNECTING with SEND_AND_RECV.
+  const displayParticipantCount =
+    hostInRoom && signalingUp ? Math.max(1, participantCount) : 0;
+
+  // RN 0.10.x: local participant may appear before onMeetingJoined / onConnectionOpen.
   useEffect(() => {
     if (endedRef.current || liveMode === 'screen') return undefined;
-    if (!joinCompleted || !localParticipant?.id || !isBroadcasterMode) return undefined;
-    if (meetingJoinedRef.current || webcamEnableAttemptedRef.current) return undefined;
+    if (meetingJoinedRef.current || !joinRequestedRef.current) return undefined;
+    if (!localParticipant?.id || !isBroadcasterMode) return undefined;
 
     const t = setTimeout(() => {
-      if (endedRef.current || meetingJoinedRef.current || webcamEnableAttemptedRef.current) return;
-      meetingJoinedRef.current = true;
-      connectedOnceRef.current = true;
-      logEvent('WEBCAM_FALLBACK_AFTER_JOIN', {
-        sdk: lastSdkState,
+      if (endedRef.current || meetingJoinedRef.current) return;
+      if (lastSdkState === 'DISCONNECTED' || lastSdkState === 'CLOSED') return;
+      logEvent('JOIN_FALLBACK_LOCAL_PARTICIPANT', {
         mode: localParticipant?.mode || null,
+        sdk: lastSdkState,
       });
-      webcamEnableAttemptedRef.current = true;
-      try {
-        actionsRef.current.enableWebcam?.();
-      } catch (e) {
-        logEvent('WEBCAM_FALLBACK_ERROR', e);
-        webcamEnableAttemptedRef.current = false;
+      connectedOnceRef.current = true;
+      meetingJoinedRef.current = true;
+      setMeetingJoined(true);
+      if (!webcamEnableAttemptedRef.current) {
+        webcamEnableAttemptedRef.current = true;
+        try {
+          actionsRef.current.enableWebcam?.();
+          logEvent('ACTION_ENABLE_WEBCAM_FALLBACK');
+        } catch (e) {
+          logEvent('ENABLE_WEBCAM_FALLBACK_ERROR', e);
+          webcamEnableAttemptedRef.current = false;
+        }
       }
-    }, 2500);
+    }, 2800);
 
     return () => clearTimeout(t);
   }, [
-    joinCompleted,
     localParticipant?.id,
     localParticipant?.mode,
     isBroadcasterMode,
@@ -528,10 +587,10 @@ function BroadcasterMeetingInner({
       id: localParticipant.id,
       mode: localParticipant.mode || null,
       participantCount,
-      joinCompleted: joinCompletedRef.current,
+      joinRequested: joinRequestedRef.current,
       meetingJoined: meetingJoinedRef.current,
     });
-  }, [localParticipant?.id, localParticipant?.mode, participantCount, joinCompleted, logEvent]);
+  }, [localParticipant?.id, localParticipant?.mode, participantCount, meetingJoined, logEvent]);
 
   // Start HLS once the host is in-room and publishing audio/video (or screen+audio).
   useEffect(() => {
@@ -644,10 +703,7 @@ function BroadcasterMeetingInner({
     }
   }, [localWebcamOn, localWebcamStream, liveMode, logEvent]);
 
-  // Join exactly once after permissions + interactions settle. Deps intentionally empty:
-  // re-running this effect (and therefore its cleanup) on every SDK render would call
-  // leave() mid-join and tear down the meeting (root cause of "closes shortly after join").
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Join once after permissions — same pattern as VideoSDKCall (no leave() in this cleanup).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -666,22 +722,21 @@ function BroadcasterMeetingInner({
         return;
       }
       try {
-        // Wait until useMeeting() exposes join (avoids silent no-op on first paint).
         const joinReadyDeadline = Date.now() + 8000;
         while (!cancelled && Date.now() < joinReadyDeadline) {
-          if (typeof actionsRef.current.join === 'function') break;
+          if (typeof joinFnRef.current === 'function') break;
           await new Promise((r) => setTimeout(r, 80));
         }
         if (cancelled) return;
-        if (typeof actionsRef.current.join !== 'function') {
+        if (typeof joinFnRef.current !== 'function') {
           throw new Error('VideoSDK join() was not ready');
         }
 
         joinStartedAtRef.current = Date.now();
+        joinRequestedRef.current = true;
         logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
-        await Promise.resolve(actionsRef.current.join());
-        joinCompletedRef.current = true;
-        setJoinCompleted(true);
+        await Promise.resolve(joinFnRef.current());
+        logEvent('ACTION_JOIN_REQUESTED', { roomId: roomDebug || null });
       } catch (e) {
         if (!cancelled) {
           logEvent('JOIN_FAILED', e);
@@ -708,26 +763,41 @@ function BroadcasterMeetingInner({
         clearTimeout(enableWebcamTimerRef.current);
         enableWebcamTimerRef.current = null;
       }
+    };
+  }, [liveMode, roomDebug, logEvent]);
+
+  // Leave only when the broadcast screen unmounts (not on join-effect re-run / Strict Mode).
+  useEffect(() => {
+    return () => {
+      if (endedRef.current) return;
+      if (hlsStartTimerRef.current) {
+        clearTimeout(hlsStartTimerRef.current);
+        hlsStartTimerRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       try {
         if (hlsStartedRef.current) actionsRef.current.stopHls?.();
-        actionsRef.current.leave?.();
-        logEvent('CLEANUP_LEAVE');
+        leaveFnRef.current?.();
+        logEvent('UNMOUNT_LEAVE');
       } catch (_) {}
     };
-  }, []);
+  }, [logEvent]);
 
   useEffect(() => {
-    if (phase !== 'joining') return undefined;
+    if (phase !== 'joining' || meetingJoined) return undefined;
     const t = setTimeout(() => {
-      if (endedRef.current) return;
+      if (endedRef.current || meetingJoinedRef.current) return;
       setErrorMessage(
-        `Stream is taking too long (SDK state: ${lastSdkState}). Confirm VideoSDK interactive HLS is enabled, your JWT token URL works, and the device has a stable connection.`
+        `Could not join the live room (SDK: ${lastSdkState}). Start a new stream and confirm camera/mic permissions.`
       );
-      logEvent('TIMEOUT_JOINING', { lastSdkState });
+      logEvent('TIMEOUT_JOINING', { lastSdkState, joinRequested: joinRequestedRef.current });
       setPhase((current) => (current === 'joining' ? 'error' : current));
-    }, 75000);
+    }, 45000);
     return () => clearTimeout(t);
-  }, [phase, lastSdkState, logEvent]);
+  }, [phase, meetingJoined, lastSdkState, logEvent]);
 
   const handleEndPress = () => {
     finalizeEnd(true);
@@ -767,12 +837,18 @@ function BroadcasterMeetingInner({
           >
             <View style={styles.dot} />
             <Text style={styles.liveText}>
-              {phase === 'live' ? 'LIVE' : hostInRoom ? 'IN ROOM' : 'CONNECTING'}
+              {phase === 'live'
+                ? 'LIVE'
+                : hostInRoom
+                  ? 'IN ROOM'
+                  : lastSdkState === 'DISCONNECTED'
+                    ? 'RECONNECTING'
+                    : 'CONNECTING'}
             </Text>
           </View>
           <View style={styles.participantPill}>
             <Text style={styles.participantPillText}>
-              👤 {hostInRoom ? participantCount || 1 : '…'}
+              👤 {hostInRoom ? displayParticipantCount : meetingJoined ? participantCount : '…'}
             </Text>
           </View>
         </View>
@@ -783,24 +859,27 @@ function BroadcasterMeetingInner({
           <Text style={styles.bannerText}> Starting stream…</Text>
         </View>
       )}
-      <View style={styles.statePanel}>
-        <Text style={styles.statePanelText}>phase: {phase}</Text>
-        <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
-        <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
-        <Text style={styles.statePanelText}>token: {tokenDebug || 'n/a'}</Text>
-        <Text style={styles.statePanelText}>
-          participants: {participantCount} local: {localParticipant?.id || 'none'}
-        </Text>
-        <Text style={styles.statePanelText}>
-          meetingPid: {meetingParticipantId || '(omit)'} host: {hostUserId || 'n/a'}
-        </Text>
-        <Text style={styles.statePanelText}>session: {sessionIdRef.current}</Text>
-        {debugLines.slice(0, 12).map((line, idx) => (
-          <Text key={`${idx}-${line}`} style={styles.statePanelText}>
-            {line}
+      {__DEV__ ? (
+        <View style={styles.statePanel}>
+          <Text style={styles.statePanelText}>phase: {phase}</Text>
+          <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
+          <Text style={styles.statePanelText}>joined: {meetingJoined ? 'yes' : 'no'}</Text>
+          <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
+          <Text style={styles.statePanelText}>token: {tokenDebug || 'n/a'}</Text>
+          <Text style={styles.statePanelText}>
+            participants: {displayParticipantCount} local: {localParticipant?.id || 'none'}
           </Text>
-        ))}
-      </View>
+          <Text style={styles.statePanelText}>
+            meetingPid: {meetingParticipantId || '(omit)'} host: {hostUserId || 'n/a'}
+          </Text>
+          <Text style={styles.statePanelText}>session: {sessionIdRef.current}</Text>
+          {debugLines.slice(0, 12).map((line, idx) => (
+            <Text key={`${idx}-${line}`} style={styles.statePanelText}>
+              {line}
+            </Text>
+          ))}
+        </View>
+      ) : null}
       <TouchableOpacity
         style={[styles.endStream, { bottom: Math.max(insets.bottom, 16) + 16 }]}
         onPress={handleEndPress}
@@ -827,47 +906,65 @@ export default function LiveStreamBroadcasterImpl({
   const [tokenDebug, setTokenDebug] = useState('token: n/a');
   const [tokenParticipantId, setTokenParticipantId] = useState(null);
   const hlsStartedRef = useRef(false);
+  const validatedTokenRef = useRef('');
   // Host must always join using the real VideoSDK room id (not Appwrite stream id).
   const effectiveRoomId = typeof roomId === 'string' ? roomId.trim() : '';
 
   useEffect(() => {
     let cancelled = false;
+    const prefilled = typeof initialToken === 'string' ? initialToken.trim() : '';
+    if (prefilled && validatedTokenRef.current === prefilled && token) {
+      return undefined;
+    }
+
     setTokenError(null);
-    setTokenParticipantId(null);
-    setLoading(true);
+    if (!token) {
+      setLoading(true);
+    }
+
+    const applyHostToken = (meetingToken) => {
+      const validation = validateMeetingToken(meetingToken, effectiveRoomId, { requireMod: true });
+      if (!validation.ok) {
+        setTokenError(validation.error);
+        return false;
+      }
+      const claims = validation.claims || {};
+      if (validation.participantId) {
+        setTokenParticipantId(validation.participantId);
+      }
+      const perms = Array.isArray(claims.permissions) ? claims.permissions : [];
+      setTokenDebug(
+        `key:${claims?.apikey || 'n/a'} v2 perms:${perms.join('|')} room:${claims.roomId || effectiveRoomId}`
+      );
+      validatedTokenRef.current = meetingToken;
+      setToken(meetingToken);
+      return true;
+    };
+
     (async () => {
       try {
-        // Non-blocking backend health probe for TestFlight diagnostics.
-        try {
-          const healthUrl = buildHealthUrl(VIDEOSDK_CONFIG.tokenServerUrl);
-          if (healthUrl) {
-            const response = await fetch(healthUrl, { method: 'GET', headers: { Accept: 'application/json' } });
-            const raw = await response.text();
-            let payload = null;
-            try {
-              payload = raw ? JSON.parse(raw) : null;
-            } catch (_) {
-              payload = raw;
+        if (__DEV__) {
+          try {
+            const healthUrl = buildHealthUrl(VIDEOSDK_CONFIG.tokenServerUrl);
+            if (healthUrl) {
+              const response = await fetch(healthUrl, { method: 'GET', headers: { Accept: 'application/json' } });
+              const raw = await response.text();
+              let payload = null;
+              try {
+                payload = raw ? JSON.parse(raw) : null;
+              } catch (_) {
+                payload = raw;
+              }
+              console.log('[LiveBroadcast] token-backend health', {
+                url: healthUrl,
+                status: response.status,
+                ok: response.ok,
+                payload,
+              });
             }
-            console.log('[LiveBroadcast] token-backend health', {
-              url: healthUrl,
-              status: response.status,
-              ok: response.ok,
-              payload,
-            });
-            if (payload && typeof payload === 'object') {
-              const keysPresent =
-                payload.videoSdkKeysPresent === true ||
-                payload.keysPresent === true ||
-                payload.ok === true;
-              setTokenDebug((prev) => `${prev} health:${response.status} keys:${keysPresent ? 'yes' : 'no'}`);
-            } else {
-              setTokenDebug((prev) => `${prev} health:${response.status}`);
-            }
+          } catch (healthError) {
+            console.warn('[LiveBroadcast] token-backend health probe failed', healthError);
           }
-        } catch (healthError) {
-          console.warn('[LiveBroadcast] token-backend health probe failed', healthError);
-          setTokenDebug((prev) => `${prev} health:probe-failed`);
         }
 
         if (!effectiveRoomId) {
@@ -877,104 +974,19 @@ export default function LiveStreamBroadcasterImpl({
             }.`
           );
         }
-        const t = typeof initialToken === 'string' ? initialToken.trim() : '';
-        if (!t) {
+        if (!prefilled) {
           throw new Error(
             'Missing host token from create-room-and-token response. Ensure backend returns both meetingId and token in one call.'
           );
         }
         if (cancelled) return;
-        if (t) {
-          try {
-            const claims = decodeJwtPayload(t);
-            if (claims) {
-              console.log('TOKEN ROOM:', claims?.roomId);
-              console.log('MEETING ROOM:', effectiveRoomId);
-              console.log('TOKEN PARTICIPANT:', claims?.participantId);
-              console.log('TOKEN ROOM ID:', claims?.roomId);
-              console.log('JOINING ROOM ID:', effectiveRoomId);
-              if (claims?.participantId) {
-                setTokenParticipantId(String(claims.participantId));
-              }
-              const perms = Array.isArray(claims?.permissions) ? claims.permissions : [];
-              const tokenRoomId = claims?.roomId ? String(claims.roomId) : '';
-              const expectedRoomId = String(effectiveRoomId || '');
-
-              if (!tokenRoomId) {
-                setTokenError(
-                  'VideoSDK host token is missing roomId. Redeploy the videosdk-token Appwrite function, then start a new live stream.'
-                );
-                setLoading(false);
-                return;
-              }
-              if (tokenRoomId && expectedRoomId && tokenRoomId !== expectedRoomId) {
-                setTokenError(
-                  `VideoSDK token room mismatch: token=${tokenRoomId}, expected=${expectedRoomId}.`
-                );
-                setLoading(false);
-                return;
-              }
-              if (!perms.includes('allow_join')) {
-                setTokenError('VideoSDK token missing allow_join permission.');
-                setLoading(false);
-                return;
-              }
-              if (!perms.includes('allow_mod')) {
-                setTokenError(
-                  'VideoSDK host token missing allow_mod permission. Live (HLS) start requires allow_mod.'
-                );
-                setLoading(false);
-                return;
-              }
-              if (claims.version !== 2) {
-                setTokenError(
-                  'VideoSDK token missing version:2. Redeploy the latest videosdk-token function, then start a new live stream.'
-                );
-                setLoading(false);
-                return;
-              }
-              const roles = Array.isArray(claims.roles) ? claims.roles : [];
-              if (roles.includes('rtc') || roles.includes('crawler')) {
-                setTokenError(
-                  'VideoSDK token must not include roles (rtc/crawler) for mobile join. Redeploy videosdk-token and start a new stream.'
-                );
-                setLoading(false);
-                return;
-              }
-
-              setTokenDebug(
-                `key:${claims?.apikey || 'n/a'} v2 perms:${perms.join('|')} room:${tokenRoomId}`
-              );
-              if (__DEV__) {
-                console.log('[LiveBroadcast] token-room check', {
-                  streamId: streamId || null,
-                  routeRoomId: roomId || null,
-                  meetingId: effectiveRoomId || null,
-                  tokenRoomId: tokenRoomId || null,
-                  apikey: claims?.apikey || null,
-                  permissions: perms,
-                });
-              }
-            }
-            if (__DEV__ && claims) {
-              console.log('[LiveBroadcast] token claims', {
-                apikey: claims?.apikey || null,
-                roomId: claims?.roomId || null,
-                participantId: claims?.participantId || null,
-                permissions: claims?.permissions || null,
-                roles: claims?.roles || null,
-              });
-            }
-          } catch (decodeError) {
-            if (__DEV__) {
-              console.warn('[LiveBroadcast] token decode failed', decodeError);
-            }
-          }
-          setToken(t);
-          return;
+        if (!applyHostToken(prefilled)) return;
+        if (__DEV__) {
+          console.log('[LiveBroadcast] host token ready', {
+            streamId: streamId || null,
+            roomId: effectiveRoomId,
+          });
         }
-        setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
-        return;
       } catch (e) {
         if (!cancelled) setTokenError(e?.message || 'Token error');
       } finally {
@@ -984,7 +996,7 @@ export default function LiveStreamBroadcasterImpl({
     return () => {
       cancelled = true;
     };
-  }, [effectiveRoomId, initialToken, hostUserId, streamId, roomId]);
+  }, [effectiveRoomId, initialToken, streamId, roomId, token]);
 
   if (loading) {
     return (
@@ -1041,15 +1053,13 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
-  // Join with audio-only; enable webcam after CONNECTED (see BroadcasterMeetingInner).
-  // Pass participantId only when the JWT includes the same claim (Node /get-token). Omitting
-  // it when the JWT has no participantId lets VideoSDK auto-generate a stable local id.
+  // Match VideoSDKCall: mic + webcam on at join so the host registers as participant 1 immediately.
   // participantId must match JWT when present (host Appwrite user id from POST ?participantId=).
   const meetingConfig = {
     meetingId: effectiveRoomId,
     mode: 'SEND_AND_RECV',
     micEnabled: true,
-    webcamEnabled: false,
+    webcamEnabled: liveMode === 'camera',
     name: hostDisplayName || hostUserId || 'Host',
     defaultCamera: 'front',
     debugMode: __DEV__,
@@ -1061,7 +1071,7 @@ export default function LiveStreamBroadcasterImpl({
   };
 
   return (
-    <MeetingProvider config={meetingConfig} token={authToken}>
+    <MeetingProvider key={effectiveRoomId} config={meetingConfig} token={authToken}>
       <BroadcasterMeetingInner
         streamId={streamId}
         quality={quality}
