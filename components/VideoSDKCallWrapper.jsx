@@ -9,6 +9,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
+import { videosdkTrace } from '../lib/videosdkTrace';
 
 /**
  * Error Boundary to catch crashes when VideoSDK native module is not linked
@@ -49,7 +50,9 @@ const VideoSDKCallWrapper = (props) => {
     let isMounted = true;
 
     const loadVideoSDKCall = async () => {
+      videosdkTrace('S2_SDK', 'INIT_START', { isExpoGo });
       if (isExpoGo) {
+        videosdkTrace('S2_SDK', 'INIT_FAILED', 'Expo Go — native VideoSDK unavailable');
         if (isMounted) {
           setError('VideoSDK is not supported in Expo Go. Please use a development build.');
         }
@@ -62,17 +65,20 @@ const VideoSDKCallWrapper = (props) => {
         if (videosdkPackage && videosdkPackage.MeetingProvider) {
           const callComponent = require('./VideoSDKCall').default;
           if (isMounted && callComponent) {
+            videosdkTrace('S2_SDK', 'INIT_SUCCESS', { component: 'VideoSDKCall' });
             setVideoSDKCall(() => callComponent);
             return;
           }
         }
 
+        videosdkTrace('S2_SDK', 'INIT_FAILED', 'MeetingProvider not found in package');
         if (isMounted) {
           setError('VideoSDK native module not linked. Please rebuild the app.');
         }
       } catch (err) {
         if (isMounted) {
           const errorMessage = err.message || 'VideoSDK SDK not available';
+          videosdkTrace('S2_SDK', 'INIT_FAILED', { message: errorMessage });
           console.error('VideoSDKCallWrapper error:', errorMessage);
 
           if (
@@ -91,11 +97,10 @@ const VideoSDKCallWrapper = (props) => {
       }
     };
 
-    const timer = setTimeout(loadVideoSDKCall, 0);
+    loadVideoSDKCall();
 
     return () => {
       isMounted = false;
-      clearTimeout(timer);
     };
   }, [isExpoGo]);
 

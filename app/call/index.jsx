@@ -30,6 +30,7 @@ import {
 } from '../../lib/calls';
 import { CallState } from '../../lib/callHelper';
 import { stashCallSession, peekCallSession, clearCallSession } from '../../lib/pendingCallSession';
+import { videosdkTrace } from '../../lib/videosdkTrace';
 import VideoSDKCallWrapper from '../../components/VideoSDKCallWrapper';
 
 const COLORS = {
@@ -209,8 +210,9 @@ const CallScreen = () => {
       } else if (params.receiverId && params.callType) {
         setIsIncoming(false);
         setCallType(params.callType);
-        setCallState('calling');
+        setCallState('preparing');
         await initiateCall(params.receiverId, params.callType);
+        setCallState('calling');
       } else {
         setError('Invalid call parameters');
       }
@@ -233,6 +235,11 @@ const CallScreen = () => {
           token: call.videosdkCallerToken,
         });
       }
+      videosdkTrace('S1_ROOM', 'CALL_UI_READY', {
+        callId: call.$id,
+        meetingId: roomId || null,
+        hasStashedToken: Boolean(roomId && call.videosdkCallerToken),
+      });
 
       if (unsubscribeRef.current) unsubscribeRef.current();
       unsubscribeRef.current = subscribeCallUpdates(call.$id, ({ payload }) => {
@@ -389,6 +396,16 @@ const CallScreen = () => {
       </View>
     </View>
   );
+
+  if (callState === 'preparing') {
+    return renderShell(
+      <View style={styles.centerBlock}>
+        <ActivityIndicator size="large" color={accent} />
+        <Text style={styles.connectingTitle}>Starting call</Text>
+        <Text style={styles.connectingHint}>Creating VideoSDK room…</Text>
+      </View>
+    );
+  }
 
   if (error) {
     return renderShell(

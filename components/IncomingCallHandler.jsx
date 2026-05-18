@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { getIncomingCall, rejectCall } from '../lib/calls';
 import { CallState } from '../lib/callHelper';
+import { videosdkTrace } from '../lib/videosdkTrace';
 
 const IncomingCallHandler = () => {
   const { user } = useGlobalContext();
@@ -41,6 +42,16 @@ const IncomingCallHandler = () => {
           // Mark this call as shown
           shownCallIdsRef.current.add(callId);
           isNavigatingRef.current = true;
+
+          const meetingId = String(
+            incomingCall.channelName || incomingCall.roomName || ''
+          ).trim();
+          videosdkTrace('S5_INCOMING', 'RING', {
+            callId,
+            meetingId: meetingId || null,
+            status: incomingCall.status,
+            callerId: incomingCall.callerId || null,
+          });
 
           const callType = incomingCall.callType === 'video' ? 'Video' : 'Audio';
           const callerName = incomingCall.callerUsername || 'Someone';

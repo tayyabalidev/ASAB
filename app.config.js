@@ -29,6 +29,12 @@ module.exports = () => {
   const videosdkRoomPathExplicit =
     roomPathRaw !== undefined && roomPathRaw !== null ? String(roomPathRaw).trim() : null;
 
+  const debugLogsRaw = process.env.EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS;
+  const videosdkDebugLogs =
+    debugLogsRaw !== undefined && debugLogsRaw !== null
+      ? String(debugLogsRaw).trim() !== '0'
+      : true;
+
   return {
     ...appJson,
     expo: {
@@ -43,6 +49,7 @@ module.exports = () => {
         ...(videosdkRoomPathExplicit !== null
           ? { videosdkRoomPathExplicit }
           : {}),
+        videosdkDebugLogs,
       },
     },
   };

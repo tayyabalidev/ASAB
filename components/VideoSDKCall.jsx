@@ -26,8 +26,9 @@ import {
   RTCView,
 } from '@videosdk.live/react-native-sdk';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
-import { getVideoSDKToken } from '../lib/videosdkHelper';
+import { getVideoSDKToken, waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
+import { videosdkTrace } from '../lib/videosdkTrace';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { updateCallStatus } from '../lib/calls';
 import { CallState } from '../lib/callHelper';
@@ -76,6 +77,7 @@ const VideoSDKCallInner = ({
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
   const phaseRef = useRef(phase);
+  const joinRequestedRef = useRef(false);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -84,11 +86,27 @@ const VideoSDKCallInner = ({
   useEffect(() => {
     callIdRef.current = callId;
     connectedReportedRef.current = false;
-  }, [callId]);
+    joinRequestedRef.current = false;
+    meetingJoinedRef.current = false;
+    setMeetingJoined(false);
+  }, [callId, roomId]);
 
   const { join, leave, toggleMic, toggleWebcam, participants, localParticipant } = useMeeting({
     onMeetingJoined: () => {
-      console.log('✅ Joined VideoSDK meeting successfully');
+      const parts = participantsRef.current;
+      const count = parts instanceof Map ? parts.size : 0;
+      videosdkTrace('S3_JOIN', 'MEETING_JOINED', {
+        roomId,
+        phase: phaseRef.current,
+        callId: callIdRef.current,
+        participantCount: count,
+      });
+      console.log('[CALL_MEETING_JOINED]', {
+        roomId,
+        phase: phaseRef.current,
+        callId: callIdRef.current,
+        participantCount: count,
+      });
       if (joinTimeoutRef.current) {
         clearTimeout(joinTimeoutRef.current);
         joinTimeoutRef.current = null;
@@ -113,6 +131,13 @@ const VideoSDKCallInner = ({
       if (onError) onError(error);
     },
     onParticipantJoined: (participant) => {
+      const parts = participantsRef.current;
+      const count = parts instanceof Map ? parts.size : 0;
+      videosdkTrace('S4_PARTICIPANTS', 'JOINED', {
+        roomId,
+        id: participant?.id || null,
+        count,
+      });
       console.log('👤 Participant joined:', participant.id);
     },
     onParticipantLeft: (participant) => {
@@ -134,6 +159,24 @@ const VideoSDKCallInner = ({
 
   // VideoSDK participant ids are not Appwrite user ids — exclude local by SDK localParticipant
   const localId = localParticipant?.id;
+  const participantCount = (() => {
+    if (!localId) return meetingJoined ? 1 : 0;
+    const size = participants instanceof Map ? participants.size : 0;
+    return participants.has(localId) ? Math.max(1, size) : size + 1;
+  })();
+
+  useEffect(() => {
+    if (!meetingJoined && !localId) return;
+    const ids = participants instanceof Map ? Array.from(participants.keys()) : [];
+    videosdkTrace('S4_PARTICIPANTS', 'SNAPSHOT', {
+      roomId,
+      localId: localId || null,
+      count: participantCount,
+      ids,
+      phase: phaseRef.current,
+    });
+  }, [meetingJoined, localId, participantCount, participants, roomId]);
+
   const remoteParticipants = localId
     ? Array.from(participants.values()).filter((p) => p.id !== localId)
     : [];
@@ -144,6 +187,14 @@ const VideoSDKCallInner = ({
   useEffect(() => {
     if (!remoteConnected || !callIdRef.current || connectedReportedRef.current) return;
     connectedReportedRef.current = true;
+    const parts = participants;
+    const totalCount = parts instanceof Map ? parts.size : 0;
+    videosdkTrace('S4_PARTICIPANTS', 'REMOTE_CONNECTED', {
+      callId: callIdRef.current,
+      roomId,
+      remoteCount: remoteParticipants.length,
+      totalCount,
+    });
     console.log('[CALL_REMOTE_CONNECTED]', {
       callId: callIdRef.current,
       roomId,
@@ -200,14 +251,22 @@ const VideoSDKCallInner = ({
   }, [meetingJoined, remoteConnected, peerDisplayName]);
 
   useEffect(() => {
-    // Join meeting when component mounts
+    if (joinRequestedRef.current) return undefined;
+
     let cancelled = false;
     const joinMeeting = async () => {
       try {
+        videosdkTrace('S3_JOIN', 'START', {
+          roomId,
+          callType,
+          phase: phaseRef.current,
+          callId: callIdRef.current,
+          userId: currentUserId || null,
+        });
         console.log('[CALL_JOIN_START]', {
           roomId,
           callType,
-          phase,
+          phase: phaseRef.current,
           callId: callIdRef.current,
           userId: currentUserId || null,
         });
@@ -224,23 +283,50 @@ const VideoSDKCallInner = ({
           return;
         }
 
+        const joinFn = await waitForMeetingJoinFn(() => joinFnRef.current, {
+          isCancelled: () => cancelled,
+        });
+        if (cancelled) return;
+        if (!joinFn) {
+          videosdkTrace('S3_JOIN', 'JOIN_FN_TIMEOUT', { roomId, callId: callIdRef.current });
+          throw new Error('VideoSDK join() was not ready');
+        }
+
+        videosdkTrace('S3_JOIN', 'JOIN_FN_READY', { roomId });
+        joinRequestedRef.current = true;
+
         joinTimeoutRef.current = setTimeout(() => {
           if (!cancelled && !meetingJoinedRef.current && !endingRef.current) {
             const timeoutError = new Error('Joining room timed out. Check token, roomId, or network.');
-            console.warn('[CALL_JOIN_TIMEOUT]', { roomId, phase, callId: callIdRef.current });
-            if (!isPrecall && onError) onError(timeoutError);
+            console.warn('[CALL_JOIN_TIMEOUT]', {
+              roomId,
+              phase: phaseRef.current,
+              callId: callIdRef.current,
+            });
+            if (phaseRef.current !== 'precall' && onError) onError(timeoutError);
           }
         }, 45000);
 
-        await joinFnRef.current?.();
+        await joinFn();
+        videosdkTrace('S3_JOIN', 'REQUESTED', {
+          roomId,
+          callId: callIdRef.current,
+          phase: phaseRef.current,
+        });
         console.log('[CALL_JOIN_REQUESTED]', {
           roomId,
           callId: callIdRef.current,
+          phase: phaseRef.current,
         });
       } catch (error) {
+        joinRequestedRef.current = false;
         if (cancelled || endingRef.current) return;
-        console.error('Error joining VideoSDK meeting:', error);
-        if (!isPrecall) {
+        videosdkTrace('S3_JOIN', 'FAIL', {
+          roomId,
+          message: error?.message || String(error),
+        });
+        console.error('[CALL_JOIN_FAILED]', error);
+        if (phaseRef.current !== 'precall') {
           Alert.alert('Error', 'Failed to join call. Please try again.');
         }
         if (onError) onError(error);
@@ -255,7 +341,7 @@ const VideoSDKCallInner = ({
         joinTimeoutRef.current = null;
       }
     };
-  }, [roomId, callType, phase, onError]);
+  }, [roomId, callType, currentUserId, callId, onError]);
 
   const handleCallEnd = async () => {
     if (endingRef.current) return;
@@ -349,11 +435,20 @@ const VideoSDKCallInner = ({
 
   const controlsBottom = Math.max(insets.bottom, 20) + 16;
 
+  const roomParticipantCount = (() => {
+    if (!meetingJoined) return 0;
+    if (!localId) return 1;
+    const size = participants instanceof Map ? participants.size : 0;
+    return participants.has(localId) ? Math.max(1, size) : size + 1;
+  })();
+
   if (isPrecall) {
     return (
       <View style={styles.precallHost} pointerEvents="none">
-        {__DEV__ && meetingJoined ? (
-          <Text style={styles.precallDevBadge}>In room (waiting)</Text>
+        {__DEV__ ? (
+          <Text style={styles.precallDevBadge}>
+            {meetingJoined ? `In room · ${roomParticipantCount}` : 'Joining room…'}
+          </Text>
         ) : null}
       </View>
     );
@@ -532,6 +627,7 @@ const VideoSDKCall = ({
     const applyValidatedToken = (meetingToken) => {
       const validation = validateMeetingToken(meetingToken, normalizedRoomId);
       if (!validation.ok) {
+        videosdkTrace('S2_SDK', 'TOKEN_FAIL', { roomId: normalizedRoomId, error: validation.error });
         setTokenError(validation.error);
         return false;
       }
@@ -539,6 +635,10 @@ const VideoSDKCall = ({
         setMeetingParticipantId(validation.participantId);
       }
       setToken(meetingToken);
+      videosdkTrace('S2_SDK', 'TOKEN_OK', {
+        roomId: normalizedRoomId,
+        participantId: validation.participantId || null,
+      });
       return true;
     };
 
@@ -547,6 +647,7 @@ const VideoSDKCall = ({
         if (!normalizedRoomId) {
           throw new Error('Missing VideoSDK roomId for this call.');
         }
+        videosdkTrace('S2_SDK', 'TOKEN_FETCH_START', { roomId: normalizedRoomId, userId: currentUserId });
 
         const prefilled =
           typeof initialToken === 'string' && initialToken.trim() ? initialToken.trim() : '';
@@ -661,14 +762,24 @@ const VideoSDKCall = ({
     );
   }
 
+  videosdkTrace('S2_SDK', 'MEETING_PROVIDER_MOUNT', {
+    meetingId: normalizedRoomId,
+    mode: 'SEND_AND_RECV',
+    hasToken: Boolean(authToken),
+    phase,
+  });
+
   return (
     <MeetingProvider
+      key={normalizedRoomId}
       config={{
         meetingId: normalizedRoomId,
+        mode: 'SEND_AND_RECV',
         ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
         micEnabled: VIDEOSDK_CONFIG.meetingSettings.micEnabled,
         webcamEnabled: callType === 'video' && VIDEOSDK_CONFIG.meetingSettings.webcamEnabled,
         name: currentUserId || 'User',
+        debugMode: __DEV__,
         notification: {
           title: 'VideoSDK Call',
           message: 'You are in a call',

@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import { useGlobalContext } from '../../context/GlobalProvider';
 import { createLiveStream } from '../../lib/livestream';
 import { stashLiveHostSession } from '../../lib/pendingLiveBroadcast';
+import { videosdkTrace } from '../../lib/videosdkTrace';
 import { CustomButton } from '../../components';
 import { useTranslation } from 'react-i18next';
 
@@ -116,6 +117,11 @@ const GoLive = () => {
         hostToken: liveStream.videosdkHostToken,
         quality: selectedQuality,
         liveMode: selectedLiveMode,
+      });
+
+      videosdkTrace('S1_ROOM', 'LIVE_NAVIGATE', {
+        streamId: liveStream.$id,
+        meetingId: liveStream.videosdkRoomId,
       });
 
       // Navigate to broadcaster screen

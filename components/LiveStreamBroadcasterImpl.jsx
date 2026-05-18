@@ -15,6 +15,8 @@ import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { endLiveStream } from '../lib/livestream';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
+import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
+import { videosdkTrace, videosdkTraceMirror } from '../lib/videosdkTrace';
 
 const { width, height } = Dimensions.get('window');
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
@@ -50,6 +52,13 @@ function countRoomParticipants(participants, localParticipant) {
   }
   if (!(participants instanceof Map) || participants.size === 0) return 1;
   return participants.has(localId) ? Math.max(1, participants.size) : participants.size + 1;
+}
+
+/** RN SDK may omit mode briefly after join; empty mode still means host with SEND_AND_RECV config. */
+function isPublisherParticipantMode(mode) {
+  const m = String(mode || '').trim().toUpperCase();
+  if (!m) return true;
+  return m === 'SEND_AND_RECV' || m === 'CONFERENCE' || m === 'SEND_RECV';
 }
 
 function LocalPreview({ liveMode }) {
@@ -124,6 +133,7 @@ function BroadcasterMeetingInner({
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
   const [meetingJoined, setMeetingJoined] = useState(false);
+  const [joinPending, setJoinPending] = useState(false);
 
   useEffect(() => {
     liveModeRef.current = liveMode;
@@ -142,6 +152,7 @@ function BroadcasterMeetingInner({
     (label, value) => {
       const line = `${new Date().toISOString()} [${sessionIdRef.current}] ${label}: ${stringifyValue(value)}`;
       setDebugLines((prev) => [line, ...prev].slice(0, 40));
+      videosdkTraceMirror(label, value == null ? '' : value);
     },
     [stringifyValue]
   );
@@ -226,6 +237,10 @@ function BroadcasterMeetingInner({
       connectedOnceRef.current = true;
       setMeetingJoined(true);
       setLastSdkState('MEETING_JOINED');
+      videosdkTrace('S3_JOIN', 'MEETING_JOINED', {
+        roomId: roomDebug || null,
+        streamId,
+      });
       logEvent('MEETING_JOINED', {
         sdkMeetingId: sdkMeetingId || null,
         expected: roomDebug || null,
@@ -297,6 +312,11 @@ function BroadcasterMeetingInner({
     },
     onConnectionClose: (e) => logEvent('CONNECTION_CLOSE', e),
     onParticipantJoined: (p) => {
+      videosdkTrace('S4_PARTICIPANTS', 'JOINED', {
+        roomId: roomDebug || null,
+        id: p?.id || null,
+        mode: p?.mode || null,
+      });
       logEvent('PARTICIPANT_JOINED', { id: p?.id, mode: p?.mode });
     },
     onParticipantLeft: (p) => {
@@ -311,6 +331,7 @@ function BroadcasterMeetingInner({
       accept?.();
     },
     onHlsStarted: (e) => {
+      videosdkTrace('S7_HLS', 'STARTED', { roomId: roomDebug || null, streamId });
       logEvent('HLS_STARTED', e || {});
       if (endedRef.current) return;
       hlsStartedRef.current = true;
@@ -508,9 +529,7 @@ function BroadcasterMeetingInner({
 
   const participantCount = countRoomParticipants(participants, localParticipant);
 
-  const localMode = String(localParticipant?.mode || '').toUpperCase();
-  const isBroadcasterMode =
-    localMode === 'SEND_AND_RECV' || localMode === 'CONFERENCE';
+  const isBroadcasterMode = isPublisherParticipantMode(localParticipant?.mode);
 
   const signalingUp =
     meetingJoined &&
@@ -524,7 +543,11 @@ function BroadcasterMeetingInner({
   const hostCanPublish = hostInRoom;
 
   const displayParticipantCount =
-    hostInRoom && signalingUp ? Math.max(1, participantCount) : 0;
+    hostInRoom
+      ? Math.max(1, participantCount)
+      : meetingJoined || joinPending
+        ? Math.max(1, participantCount)
+        : 0;
 
   // RN 0.10.x: local participant may appear before onMeetingJoined / onConnectionOpen.
   useEffect(() => {
@@ -583,6 +606,16 @@ function BroadcasterMeetingInner({
 
   useEffect(() => {
     if (!localParticipant?.id) return;
+    const ids =
+      participants instanceof Map ? Array.from(participants.keys()) : [];
+    videosdkTrace('S4_PARTICIPANTS', 'SNAPSHOT', {
+      roomId: roomDebug || null,
+      localId: localParticipant.id,
+      localMode: localParticipant.mode || null,
+      count: displayParticipantCount,
+      ids,
+      meetingJoined: meetingJoinedRef.current,
+    });
     logEvent('LOCAL_PARTICIPANT_READY', {
       id: localParticipant.id,
       mode: localParticipant.mode || null,
@@ -590,7 +623,16 @@ function BroadcasterMeetingInner({
       joinRequested: joinRequestedRef.current,
       meetingJoined: meetingJoinedRef.current,
     });
-  }, [localParticipant?.id, localParticipant?.mode, participantCount, meetingJoined, logEvent]);
+  }, [
+    localParticipant?.id,
+    localParticipant?.mode,
+    participantCount,
+    displayParticipantCount,
+    meetingJoined,
+    participants,
+    roomDebug,
+    logEvent,
+  ]);
 
   // Start HLS once the host is in-room and publishing audio/video (or screen+audio).
   useEffect(() => {
@@ -645,6 +687,11 @@ function BroadcasterMeetingInner({
           }
           await Promise.resolve(startScreen());
         }
+        videosdkTrace('S7_HLS', 'START_REQUEST', {
+          roomId: roomDebug || null,
+          streamId,
+          attempt,
+        });
         logEvent('ACTION_START_HLS', {
           attempt,
           liveMode,
@@ -722,23 +769,30 @@ function BroadcasterMeetingInner({
         return;
       }
       try {
-        const joinReadyDeadline = Date.now() + 8000;
-        while (!cancelled && Date.now() < joinReadyDeadline) {
-          if (typeof joinFnRef.current === 'function') break;
-          await new Promise((r) => setTimeout(r, 80));
-        }
+        const joinFn = await waitForMeetingJoinFn(() => joinFnRef.current, {
+          isCancelled: () => cancelled,
+        });
         if (cancelled) return;
-        if (typeof joinFnRef.current !== 'function') {
+        if (!joinFn) {
+          videosdkTrace('S3_JOIN', 'JOIN_FN_TIMEOUT', { roomId: roomDebug || null });
           throw new Error('VideoSDK join() was not ready');
         }
 
+        videosdkTrace('S3_JOIN', 'JOIN_FN_READY', { roomId: roomDebug || null });
         joinStartedAtRef.current = Date.now();
         joinRequestedRef.current = true;
+        setJoinPending(true);
+        videosdkTrace('S3_JOIN', 'START', { liveMode, roomId: roomDebug || null, streamId });
         logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
-        await Promise.resolve(joinFnRef.current());
+        await Promise.resolve(joinFn());
+        videosdkTrace('S3_JOIN', 'REQUESTED', { roomId: roomDebug || null });
         logEvent('ACTION_JOIN_REQUESTED', { roomId: roomDebug || null });
       } catch (e) {
         if (!cancelled) {
+          videosdkTrace('S3_JOIN', 'FAIL', {
+            roomId: roomDebug || null,
+            message: e?.message || String(e),
+          });
           logEvent('JOIN_FAILED', e);
           setErrorMessage('Failed to join meeting');
           setPhase('error');
@@ -848,7 +902,7 @@ function BroadcasterMeetingInner({
           </View>
           <View style={styles.participantPill}>
             <Text style={styles.participantPillText}>
-              👤 {hostInRoom ? displayParticipantCount : meetingJoined ? participantCount : '…'}
+              👤 {displayParticipantCount > 0 ? displayParticipantCount : joinPending ? '…' : 0}
             </Text>
           </View>
         </View>
@@ -925,6 +979,10 @@ export default function LiveStreamBroadcasterImpl({
     const applyHostToken = (meetingToken) => {
       const validation = validateMeetingToken(meetingToken, effectiveRoomId, { requireMod: true });
       if (!validation.ok) {
+        videosdkTrace('S2_SDK', 'TOKEN_FAIL', {
+          roomId: effectiveRoomId,
+          error: validation.error,
+        });
         setTokenError(validation.error);
         return false;
       }
@@ -938,10 +996,15 @@ export default function LiveStreamBroadcasterImpl({
       );
       validatedTokenRef.current = meetingToken;
       setToken(meetingToken);
+      videosdkTrace('S2_SDK', 'TOKEN_OK', {
+        roomId: effectiveRoomId,
+        participantId: validation.participantId || null,
+      });
       return true;
     };
 
     (async () => {
+      videosdkTrace('S2_SDK', 'TOKEN_FETCH_START', { roomId: effectiveRoomId, streamId });
       try {
         if (__DEV__) {
           try {
@@ -1069,6 +1132,13 @@ export default function LiveStreamBroadcasterImpl({
     },
     ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
   };
+
+  videosdkTrace('S2_SDK', 'MEETING_PROVIDER_MOUNT', {
+    meetingId: effectiveRoomId,
+    mode: meetingConfig.mode,
+    hasToken: Boolean(authToken),
+    streamId,
+  });
 
   return (
     <MeetingProvider key={effectiveRoomId} config={meetingConfig} token={authToken}>

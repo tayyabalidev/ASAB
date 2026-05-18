@@ -10,6 +10,7 @@ import Constants from 'expo-constants';
 import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser, getOrCreateGoogleUser, appwriteConfig } from '../lib/appwrite';
 import { useBadgeNotifications } from '../hooks/useBadgeNotifications';
 import IncomingCallHandler from '../components/IncomingCallHandler';
+import VideosdkDebugPanel from '../components/VideosdkDebugPanel';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -424,6 +425,7 @@ export default function RootLayout() {
         <OAuthHandler />
         <BadgeNotificationHandler />
         <IncomingCallHandler />
+        <VideosdkDebugPanel />
         <Stack
           screenOptions={{
             headerShown: false, // Hide all headers by default
