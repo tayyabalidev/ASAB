@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Dimensions,
   InteractionManager,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
@@ -310,7 +311,13 @@ function BroadcasterMeetingInner({
         logEvent('PIN_ON_CONNECTION_ERROR', e);
       }
     },
-    onConnectionClose: (e) => logEvent('CONNECTION_CLOSE', e),
+    onConnectionClose: (e) => {
+      videosdkTrace('S3_JOIN', 'CONNECTION_CLOSE', {
+        roomId: roomDebug || null,
+        detail: e || null,
+      });
+      logEvent('CONNECTION_CLOSE', e);
+    },
     onParticipantJoined: (p) => {
       videosdkTrace('S4_PARTICIPANTS', 'JOINED', {
         roomId: roomDebug || null,
@@ -391,41 +398,90 @@ function BroadcasterMeetingInner({
       }
 
       if (stateText === 'DISCONNECTED' && !endedRef.current) {
-        // Only treat as "in room" after VideoSDK confirmed join — not when join() promise resolved.
-        const sessionEstablished =
-          meetingJoinedRef.current &&
-          (connectedOnceRef.current ||
-            lastSdkState === 'CONNECTED' ||
-            lastSdkState === 'MEETING_JOINED');
+        const msSinceJoin = joinStartedAtRef.current
+          ? Date.now() - joinStartedAtRef.current
+          : null;
+        const hadEstablishedSession = Boolean(connectedOnceRef.current);
 
-        if (sessionEstablished) {
-          logEvent('DISCONNECTED_AFTER_ESTABLISHED', {
-            localParticipantId: localParticipantRef.current?.id || null,
-          });
-          setMeetingJoined(false);
-          meetingJoinedRef.current = false;
-          if (disconnectFatalTimerRef.current) {
-            clearTimeout(disconnectFatalTimerRef.current);
+        videosdkTrace('S3_JOIN', 'DISCONNECTED', {
+          roomId: roomDebug || null,
+          streamId,
+          stateText,
+          reason: stateReason,
+          hadEstablishedSession,
+          meetingJoined: meetingJoinedRef.current,
+          localParticipantId: localParticipantRef.current?.id || null,
+          msSinceJoin,
+          raw:
+            typeof state === 'object'
+              ? {
+                  status: state?.status,
+                  state: state?.state,
+                  message: state?.message,
+                  reason: state?.reason,
+                  error: state?.error,
+                }
+              : state,
+        });
+
+        // Host never completed a stable join — do not leave/rejoin loop (worsens iOS signaling).
+        if (!hadEstablishedSession) {
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
           }
-          disconnectFatalTimerRef.current = setTimeout(() => {
-            if (endedRef.current || meetingJoinedRef.current) return;
-            setErrorMessage('Lost connection to the live room');
-            setErrorDetail(
-              'VideoSDK disconnected after join. Start a new live stream and check network permissions.'
-            );
-            setPhase('error');
-          }, 4000);
+          reconnectAttemptsRef.current = 0;
+          hlsStartTriggeredRef.current = false;
+          webcamEnableAttemptedRef.current = false;
+          pinAttemptedRef.current = false;
+          if (enableWebcamTimerRef.current) {
+            clearTimeout(enableWebcamTimerRef.current);
+            enableWebcamTimerRef.current = null;
+          }
+          meetingJoinedRef.current = false;
+          setMeetingJoined(false);
+          setJoinPending(false);
+          logEvent('DISCONNECTED_DURING_JOIN', {
+            localParticipantId: localParticipantRef.current?.id || null,
+            msSinceJoin,
+            reason: stateReason,
+          });
+          videosdkTrace('S3_JOIN', 'FAIL_DURING_JOIN', {
+            roomId: roomDebug || null,
+            reason: stateReason,
+            msSinceJoin,
+          });
+          setErrorMessage('Could not join the live room');
+          setErrorDetail(
+            (stateReason
+              ? `${stateReason}. `
+              : 'VideoSDK disconnected before the host could stay in the room. ') +
+              'Start a NEW live stream (do not reuse an old room id). ' +
+              'Check camera/mic permissions and network (Wi‑Fi or cellular). ' +
+              `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}.`
+          );
+          setPhase('error');
           return;
         }
 
-        logEvent('DISCONNECTED_DURING_JOIN', {
+        // Was in room — allow reconnect retries only after a successful join.
+        logEvent('DISCONNECTED_AFTER_ESTABLISHED', {
           localParticipantId: localParticipantRef.current?.id || null,
-          msSinceJoin: joinStartedAtRef.current
-            ? Date.now() - joinStartedAtRef.current
-            : null,
         });
+        setMeetingJoined(false);
+        meetingJoinedRef.current = false;
+        if (disconnectFatalTimerRef.current) {
+          clearTimeout(disconnectFatalTimerRef.current);
+        }
+        disconnectFatalTimerRef.current = setTimeout(() => {
+          if (endedRef.current || meetingJoinedRef.current) return;
+          setErrorMessage('Lost connection to the live room');
+          setErrorDetail(
+            'VideoSDK disconnected after join. Start a new live stream and check network permissions.'
+          );
+          setPhase('error');
+        }, 4000);
 
-        // Allow HLS, webcam, and pin to be re-attempted after a clean reconnect.
         hlsStartTriggeredRef.current = false;
         webcamEnableAttemptedRef.current = false;
         pinAttemptedRef.current = false;
@@ -433,8 +489,6 @@ function BroadcasterMeetingInner({
           clearTimeout(enableWebcamTimerRef.current);
           enableWebcamTimerRef.current = null;
         }
-        meetingJoinedRef.current = false;
-        setMeetingJoined(false);
 
         const nextAttempt = reconnectAttemptsRef.current + 1;
         if (nextAttempt <= 4) {
@@ -477,6 +531,7 @@ function BroadcasterMeetingInner({
             connectedOnce: connectedOnceRef.current,
             localParticipantId: localParticipantRef.current?.id || null,
           });
+          videosdkTrace('S3_JOIN', 'RETRY_EXHAUSTED', { roomId: roomDebug || null });
           setErrorMessage('Could not join the live room');
           setErrorDetail(
             'VideoSDK disconnected before the host could stay in the room. Start a NEW live stream (do not reuse an old room id). ' +
@@ -507,6 +562,11 @@ function BroadcasterMeetingInner({
         clearTimeout(hlsStartTimerRef.current);
         hlsStartTimerRef.current = null;
       }
+      videosdkTrace('S3_JOIN', 'SDK_ERROR', {
+        roomId: roomDebug || null,
+        message: err?.message || err?.reason || err?.error || null,
+        detail: err || null,
+      });
       logEvent('SDK_ERROR', err);
       const sdkMessage =
         err?.message || err?.reason || err?.error || err?.errorMessage || 'Meeting error';
@@ -542,12 +602,13 @@ function BroadcasterMeetingInner({
 
   const hostCanPublish = hostInRoom;
 
-  const displayParticipantCount =
-    hostInRoom
-      ? Math.max(1, participantCount)
-      : meetingJoined || joinPending
-        ? Math.max(1, participantCount)
-        : 0;
+  // Match VideoSDK dashboard: only show 1 after server-confirmed join (not joinPending alone).
+  const displayParticipantCount = hostInRoom ? Math.max(1, participantCount) : 0;
+  const participantPillLabel = hostInRoom
+    ? String(displayParticipantCount)
+    : joinPending
+      ? '…'
+      : '0';
 
   // RN 0.10.x: local participant may appear before onMeetingJoined / onConnectionOpen.
   useEffect(() => {
@@ -779,6 +840,11 @@ function BroadcasterMeetingInner({
         }
 
         videosdkTrace('S3_JOIN', 'JOIN_FN_READY', { roomId: roomDebug || null });
+        if (Platform.OS === 'ios') {
+          await new Promise((r) => setTimeout(r, 450));
+          if (cancelled) return;
+          videosdkTrace('S3_JOIN', 'IOS_STABILIZE_DELAY', { ms: 450 });
+        }
         joinStartedAtRef.current = Date.now();
         joinRequestedRef.current = true;
         setJoinPending(true);
@@ -895,14 +961,14 @@ function BroadcasterMeetingInner({
                 ? 'LIVE'
                 : hostInRoom
                   ? 'IN ROOM'
-                  : lastSdkState === 'DISCONNECTED'
+                  : connectedOnceRef.current && lastSdkState === 'DISCONNECTED'
                     ? 'RECONNECTING'
                     : 'CONNECTING'}
             </Text>
           </View>
           <View style={styles.participantPill}>
             <Text style={styles.participantPillText}>
-              👤 {displayParticipantCount > 0 ? displayParticipantCount : joinPending ? '…' : 0}
+              👤 {participantPillLabel}
             </Text>
           </View>
         </View>
