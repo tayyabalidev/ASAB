@@ -2,9 +2,11 @@
 
 ## Install build 1.0.70+
 
+**Do not use Expo Go** for live/call testing — VideoSDK native code does not run there.
+
 This build includes:
 
-- Floating **SDK** button (bottom-left)
+- Floating **SDK** button (bottom-left, on top of all screens including Go Live)
 - In-app log panel with **Share / Copy**
 - S3 join fixes (no retry loop before first join, accurate participant count)
 

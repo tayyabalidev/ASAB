@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Alert, AppState } from 'react-native';
+import { Alert, AppState, StyleSheet, View } from 'react-native';
 import { Stack, SplashScreen } from 'expo-router';
 import GlobalProvider, { useGlobalContext } from '../context/GlobalProvider';
 import { useFonts } from 'expo-font';
@@ -425,7 +425,6 @@ export default function RootLayout() {
         <OAuthHandler />
         <BadgeNotificationHandler />
         <IncomingCallHandler />
-        <VideosdkDebugPanel />
         <Stack
           screenOptions={{
             headerShown: false, // Hide all headers by default
@@ -468,7 +467,19 @@ export default function RootLayout() {
             }} 
           />
         </Stack>
+        {/* Above Stack so live/call full-screen views do not hide the debug FAB (TestFlight). */}
+        <View style={layoutStyles.debugOverlay} pointerEvents="box-none">
+          <VideosdkDebugPanel />
+        </View>
       </GlobalProvider>
     </StripeProvider>
   );
 }
+
+const layoutStyles = StyleSheet.create({
+  debugOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 999999,
+    elevation: 999999,
+  },
+});
