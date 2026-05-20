@@ -79,12 +79,12 @@ export default function VideosdkDebugPanel() {
   if (!expanded) {
     return (
       <TouchableOpacity
-        style={[styles.fab, { bottom: Math.max(insets.bottom, 12) + 72 }]}
+        style={[styles.fab, { top: Math.max(insets.top, 12) + 8, bottom: undefined }]}
         onPress={() => setExpanded(true)}
         activeOpacity={0.85}
         accessibilityLabel="Open VideoSDK debug logs"
       >
-        <Text style={styles.fabText}>SDK</Text>
+        <Text style={styles.fabText}>LOG</Text>
         {lines.length > 0 ? (
           <View style={styles.fabBadge}>
             <Text style={styles.fabBadgeText}>{lines.length > 99 ? '99+' : lines.length}</Text>
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   fabText: {
-    color: '#34d399',
+    color: '#fff',
     fontWeight: '800',
     fontSize: 13,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',

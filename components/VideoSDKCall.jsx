@@ -91,7 +91,8 @@ const VideoSDKCallInner = ({
     setMeetingJoined(false);
   }, [callId, roomId]);
 
-  const { join, leave, toggleMic, toggleWebcam, participants, localParticipant } = useMeeting({
+  const { join, leave, toggleMic, toggleWebcam, enableMic, enableWebcam, participants, localParticipant } =
+    useMeeting({
     onMeetingJoined: () => {
       const parts = participantsRef.current;
       const count = parts instanceof Map ? parts.size : 0;
@@ -113,6 +114,28 @@ const VideoSDKCallInner = ({
       }
       meetingJoinedRef.current = true;
       setMeetingJoined(true);
+      setTimeout(() => {
+        try {
+          enableMic?.();
+          videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN', { roomId });
+        } catch (e) {
+          videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN_ERROR', {
+            message: e?.message || String(e),
+          });
+        }
+        if (callType === 'video') {
+          setTimeout(() => {
+            try {
+              enableWebcam?.();
+              videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { roomId });
+            } catch (e) {
+              videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN_ERROR', {
+                message: e?.message || String(e),
+              });
+            }
+          }, 500);
+        }
+      }, 400);
     },
     onMeetingLeft: () => {
       console.log('👋 Left VideoSDK meeting');
@@ -776,8 +799,8 @@ const VideoSDKCall = ({
         meetingId: normalizedRoomId,
         mode: 'SEND_AND_RECV',
         ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
-        micEnabled: VIDEOSDK_CONFIG.meetingSettings.micEnabled,
-        webcamEnabled: callType === 'video' && VIDEOSDK_CONFIG.meetingSettings.webcamEnabled,
+        micEnabled: false,
+        webcamEnabled: false,
         name: currentUserId || 'User',
         debugMode: __DEV__,
         notification: {
