@@ -8,7 +8,11 @@
 
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
+import { canLoadVideoSdkNative, isExpoGoOrStoreClient } from '../lib/videosdkNativeGate';
+import {
+  safeRequireMeetingSdk,
+  safeRequireVideoSDKCallComponent,
+} from '../lib/videosdkSafeLoad';
 import { videosdkTrace } from '../lib/videosdkTrace';
 
 /**
@@ -41,17 +45,17 @@ const VideoSDKCallWrapper = (props) => {
   const [error, setError] = React.useState(null);
   const [sdkRenderError, setSdkRenderError] = React.useState(false);
   const [sdkCrashMessage, setSdkCrashMessage] = React.useState(null);
-  /** Expo Go: StoreClient. App Store / TestFlight / EAS standalone: Standalone (or Bare in some setups). */
-  const isExpoGo =
-    Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
-    Constants.appOwnership === 'expo';
+  const isExpoGo = isExpoGoOrStoreClient();
 
   React.useEffect(() => {
     let isMounted = true;
 
     const loadVideoSDKCall = async () => {
-      videosdkTrace('S2_SDK', 'INIT_START', { isExpoGo });
-      if (isExpoGo) {
+      videosdkTrace('S2_SDK', 'INIT_START', {
+        isExpoGo,
+        canLoadNative: canLoadVideoSdkNative(),
+      });
+      if (!canLoadVideoSdkNative()) {
         videosdkTrace('S2_SDK', 'INIT_FAILED', 'Expo Go — native VideoSDK unavailable');
         if (isMounted) {
           setError('VideoSDK is not supported in Expo Go. Please use a development build.');
@@ -60,10 +64,10 @@ const VideoSDKCallWrapper = (props) => {
       }
 
       try {
-        const videosdkPackage = require('@videosdk.live/react-native-sdk');
+        const videosdkPackage = safeRequireMeetingSdk();
 
         if (videosdkPackage && videosdkPackage.MeetingProvider) {
-          const callComponent = require('./VideoSDKCall').default;
+          const callComponent = safeRequireVideoSDKCallComponent();
           if (isMounted && callComponent) {
             videosdkTrace('S2_SDK', 'INIT_SUCCESS', { component: 'VideoSDKCall' });
             setVideoSDKCall(() => callComponent);

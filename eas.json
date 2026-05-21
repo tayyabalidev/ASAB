@@ -18,6 +18,9 @@
       "autoIncrement": true,
       "distribution": "internal",
       "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "1"
+      },
       "ios": {
         "simulator": false
       },
@@ -29,6 +32,9 @@
       "autoIncrement": true,
       "distribution": "store",
       "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "1"
+      },
       "ios": {
         "buildConfiguration": "Release"
       },

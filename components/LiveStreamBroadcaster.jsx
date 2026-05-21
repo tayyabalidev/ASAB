@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { isExpoGoOrStoreClient } from '../lib/videosdkNativeGate';
+import { safeRequireLiveStreamBroadcasterImpl } from '../lib/videosdkSafeLoad';
 
 function FallbackBroadcaster({ streamId, onStreamEnd }) {
   return (
@@ -29,12 +30,7 @@ export default function LiveStreamBroadcaster(props) {
     if (isExpoGoOrStoreClient()) {
       return null;
     }
-    try {
-      return require('./LiveStreamBroadcasterImpl').default;
-    } catch (e) {
-      console.warn('LiveStreamBroadcaster: failed to load VideoSDK implementation', e);
-      return null;
-    }
+    return safeRequireLiveStreamBroadcasterImpl();
   }, []);
 
   if (!Inner) {

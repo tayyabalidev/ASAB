@@ -133,6 +133,9 @@ function BroadcasterMeetingInner({
   const liveModeRef = useRef(liveMode);
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
+  const enableMicRef = useRef(null);
+  const enableWebcamRef = useRef(null);
+  const micEnableAttemptsRef = useRef(0);
   const [meetingJoined, setMeetingJoined] = useState(false);
   const [joinPending, setJoinPending] = useState(false);
 
@@ -218,33 +221,80 @@ function BroadcasterMeetingInner({
     [streamId, stopMeeting, onStreamEnd, hlsStartedRef]
   );
 
+  const tryEnableMic = useCallback(
+    (source) => {
+      if (endedRef.current) return;
+      const fn = enableMicRef.current;
+      if (typeof fn !== 'function') {
+        videosdkTrace('S3_JOIN', 'ENABLE_MIC_SKIPPED_NO_FN', { source, roomId: roomDebug || null });
+        return;
+      }
+      micEnableAttemptsRef.current += 1;
+      try {
+        fn();
+        logEvent('ACTION_ENABLE_MIC_AFTER_JOIN', {
+          source,
+          attempt: micEnableAttemptsRef.current,
+        });
+        videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN', {
+          source,
+          attempt: micEnableAttemptsRef.current,
+          roomId: roomDebug || null,
+        });
+      } catch (e) {
+        logEvent('ENABLE_MIC_AFTER_JOIN_ERROR', { source, attempt: micEnableAttemptsRef.current, e });
+        videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN_ERROR', {
+          source,
+          message: e?.message || String(e),
+          roomId: roomDebug || null,
+        });
+      }
+    },
+    [logEvent, roomDebug]
+  );
+
+  const tryEnableWebcam = useCallback(
+    (source) => {
+      if (endedRef.current || liveModeRef.current === 'screen') return;
+      const fn = enableWebcamRef.current;
+      if (typeof fn !== 'function') {
+        videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_SKIPPED_NO_FN', { source, roomId: roomDebug || null });
+        return;
+      }
+      try {
+        logEvent('ACTION_ENABLE_WEBCAM_AFTER_JOIN', { source });
+        videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { source, roomId: roomDebug || null });
+        fn();
+      } catch (e) {
+        logEvent('ENABLE_WEBCAM_AFTER_JOIN_ERROR', e);
+        webcamEnableAttemptedRef.current = false;
+        videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN_ERROR', {
+          source,
+          message: e?.message || String(e),
+          roomId: roomDebug || null,
+        });
+      }
+    },
+    [logEvent, roomDebug]
+  );
+
+  // Defer media enable to next tick so useMeeting() has bound enableMic/enableWebcam (same as VideoSDKCall).
   const publishMediaAfterJoin = useCallback(
     (source) => {
       if (endedRef.current) return;
-      const act = actionsRef.current;
-      try {
-        act.enableMic?.();
-        logEvent('ACTION_ENABLE_MIC_AFTER_JOIN', { source });
-        videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN', { source, roomId: roomDebug || null });
-      } catch (e) {
-        logEvent('ENABLE_MIC_AFTER_JOIN_ERROR', e);
-      }
+      setTimeout(() => tryEnableMic(source), 50);
       if (liveModeRef.current === 'screen') return;
       if (webcamEnableAttemptedRef.current) return;
       webcamEnableAttemptedRef.current = true;
+      if (enableWebcamTimerRef.current) {
+        clearTimeout(enableWebcamTimerRef.current);
+      }
       enableWebcamTimerRef.current = setTimeout(() => {
-        if (endedRef.current) return;
-        try {
-          logEvent('ACTION_ENABLE_WEBCAM_AFTER_JOIN', { source });
-          videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { source, roomId: roomDebug || null });
-          act.enableWebcam?.();
-        } catch (e) {
-          logEvent('ENABLE_WEBCAM_AFTER_JOIN_ERROR', e);
-          webcamEnableAttemptedRef.current = false;
-        }
-      }, 600);
+        enableWebcamTimerRef.current = null;
+        tryEnableWebcam(source);
+      }, 650);
     },
-    [logEvent, roomDebug]
+    [tryEnableMic, tryEnableWebcam]
   );
 
   const {
@@ -292,8 +342,19 @@ function BroadcasterMeetingInner({
         logEvent('PIN_ERROR', e);
       }
     },
-    onMeetingLeft: () => {
-      logEvent('MEETING_LEFT');
+    onMeetingLeft: (data) => {
+      videosdkTrace('S3_JOIN', 'MEETING_LEFT', {
+        roomId: roomDebug || null,
+        streamId,
+        hadEstablishedSession: Boolean(connectedOnceRef.current),
+        localParticipantId: localParticipantRef.current?.id || null,
+        detail: data || null,
+      });
+      logEvent('MEETING_LEFT', {
+        hadEstablishedSession: Boolean(connectedOnceRef.current),
+        localParticipantId: localParticipantRef.current?.id || null,
+        data: data || null,
+      });
     },
     onConnectionOpen: () => {
       connectedOnceRef.current = true;
@@ -596,6 +657,8 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableWebcam = enableWebcam;
   actionsRef.current.startScreenShare = startScreenShare;
   actionsRef.current.enableScreenShare = enableScreenShare;
+  enableMicRef.current = enableMic;
+  enableWebcamRef.current = enableWebcam;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
   localParticipantRef.current = localParticipant || null;
@@ -654,22 +717,24 @@ function BroadcasterMeetingInner({
     publishMediaAfterJoin,
   ]);
 
-  // If in-room but the camera track never appears, retry enableWebcam once.
+  // Retry mic/webcam if join succeeded but tracks never published (dashboard stays at 0 participants).
   useEffect(() => {
-    if (endedRef.current || liveMode === 'screen') return undefined;
-    if (!hostCanPublish || localWebcamOn) return undefined;
+    if (endedRef.current || !hostCanPublish) return undefined;
+    if (localMicOn && (liveMode === 'screen' || localWebcamOn)) return undefined;
     const t = setTimeout(() => {
-      if (endedRef.current || localWebcamOn) return;
-      logEvent('ENABLE_WEBCAM_RETRY');
-      webcamEnableAttemptedRef.current = false;
-      try {
-        actionsRef.current.enableWebcam?.();
-      } catch (e) {
-        logEvent('ENABLE_WEBCAM_RETRY_ERROR', e);
+      if (endedRef.current || !hostCanPublish) return;
+      if (!localMicOn && micEnableAttemptsRef.current < 4) {
+        logEvent('ENABLE_MIC_RETRY', { attempt: micEnableAttemptsRef.current + 1 });
+        tryEnableMic('micRetry');
       }
-    }, 3500);
+      if (liveMode !== 'screen' && !localWebcamOn && micEnableAttemptsRef.current > 0) {
+        logEvent('ENABLE_WEBCAM_RETRY');
+        webcamEnableAttemptedRef.current = false;
+        tryEnableWebcam('webcamRetry');
+      }
+    }, 2800);
     return () => clearTimeout(t);
-  }, [hostCanPublish, liveMode, localWebcamOn, logEvent]);
+  }, [hostCanPublish, liveMode, localMicOn, localWebcamOn, logEvent, tryEnableMic, tryEnableWebcam]);
 
   useEffect(() => {
     if (!localParticipant?.id) return;
@@ -707,10 +772,13 @@ function BroadcasterMeetingInner({
     if (!hostCanPublish) return undefined;
     if (hlsStartTriggeredRef.current) return undefined;
 
+    const cameraVideoReady = Boolean(localWebcamOn && localWebcamStream);
+    const cameraAudioOnlyReady =
+      liveMode === 'camera' && Boolean(localMicOn) && !cameraVideoReady;
     const producerReady =
       liveMode === 'screen'
         ? Boolean(localMicOn)
-        : Boolean(localWebcamOn && localWebcamStream);
+        : cameraVideoReady || cameraAudioOnlyReady;
 
     if (!producerReady) {
       logEvent('HLS_TRIGGER_WAIT_PRODUCER', {
@@ -720,6 +788,11 @@ function BroadcasterMeetingInner({
         localMicOn: Boolean(localMicOn),
       });
       return undefined;
+    }
+
+    if (cameraAudioOnlyReady) {
+      logEvent('HLS_TRIGGER_AUDIO_ONLY', { roomId: roomDebug || null });
+      videosdkTrace('S7_HLS', 'AUDIO_ONLY_PRODUCER', { roomId: roomDebug || null, streamId });
     }
 
     hlsStartTriggeredRef.current = true;
@@ -905,9 +978,17 @@ function BroadcasterMeetingInner({
         reconnectTimerRef.current = null;
       }
       try {
+        if (!connectedOnceRef.current && !joinRequestedRef.current) {
+          logEvent('UNMOUNT_SKIP_LEAVE', { reason: 'never_joined' });
+          return;
+        }
         if (hlsStartedRef.current) actionsRef.current.stopHls?.();
         leaveFnRef.current?.();
-        logEvent('UNMOUNT_LEAVE');
+        logEvent('UNMOUNT_LEAVE', { hadEstablishedSession: Boolean(connectedOnceRef.current) });
+        videosdkTrace('S3_JOIN', 'UNMOUNT_LEAVE', {
+          roomId: roomDebug || null,
+          hadEstablishedSession: Boolean(connectedOnceRef.current),
+        });
       } catch (_) {}
     };
   }, [logEvent]);
@@ -1211,7 +1292,7 @@ export default function LiveStreamBroadcasterImpl({
     webcamEnabled: meetingConfig.webcamEnabled,
     hasToken: Boolean(authToken),
     streamId,
-    buildNote: '1.0.73 join with media off then enable after MEETING_JOINED',
+    buildNote: '1.0.74 deferred enableMic/webcam + mic retry + audio-only HLS fallback',
   });
 
   return (

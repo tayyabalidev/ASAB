@@ -1,53 +1,72 @@
 # VideoSDK debug on TestFlight (no Mac / no Xcode)
 
-## Root cause found (VideoSDK dashboard Traces)
+## Expo Go errors (`checkCameraPermission` / native module)
 
-If Traces show **Loading Device Capabilities** failed with:
+Those errors mean VideoSDK was loaded inside **Expo Go**, which has no VideoSDK native code. After build **1.0.75+** gate fixes, Expo Go should show the orange **LOG** button without crashing. **Go Live / calls still require TestFlight or `eas build`** — not Expo Go.
 
-`Could not join the room device not supported`
+Restart Metro after pulling: `npx expo start -c`
 
-Then S1/S2 are OK — the SDK rejects **Loading device capabilities** when `micEnabled` or `webcamEnabled` is true at join (your trace still shows both `true` = old build).
+## Why logs look different in Expo vs TestFlight
 
-Build **1.0.73+** joins with **mic off + camera off**, then enables mic → camera after `MEETING_JOINED`.
+| Where | What you see |
+|-------|----------------|
+| **Expo Go / `npx expo start`** | Extra **dev-only** panels on the live screen (`phase`, `sdk`, scrollable lines) — only when `__DEV__` is true |
+| **TestFlight** | Those dev panels are **hidden**. Use the orange **LOG** button instead |
 
-Verify in LOG panel: `MEETING_PROVIDER_MOUNT` must show `"micEnabled":false,"webcamEnabled":false`.
+If you only tested in Expo before, you were not using the same UI as TestFlight.
 
-## Install build 1.0.73+
+## Where to find logs on TestFlight (build 1.0.75+)
+
+1. **Orange `LOG` button — top-right** on every screen (shows `v1.0.75` under the label).
+2. On **Go Live / broadcast**, also tap **Open VideoSDK logs** (top-left) — opens the same panel.
+3. Tap **LOG** → **Share** → paste into Notes or Messages.
+
+If you do **not** see orange **LOG v1.0.75** top-right, your TestFlight build is **older** than this code. Submit a new build with EAS.
+
+## Install build 1.0.75+
 
 **Do not use Expo Go** for live/call testing — VideoSDK native code does not run there.
 
 This build includes:
 
-- Orange **LOG** button (top-right, on top of all screens including Go Live)
-- In-app log panel with **Share / Copy**
-- S3 join fixes (no retry loop before first join, accurate participant count)
+- Orange **LOG** in a **Modal** (stays above full-screen live UI on iOS)
+- **Open VideoSDK logs** on the broadcast screen
+- `EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS=1` in EAS production/preview profiles
 
-## How to capture logs
+## Root cause (VideoSDK dashboard Traces)
 
-1. Open the app from TestFlight.
-2. Confirm the green **SDK** pill appears bottom-left on the home screen.
-3. Tap **Go Live** and reproduce the issue.
-4. Tap **SDK** → expand the panel → **Share / Copy**.
-5. Save to **Notes** or Messages and send the full text.
+If Traces show **Loading Device Capabilities** failed with `device not supported`, use build **1.0.73+** (mic/camera off at join, enabled after `MEETING_JOINED`).
 
-## What to look for
+Verify in LOG panel: `MEETING_PROVIDER_MOUNT` with `"micEnabled":false,"webcamEnabled":false`.
+
+## What to look for in shared logs
 
 | Log line | Meaning |
 |----------|---------|
+| `[S2_SDK][DEBUG_PANEL_READY]` | LOG UI mounted (should appear on app open) |
 | `[S1_ROOM][SUCCESS]` | Room created on server |
 | `[S2_SDK][TOKEN_OK]` | JWT validated |
 | `[S2_SDK][MEETING_PROVIDER_MOUNT]` | SDK session started |
 | `[S3_JOIN][REQUESTED]` | `join()` called |
 | `[S3_JOIN][MEETING_JOINED]` | Host in room (required) |
-| `[S3_JOIN][DISCONNECTED]` | Dropped — read `reason` field |
+| `[S3_JOIN][ENABLE_MIC_AFTER_JOIN]` | Mic publish started |
+| `[S3_JOIN][DISCONNECTED]` | Dropped — read `reason` |
 | `[S3_JOIN][FAIL_DURING_JOIN]` | Never stayed in room |
 
-If you see **REQUESTED** but not **MEETING_JOINED**, copy the **DISCONNECTED** line (includes `reason`).
+## EAS build
 
-## Disable debug UI for store release
+```bash
+eas build --profile production --platform ios
+```
+
+Ensure Expo project env does **not** set `EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS=0` unless you want logs hidden.
+
+## Disable debug UI for App Store release
 
 Set at build time:
 
 ```
 EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS=0
 ```
+
+And in `app.json` → `extra` → `"videosdkDebugLogs": false`.

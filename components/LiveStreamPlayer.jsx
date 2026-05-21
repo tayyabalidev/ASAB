@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { isExpoGoOrStoreClient } from '../lib/videosdkNativeGate';
+import { safeRequireLiveStreamPlayerImpl } from '../lib/videosdkSafeLoad';
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
@@ -67,12 +68,7 @@ export default function LiveStreamPlayer(props) {
     if (isExpoGoOrStoreClient()) {
       return null;
     }
-    try {
-      return require('./LiveStreamPlayerImpl').default;
-    } catch (e) {
-      console.warn('LiveStreamPlayer: failed to load VideoSDK implementation', e);
-      return null;
-    }
+    return safeRequireLiveStreamPlayerImpl();
   }, []);
 
   if (!Inner) {
