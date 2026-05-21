@@ -14,7 +14,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
 import * as Device from 'expo-device';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
-import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
+import {
+  ensureCallMediaPermissions,
+  getCallMediaPermissionSnapshot,
+} from '../lib/videosdkMediaPermissions';
 import { endLiveStream } from '../lib/livestream';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
@@ -768,22 +771,72 @@ function BroadcasterMeetingInner({
   useEffect(() => {
     const cameraReady = Boolean(localWebcamOn && localWebcamStream);
     cameraReadyRef.current = cameraReady;
-    if (liveMode !== 'screen') {
-      logEvent('WEBCAM_STATE', {
-        on: Boolean(localWebcamOn),
-        hasStream: Boolean(localWebcamStream),
+    if (liveMode === 'screen') return;
+
+    const hasStream = Boolean(localWebcamStream);
+    let streamURL = null;
+    try {
+      streamURL =
+        hasStream && typeof localWebcamStream.toURL === 'function'
+          ? localWebcamStream.toURL()
+          : null;
+    } catch (_) {}
+
+    const payload = {
+      on: Boolean(localWebcamOn),
+      hasStream,
+      streamURL: streamURL ? 'present' : null,
+      micOn: Boolean(localMicOn),
+      joinRequested: Boolean(joinRequestedRef.current),
+      meetingJoined: Boolean(meetingJoinedRef.current),
+      phase,
+      lastSdkState,
+    };
+
+    logEvent('WEBCAM_STATE', payload);
+    videosdkTrace('S3_JOIN', 'LOCAL_MEDIA_STATE', payload);
+    if (hasStream) {
+      videosdkTrace('S3_JOIN', 'LOCAL_CAMERA_STREAM', {
+        hasToURL: typeof localWebcamStream?.toURL === 'function',
       });
     }
-  }, [localWebcamOn, localWebcamStream, liveMode, logEvent]);
+  }, [
+    localWebcamOn,
+    localWebcamStream,
+    localMicOn,
+    liveMode,
+    phase,
+    lastSdkState,
+    logEvent,
+  ]);
 
   // Join once after permissions — same pattern as VideoSDKCall (no leave() in this cleanup).
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const ok = await ensureCallMediaPermissions(liveMode === 'screen' ? 'audio' : 'video');
+      const permCallType = liveMode === 'screen' ? 'audio' : 'video';
+      const beforePerm = await getCallMediaPermissionSnapshot(permCallType);
       if (cancelled) return;
+      videosdkTrace('S3_JOIN', 'PERMISSION_SNAPSHOT_BEFORE', {
+        roomId: roomDebug || null,
+        liveMode,
+        ...beforePerm,
+      });
+      logEvent('PERMISSION_SNAPSHOT_BEFORE', beforePerm);
+
+      const ok = await ensureCallMediaPermissions(permCallType);
+      if (cancelled) return;
+
+      const afterPerm = await getCallMediaPermissionSnapshot(permCallType);
+      videosdkTrace('S3_JOIN', 'PERMISSION_SNAPSHOT_AFTER_ENSURE', {
+        roomId: roomDebug || null,
+        ensureOk: ok,
+        ...afterPerm,
+      });
+      logEvent('PERMISSION_ENSURE_RESULT', { ok, ...afterPerm });
+
       if (!ok) {
-        logEvent('PERMISSION_DENIED', { liveMode });
+        logEvent('PERMISSION_DENIED', { liveMode, ...afterPerm });
         Alert.alert(
           'Permissions required',
           liveMode === 'screen'
@@ -815,6 +868,17 @@ function BroadcasterMeetingInner({
         setJoinPending(true);
         videosdkTrace('S3_JOIN', 'START', { liveMode, roomId: roomDebug || null, streamId });
         logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
+        videosdkTrace('S3_JOIN', 'LOCAL_MEDIA_BEFORE_JOIN', {
+          localWebcamOn: Boolean(localWebcamOn),
+          localMicOn: Boolean(localMicOn),
+          hasWebcamStream: Boolean(localWebcamStream),
+          webcamEnabledAtProvider: liveMode === 'camera',
+        });
+        logEvent('LOCAL_MEDIA_BEFORE_JOIN', {
+          localWebcamOn: Boolean(localWebcamOn),
+          localMicOn: Boolean(localMicOn),
+          hasWebcamStream: Boolean(localWebcamStream),
+        });
         await Promise.resolve(joinFn());
         videosdkTrace('S3_JOIN', 'REQUESTED', { roomId: roomDebug || null });
         logEvent('ACTION_JOIN_REQUESTED', { roomId: roomDebug || null });
@@ -1113,7 +1177,7 @@ export default function LiveStreamBroadcasterImpl({
       liveMode,
       hasToken: Boolean(token),
       streamId,
-      buildNote: '1.0.78 unique host participantId per stream; no notification config',
+      buildNote: '1.0.79 permission + local media diagnostic traces',
     });
   }, [effectiveRoomId, token, streamId, liveMode, hostMicOn, hostWebcamOn]);
 
