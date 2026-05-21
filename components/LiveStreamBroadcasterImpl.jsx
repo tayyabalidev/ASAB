@@ -133,9 +133,6 @@ function BroadcasterMeetingInner({
   const liveModeRef = useRef(liveMode);
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
-  const enableMicRef = useRef(null);
-  const enableWebcamRef = useRef(null);
-  const micEnableAttemptsRef = useRef(0);
   const [meetingJoined, setMeetingJoined] = useState(false);
   const [joinPending, setJoinPending] = useState(false);
 
@@ -221,80 +218,12 @@ function BroadcasterMeetingInner({
     [streamId, stopMeeting, onStreamEnd, hlsStartedRef]
   );
 
-  const tryEnableMic = useCallback(
-    (source) => {
-      if (endedRef.current) return;
-      const fn = enableMicRef.current;
-      if (typeof fn !== 'function') {
-        videosdkTrace('S3_JOIN', 'ENABLE_MIC_SKIPPED_NO_FN', { source, roomId: roomDebug || null });
-        return;
-      }
-      micEnableAttemptsRef.current += 1;
-      try {
-        fn();
-        logEvent('ACTION_ENABLE_MIC_AFTER_JOIN', {
-          source,
-          attempt: micEnableAttemptsRef.current,
-        });
-        videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN', {
-          source,
-          attempt: micEnableAttemptsRef.current,
-          roomId: roomDebug || null,
-        });
-      } catch (e) {
-        logEvent('ENABLE_MIC_AFTER_JOIN_ERROR', { source, attempt: micEnableAttemptsRef.current, e });
-        videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN_ERROR', {
-          source,
-          message: e?.message || String(e),
-          roomId: roomDebug || null,
-        });
-      }
-    },
-    [logEvent, roomDebug]
-  );
-
-  const tryEnableWebcam = useCallback(
-    (source) => {
-      if (endedRef.current || liveModeRef.current === 'screen') return;
-      const fn = enableWebcamRef.current;
-      if (typeof fn !== 'function') {
-        videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_SKIPPED_NO_FN', { source, roomId: roomDebug || null });
-        return;
-      }
-      try {
-        logEvent('ACTION_ENABLE_WEBCAM_AFTER_JOIN', { source });
-        videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { source, roomId: roomDebug || null });
-        fn();
-      } catch (e) {
-        logEvent('ENABLE_WEBCAM_AFTER_JOIN_ERROR', e);
-        webcamEnableAttemptedRef.current = false;
-        videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN_ERROR', {
-          source,
-          message: e?.message || String(e),
-          roomId: roomDebug || null,
-        });
-      }
-    },
-    [logEvent, roomDebug]
-  );
-
-  // Defer media enable to next tick so useMeeting() has bound enableMic/enableWebcam (same as VideoSDKCall).
+  // TEST 1.0.77: media enabled on MeetingProvider; no post-join enableMic/enableWebcam.
   const publishMediaAfterJoin = useCallback(
     (source) => {
-      if (endedRef.current) return;
-      setTimeout(() => tryEnableMic(source), 50);
-      if (liveModeRef.current === 'screen') return;
-      if (webcamEnableAttemptedRef.current) return;
-      webcamEnableAttemptedRef.current = true;
-      if (enableWebcamTimerRef.current) {
-        clearTimeout(enableWebcamTimerRef.current);
-      }
-      enableWebcamTimerRef.current = setTimeout(() => {
-        enableWebcamTimerRef.current = null;
-        tryEnableWebcam(source);
-      }, 650);
+      logEvent('PUBLISH_MEDIA_DEFERRED_DISABLED', { source, build: '1.0.77' });
     },
-    [tryEnableMic, tryEnableWebcam]
+    [logEvent]
   );
 
   const {
@@ -635,16 +564,14 @@ function BroadcasterMeetingInner({
       const deviceUnsupported = String(sdkMessage).toLowerCase().includes('device not supported');
       setErrorMessage(
         deviceUnsupported
-          ? 'This iPhone could not start the camera for live streaming'
+          ? 'This device could not start camera/mic for live streaming (VideoSDK 1103)'
           : sdkMessage
       );
       setErrorDetail(
         deviceUnsupported
-          ? 'VideoSDK rejected the camera during join. Try another device, update iOS, or use a build with camera enabled after join (1.0.72+). ' +
-            JSON.stringify(err || {})
+          ? `VideoSDK device not supported (1103). ${JSON.stringify(err || {})}`
           : JSON.stringify(err || {})
       );
-      setErrorDetail(JSON.stringify(err || {}));
       setPhase('error');
     },
   });
@@ -657,8 +584,6 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableWebcam = enableWebcam;
   actionsRef.current.startScreenShare = startScreenShare;
   actionsRef.current.enableScreenShare = enableScreenShare;
-  enableMicRef.current = enableMic;
-  enableWebcamRef.current = enableWebcam;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
   localParticipantRef.current = localParticipant || null;
@@ -685,56 +610,6 @@ function BroadcasterMeetingInner({
     : joinPending
       ? '…'
       : '0';
-
-  // RN 0.10.x: local participant may appear before onMeetingJoined / onConnectionOpen.
-  useEffect(() => {
-    if (endedRef.current || liveMode === 'screen') return undefined;
-    if (meetingJoinedRef.current || !joinRequestedRef.current) return undefined;
-    if (!localParticipant?.id || !isBroadcasterMode) return undefined;
-
-    const t = setTimeout(() => {
-      if (endedRef.current || meetingJoinedRef.current) return;
-      if (lastSdkState === 'DISCONNECTED' || lastSdkState === 'CLOSED') return;
-      logEvent('JOIN_FALLBACK_LOCAL_PARTICIPANT', {
-        mode: localParticipant?.mode || null,
-        sdk: lastSdkState,
-      });
-      connectedOnceRef.current = true;
-      meetingJoinedRef.current = true;
-      setMeetingJoined(true);
-      webcamEnableAttemptedRef.current = false;
-      publishMediaAfterJoin('joinFallbackLocalParticipant');
-    }, 2800);
-
-    return () => clearTimeout(t);
-  }, [
-    localParticipant?.id,
-    localParticipant?.mode,
-    isBroadcasterMode,
-    liveMode,
-    lastSdkState,
-    logEvent,
-    publishMediaAfterJoin,
-  ]);
-
-  // Retry mic/webcam if join succeeded but tracks never published (dashboard stays at 0 participants).
-  useEffect(() => {
-    if (endedRef.current || !hostCanPublish) return undefined;
-    if (localMicOn && (liveMode === 'screen' || localWebcamOn)) return undefined;
-    const t = setTimeout(() => {
-      if (endedRef.current || !hostCanPublish) return;
-      if (!localMicOn && micEnableAttemptsRef.current < 4) {
-        logEvent('ENABLE_MIC_RETRY', { attempt: micEnableAttemptsRef.current + 1 });
-        tryEnableMic('micRetry');
-      }
-      if (liveMode !== 'screen' && !localWebcamOn && micEnableAttemptsRef.current > 0) {
-        logEvent('ENABLE_WEBCAM_RETRY');
-        webcamEnableAttemptedRef.current = false;
-        tryEnableWebcam('webcamRetry');
-      }
-    }, 2800);
-    return () => clearTimeout(t);
-  }, [hostCanPublish, liveMode, localMicOn, localWebcamOn, logEvent, tryEnableMic, tryEnableWebcam]);
 
   useEffect(() => {
     if (!localParticipant?.id) return;
@@ -1214,6 +1089,23 @@ export default function LiveStreamBroadcasterImpl({
     };
   }, [effectiveRoomId, initialToken, streamId, roomId, token]);
 
+  const hostMicOn = true;
+  const hostWebcamOn = liveMode === 'camera';
+
+  useEffect(() => {
+    if (!token || !effectiveRoomId) return;
+    videosdkTrace('S2_SDK', 'MEETING_PROVIDER_MOUNT', {
+      meetingId: effectiveRoomId,
+      mode: 'SEND_AND_RECV',
+      micEnabled: hostMicOn,
+      webcamEnabled: hostWebcamOn,
+      liveMode,
+      hasToken: Boolean(token),
+      streamId,
+      buildNote: '1.0.77 TEST join media on at provider — no deferred enableMic/webcam',
+    });
+  }, [effectiveRoomId, token, streamId, liveMode, hostMicOn, hostWebcamOn]);
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -1269,13 +1161,11 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
-  // Join with NO media at join — VideoSDK "Loading device capabilities" fails on iPhone X when
-  // micEnabled/webcamEnabled are true (see dashboard trace: device not supported).
   const meetingConfig = {
     meetingId: effectiveRoomId,
     mode: 'SEND_AND_RECV',
-    micEnabled: false,
-    webcamEnabled: false,
+    micEnabled: hostMicOn,
+    webcamEnabled: hostWebcamOn,
     name: hostDisplayName || hostUserId || 'Host',
     debugMode: __DEV__,
     notification: {
@@ -1284,16 +1174,6 @@ export default function LiveStreamBroadcasterImpl({
     },
     ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
   };
-
-  videosdkTrace('S2_SDK', 'MEETING_PROVIDER_MOUNT', {
-    meetingId: effectiveRoomId,
-    mode: meetingConfig.mode,
-    micEnabled: meetingConfig.micEnabled,
-    webcamEnabled: meetingConfig.webcamEnabled,
-    hasToken: Boolean(authToken),
-    streamId,
-    buildNote: '1.0.74 deferred enableMic/webcam + mic retry + audio-only HLS fallback',
-  });
 
   return (
     <MeetingProvider key={effectiveRoomId} config={meetingConfig} token={authToken}>

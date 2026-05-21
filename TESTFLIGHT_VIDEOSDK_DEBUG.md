@@ -15,6 +15,12 @@ Restart Metro after pulling: `npx expo start -c`
 
 If you only tested in Expo before, you were not using the same UI as TestFlight.
 
+## Build 1.0.77 (1103 join test)
+
+Go Live host uses **`micEnabled:true`** and **`webcamEnabled:true`** (camera mode) at `MeetingProvider` — no deferred `enableMic` after join.
+
+In LOG, confirm `MEETING_PROVIDER_MOUNT` shows `micEnabled:true`, `webcamEnabled:true`, and `buildNote` with **1.0.77**.
+
 ## Where to find logs on TestFlight (build 1.0.76+)
 
 1. **Orange `LOG` button — top-right** (shows version under the label). The rest of the app stays fully tappable.
