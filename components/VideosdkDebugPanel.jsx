@@ -1,6 +1,6 @@
 /**
  * Floating VideoSDK log viewer for TestFlight / devices without Xcode.
- * Uses a transparent Modal so the FAB stays above native Stack screens on iOS.
+ * Collapsed: small FAB only (does not block the app). Expanded: Modal sheet for logs.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -8,6 +8,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   ScrollView,
   StyleSheet,
   Share,
@@ -17,7 +18,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
-import { isExpoGoOrStoreClient } from '../lib/videosdkNativeGate';
 import {
   clearVideosdkTraceLogs,
   getVideosdkTraceLogText,
@@ -106,11 +106,11 @@ export default function VideosdkDebugPanel() {
   };
 
   const fabTop = Math.max(insets.top, 12) + 8;
-  const useModalOverlay = !isExpoGoOrStoreClient();
 
-  const overlayBody = (
-    <>
-      {!expanded ? (
+  // Collapsed: no Modal — parent _layout overlay uses pointerEvents="box-none" so only the FAB receives taps.
+  if (!expanded) {
+    return (
+      <View style={styles.fabHost} pointerEvents="box-none">
         <TouchableOpacity
           style={[styles.fab, { top: fabTop }]}
           onPress={() => setExpanded(true)}
@@ -125,11 +125,23 @@ export default function VideosdkDebugPanel() {
             </View>
           ) : null}
         </TouchableOpacity>
-      ) : (
-        <View
-          style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 8) }]}
-          pointerEvents="auto"
-        >
+      </View>
+    );
+  }
+
+  // Expanded: Modal only while viewing logs. Tap dimmed area or Hide to close.
+  return (
+    <Modal
+      visible
+      transparent
+      animationType="slide"
+      statusBarTranslucent
+      presentationStyle="overFullScreen"
+      onRequestClose={handleHide}
+    >
+      <View style={styles.modalRoot}>
+        <Pressable style={styles.backdrop} onPress={handleHide} accessibilityLabel="Close logs" />
+        <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <View style={styles.toolbar}>
             <Text style={styles.title}>
               VideoSDK logs ({lines.length}) · v{buildLabel}
@@ -147,7 +159,7 @@ export default function VideosdkDebugPanel() {
             </View>
           </View>
           <Text style={styles.hint}>
-            Top-right LOG on every screen. Share to Notes — look for S3_JOIN, MEETING_JOINED.
+            Tap outside the panel or Hide to use the app again. Share logs to Notes after Go Live.
           </Text>
           <ScrollView
             ref={scrollRef}
@@ -166,31 +178,8 @@ export default function VideosdkDebugPanel() {
             )}
           </ScrollView>
         </View>
-      )}
-    </>
-  );
-
-  if (useModalOverlay) {
-    return (
-      <Modal
-        visible
-        transparent
-        animationType="none"
-        statusBarTranslucent
-        presentationStyle="overFullScreen"
-        supportedOrientations={['portrait', 'landscape']}
-      >
-        <View style={styles.modalRoot} pointerEvents="box-none">
-          {overlayBody}
-        </View>
-      </Modal>
-    );
-  }
-
-  return (
-    <View style={styles.expoGoOverlay} pointerEvents="box-none">
-      {overlayBody}
-    </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -210,20 +199,20 @@ const openerStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  expoGoOverlay: {
+  fabHost: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 999999,
-    elevation: 999999,
   },
   modalRoot: {
     flex: 1,
-    backgroundColor: 'transparent',
+    justifyContent: 'flex-end',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
   },
   fab: {
     position: 'absolute',
     right: 12,
-    zIndex: 99999,
-    elevation: 99999,
     backgroundColor: 'rgba(234, 88, 12, 0.94)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.35)',
@@ -264,14 +253,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   panel: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    maxHeight: '48%',
-    backgroundColor: 'rgba(8, 10, 18, 0.97)',
+    maxHeight: '52%',
+    backgroundColor: 'rgba(8, 10, 18, 0.98)',
     borderTopWidth: 1,
     borderTopColor: 'rgba(234, 88, 12, 0.5)',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
   },
   toolbar: {
     flexDirection: 'row',
@@ -310,7 +297,6 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   scroll: {
-    flex: 1,
     maxHeight: 320,
   },
   scrollContent: {

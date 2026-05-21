@@ -15,15 +15,18 @@ Restart Metro after pulling: `npx expo start -c`
 
 If you only tested in Expo before, you were not using the same UI as TestFlight.
 
-## Where to find logs on TestFlight (build 1.0.75+)
+## Where to find logs on TestFlight (build 1.0.76+)
 
-1. **Orange `LOG` button — top-right** on every screen (shows `v1.0.75` under the label).
-2. On **Go Live / broadcast**, also tap **Open VideoSDK logs** (top-left) — opens the same panel.
-3. Tap **LOG** → **Share** → paste into Notes or Messages.
+1. **Orange `LOG` button — top-right** (shows version under the label). The rest of the app stays fully tappable.
+2. Tap **LOG** only when you need logs — then **Hide** or tap the dimmed area above the sheet to close.
+3. On **Go Live / broadcast**, **Open VideoSDK logs** (top-left) opens the same sheet.
+4. **Share** → paste into Notes or Messages.
 
-If you do **not** see orange **LOG v1.0.75** top-right, your TestFlight build is **older** than this code. Submit a new build with EAS.
+**Build 1.0.75 and older:** LOG used a full-screen invisible layer that blocked the whole app. Upgrade to **1.0.76+**.
 
-## Install build 1.0.75+
+If you do **not** see orange **LOG v1.0.76** top-right, submit a new EAS build.
+
+## Install build 1.0.76+
 
 **Do not use Expo Go** for live/call testing — VideoSDK native code does not run there.
 
