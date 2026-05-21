@@ -137,6 +137,7 @@ function BroadcasterMeetingInner({
   const liveModeRef = useRef(liveMode);
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
+  const enableWebcamFnRef = useRef(null);
   const [meetingJoined, setMeetingJoined] = useState(false);
   const [joinPending, setJoinPending] = useState(false);
 
@@ -230,14 +231,6 @@ function BroadcasterMeetingInner({
     [streamId, stopMeeting, onStreamEnd, hlsStartedRef]
   );
 
-  // TEST 1.0.77: media enabled on MeetingProvider; no post-join enableMic/enableWebcam.
-  const publishMediaAfterJoin = useCallback(
-    (source) => {
-      logEvent('PUBLISH_MEDIA_DEFERRED_DISABLED', { source, build: '1.0.77' });
-    },
-    [logEvent]
-  );
-
   const {
     join,
     leave,
@@ -269,7 +262,30 @@ function BroadcasterMeetingInner({
         localParticipantId: localParticipantRef.current?.id || null,
         localParticipantMode: localParticipantRef.current?.mode || null,
       });
-      publishMediaAfterJoin('onMeetingJoined');
+      if (liveModeRef.current === 'camera' && !webcamEnableAttemptedRef.current) {
+        webcamEnableAttemptedRef.current = true;
+        const fn = enableWebcamFnRef.current;
+        videosdkTrace('S3_JOIN', 'EXPERIMENT_ENABLE_WEBCAM_AFTER_JOIN', {
+          roomId: roomDebug || null,
+        });
+        logEvent('EXPERIMENT_ENABLE_WEBCAM_AFTER_JOIN', {});
+        if (typeof fn === 'function') {
+          Promise.resolve(fn())
+            .then(() => {
+              videosdkTrace('S3_JOIN', 'EXPERIMENT_ENABLE_WEBCAM_OK', { roomId: roomDebug || null });
+              logEvent('EXPERIMENT_ENABLE_WEBCAM_OK', {});
+            })
+            .catch((e) => {
+              videosdkTrace('S3_JOIN', 'EXPERIMENT_ENABLE_WEBCAM_FAIL', {
+                roomId: roomDebug || null,
+                message: e?.message || String(e),
+              });
+              logEvent('EXPERIMENT_ENABLE_WEBCAM_FAIL', e);
+            });
+        } else {
+          logEvent('EXPERIMENT_ENABLE_WEBCAM_SKIP', { reason: 'no_fn' });
+        }
+      }
       // SPOTLIGHT + priority:'PIN' HLS layout only renders pinned participants.
       // Without this pin, HLS has nothing to composite and the pipeline rejects/empties.
       try {
@@ -308,7 +324,6 @@ function BroadcasterMeetingInner({
       logEvent('CONNECTION_OPEN', {
         localParticipantId: localParticipantRef.current?.id || null,
       });
-      publishMediaAfterJoin('onConnectionOpen');
       try {
         const lp = localParticipantRef.current;
         if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
@@ -391,7 +406,6 @@ function BroadcasterMeetingInner({
         meetingJoinedRef.current = true;
         setMeetingJoined(true);
         reconnectAttemptsRef.current = 0;
-        publishMediaAfterJoin('onMeetingStateConnected');
       }
 
       if (stateText === 'DISCONNECTED' && !endedRef.current) {
@@ -600,6 +614,7 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableScreenShare = enableScreenShare;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
+  enableWebcamFnRef.current = enableWebcam;
   localParticipantRef.current = localParticipant || null;
 
   const participantCount = countRoomParticipants(participants, localParticipant);
@@ -872,7 +887,7 @@ function BroadcasterMeetingInner({
           localWebcamOn: Boolean(localWebcamOn),
           localMicOn: Boolean(localMicOn),
           hasWebcamStream: Boolean(localWebcamStream),
-          webcamEnabledAtProvider: liveMode === 'camera',
+          webcamEnabledAtProvider: false,
         });
         logEvent('LOCAL_MEDIA_BEFORE_JOIN', {
           localWebcamOn: Boolean(localWebcamOn),
@@ -1165,7 +1180,8 @@ export default function LiveStreamBroadcasterImpl({
   }, [effectiveRoomId, initialToken, streamId, roomId, token]);
 
   const hostMicOn = true;
-  const hostWebcamOn = liveMode === 'camera';
+  // TEMP 1.0.80: mic-only at join; enableWebcam() in onMeetingJoined (1103 camera hypothesis).
+  const hostWebcamOn = false;
 
   useEffect(() => {
     if (!token || !effectiveRoomId) return;
