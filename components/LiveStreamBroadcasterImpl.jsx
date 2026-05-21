@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
+import * as Device from 'expo-device';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
 import { endLiveStream } from '../lib/livestream';
@@ -176,6 +177,14 @@ function BroadcasterMeetingInner({
       hostUserId: hostUserId || null,
       meetingParticipantId: meetingParticipantId || null,
       tokenParticipantId: tokenParticipantId || null,
+      deviceModel: Device.modelName || Device.modelId || null,
+      osVersion: Device.osVersion || null,
+    });
+    videosdkTrace('S3_JOIN', 'HOST_DEVICE', {
+      roomId: roomDebug || null,
+      modelName: Device.modelName || null,
+      modelId: Device.modelId || null,
+      osVersion: Device.osVersion || null,
     });
   }, [
     streamId,
@@ -277,6 +286,8 @@ function BroadcasterMeetingInner({
         streamId,
         hadEstablishedSession: Boolean(connectedOnceRef.current),
         localParticipantId: localParticipantRef.current?.id || null,
+        modelName: Device.modelName || null,
+        modelId: Device.modelId || null,
         detail: data || null,
       });
       logEvent('MEETING_LEFT', {
@@ -1102,7 +1113,7 @@ export default function LiveStreamBroadcasterImpl({
       liveMode,
       hasToken: Boolean(token),
       streamId,
-      buildNote: '1.0.77 TEST join media on at provider — no deferred enableMic/webcam',
+      buildNote: '1.0.78 unique host participantId per stream; no notification config',
     });
   }, [effectiveRoomId, token, streamId, liveMode, hostMicOn, hostWebcamOn]);
 
@@ -1168,10 +1179,6 @@ export default function LiveStreamBroadcasterImpl({
     webcamEnabled: hostWebcamOn,
     name: hostDisplayName || hostUserId || 'Host',
     debugMode: __DEV__,
-    notification: {
-      title: 'ASAB Live',
-      message: 'You are broadcasting',
-    },
     ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
   };
 
