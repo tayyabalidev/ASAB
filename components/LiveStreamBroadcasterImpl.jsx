@@ -126,8 +126,6 @@ function BroadcasterMeetingInner({
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef(null);
   const connectedOnceRef = useRef(false);
-  const webcamEnableAttemptedRef = useRef(false);
-  const enableWebcamTimerRef = useRef(null);
   const localParticipantRef = useRef(null);
   const pinAttemptedRef = useRef(false);
   const meetingJoinedRef = useRef(false);
@@ -137,6 +135,7 @@ function BroadcasterMeetingInner({
   const liveModeRef = useRef(liveMode);
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
+  const enableMicFnRef = useRef(null);
   const enableWebcamFnRef = useRef(null);
   const [meetingJoined, setMeetingJoined] = useState(false);
   const [joinPending, setJoinPending] = useState(false);
@@ -262,30 +261,34 @@ function BroadcasterMeetingInner({
         localParticipantId: localParticipantRef.current?.id || null,
         localParticipantMode: localParticipantRef.current?.mode || null,
       });
-      if (liveModeRef.current === 'camera' && !webcamEnableAttemptedRef.current) {
-        webcamEnableAttemptedRef.current = true;
-        const fn = enableWebcamFnRef.current;
-        videosdkTrace('S3_JOIN', 'EXPERIMENT_ENABLE_WEBCAM_AFTER_JOIN', {
-          roomId: roomDebug || null,
-        });
-        logEvent('EXPERIMENT_ENABLE_WEBCAM_AFTER_JOIN', {});
-        if (typeof fn === 'function') {
-          Promise.resolve(fn())
-            .then(() => {
-              videosdkTrace('S3_JOIN', 'EXPERIMENT_ENABLE_WEBCAM_OK', { roomId: roomDebug || null });
-              logEvent('EXPERIMENT_ENABLE_WEBCAM_OK', {});
-            })
-            .catch((e) => {
-              videosdkTrace('S3_JOIN', 'EXPERIMENT_ENABLE_WEBCAM_FAIL', {
+      setTimeout(() => {
+        try {
+          enableMicFnRef.current?.();
+          videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN', { roomId: roomDebug || null });
+          logEvent('ENABLE_MIC_AFTER_JOIN', { roomId: roomDebug || null });
+        } catch (e) {
+          videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN_ERROR', {
+            roomId: roomDebug || null,
+            message: e?.message || String(e),
+          });
+          logEvent('ENABLE_MIC_AFTER_JOIN_ERROR', e);
+        }
+        if (liveModeRef.current === 'camera') {
+          setTimeout(() => {
+            try {
+              enableWebcamFnRef.current?.();
+              videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
+              logEvent('ENABLE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
+            } catch (e) {
+              videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN_ERROR', {
                 roomId: roomDebug || null,
                 message: e?.message || String(e),
               });
-              logEvent('EXPERIMENT_ENABLE_WEBCAM_FAIL', e);
-            });
-        } else {
-          logEvent('EXPERIMENT_ENABLE_WEBCAM_SKIP', { reason: 'no_fn' });
+              logEvent('ENABLE_WEBCAM_AFTER_JOIN_ERROR', e);
+            }
+          }, 500);
         }
-      }
+      }, 400);
       // SPOTLIGHT + priority:'PIN' HLS layout only renders pinned participants.
       // Without this pin, HLS has nothing to composite and the pipeline rejects/empties.
       try {
@@ -443,12 +446,7 @@ function BroadcasterMeetingInner({
           }
           reconnectAttemptsRef.current = 0;
           hlsStartTriggeredRef.current = false;
-          webcamEnableAttemptedRef.current = false;
           pinAttemptedRef.current = false;
-          if (enableWebcamTimerRef.current) {
-            clearTimeout(enableWebcamTimerRef.current);
-            enableWebcamTimerRef.current = null;
-          }
           meetingJoinedRef.current = false;
           setMeetingJoined(false);
           setJoinPending(false);
@@ -502,12 +500,7 @@ function BroadcasterMeetingInner({
         }, 4000);
 
         hlsStartTriggeredRef.current = false;
-        webcamEnableAttemptedRef.current = false;
         pinAttemptedRef.current = false;
-        if (enableWebcamTimerRef.current) {
-          clearTimeout(enableWebcamTimerRef.current);
-          enableWebcamTimerRef.current = null;
-        }
 
         const nextAttempt = reconnectAttemptsRef.current + 1;
         if (nextAttempt <= 4) {
@@ -614,6 +607,7 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableScreenShare = enableScreenShare;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
+  enableMicFnRef.current = enableMic;
   enableWebcamFnRef.current = enableWebcam;
   localParticipantRef.current = localParticipant || null;
 
@@ -923,10 +917,6 @@ function BroadcasterMeetingInner({
         clearTimeout(disconnectFatalTimerRef.current);
         disconnectFatalTimerRef.current = null;
       }
-      if (enableWebcamTimerRef.current) {
-        clearTimeout(enableWebcamTimerRef.current);
-        enableWebcamTimerRef.current = null;
-      }
     };
   }, [liveMode, roomDebug, logEvent]);
 
@@ -1179,23 +1169,20 @@ export default function LiveStreamBroadcasterImpl({
     };
   }, [effectiveRoomId, initialToken, streamId, roomId, token]);
 
-  const hostMicOn = true;
-  // TEMP 1.0.80: mic-only at join; enableWebcam() in onMeetingJoined (1103 camera hypothesis).
-  const hostWebcamOn = false;
-
   useEffect(() => {
     if (!token || !effectiveRoomId) return;
     videosdkTrace('S2_SDK', 'MEETING_PROVIDER_MOUNT', {
       meetingId: effectiveRoomId,
       mode: 'SEND_AND_RECV',
-      micEnabled: hostMicOn,
-      webcamEnabled: hostWebcamOn,
+      micEnabled: false,
+      webcamEnabled: false,
+      multistream: true,
       liveMode,
       hasToken: Boolean(token),
       streamId,
-      buildNote: '1.0.79 permission + local media diagnostic traces',
+      buildNote: '1.0.80 deferred mic/webcam after MEETING_JOINED (VideoSDKCall pattern)',
     });
-  }, [effectiveRoomId, token, streamId, liveMode, hostMicOn, hostWebcamOn]);
+  }, [effectiveRoomId, token, streamId, liveMode]);
 
   if (loading) {
     return (
@@ -1255,8 +1242,9 @@ export default function LiveStreamBroadcasterImpl({
   const meetingConfig = {
     meetingId: effectiveRoomId,
     mode: 'SEND_AND_RECV',
-    micEnabled: hostMicOn,
-    webcamEnabled: hostWebcamOn,
+    micEnabled: false,
+    webcamEnabled: false,
+    multistream: true,
     name: hostDisplayName || hostUserId || 'Host',
     debugMode: __DEV__,
     ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),

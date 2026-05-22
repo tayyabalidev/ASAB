@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, KeyboardAvoidingView, Platform, Modal, InteractionManager } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, KeyboardAvoidingView, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
@@ -137,12 +137,9 @@ const GoLive = () => {
       };
 
       if (selectedLiveMode === 'camera') {
-        InteractionManager.runAfterInteractions(() => {
-          setTimeout(navigateToBroadcast, 600);
-        });
-      } else {
-        navigateToBroadcast();
+        await new Promise((resolve) => setTimeout(resolve, 600));
       }
+      navigateToBroadcast();
     } catch (error) {
       const message = error?.message || t('liveGo.startError');
       Alert.alert(t('common.error'), message);

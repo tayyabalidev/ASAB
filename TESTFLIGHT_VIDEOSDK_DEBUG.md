@@ -15,11 +15,11 @@ Restart Metro after pulling: `npx expo start -c`
 
 If you only tested in Expo before, you were not using the same UI as TestFlight.
 
-## Build 1.0.77 (1103 join test)
+## Build 1.0.80 (1103 join fix — deferred media)
 
-Go Live host uses **`micEnabled:true`** and **`webcamEnabled:true`** (camera mode) at `MeetingProvider` — no deferred `enableMic` after join.
+Go Live host matches **`VideoSDKCall`**: **`micEnabled:false`** and **`webcamEnabled:false`** at `MeetingProvider`, then `ENABLE_MIC_AFTER_JOIN` (400ms) and `ENABLE_WEBCAM_AFTER_JOIN` (900ms total) after `MEETING_JOINED`.
 
-In LOG, confirm `MEETING_PROVIDER_MOUNT` shows `micEnabled:true`, `webcamEnabled:true`, and `buildNote` with **1.0.77**.
+In LOG, confirm `MEETING_PROVIDER_MOUNT` shows `micEnabled:false`, `webcamEnabled:false`, `multistream:true`, and `buildNote` with **1.0.80**.
 
 ## Where to find logs on TestFlight (build 1.0.76+)
 
@@ -46,7 +46,7 @@ This build includes:
 
 If Traces show **Loading Device Capabilities** failed with `device not supported`, use build **1.0.73+** (mic/camera off at join, enabled after `MEETING_JOINED`).
 
-Verify in LOG panel: `MEETING_PROVIDER_MOUNT` with `"micEnabled":false,"webcamEnabled":false`.
+Verify in LOG panel: `MEETING_PROVIDER_MOUNT` with `"micEnabled":false,"webcamEnabled":false,"multistream":true`.
 
 ## What to look for in shared logs
 
@@ -58,7 +58,8 @@ Verify in LOG panel: `MEETING_PROVIDER_MOUNT` with `"micEnabled":false,"webcamEn
 | `[S2_SDK][MEETING_PROVIDER_MOUNT]` | SDK session started |
 | `[S3_JOIN][REQUESTED]` | `join()` called |
 | `[S3_JOIN][MEETING_JOINED]` | Host in room (required) |
-| `[S3_JOIN][ENABLE_MIC_AFTER_JOIN]` | Mic publish started |
+| `[S3_JOIN][ENABLE_MIC_AFTER_JOIN]` | Mic publish started (400ms after join) |
+| `[S3_JOIN][ENABLE_WEBCAM_AFTER_JOIN]` | Camera publish started (camera mode, ~900ms after join) |
 | `[S3_JOIN][DISCONNECTED]` | Dropped — read `reason` |
 | `[S3_JOIN][FAIL_DURING_JOIN]` | Never stayed in room |
 

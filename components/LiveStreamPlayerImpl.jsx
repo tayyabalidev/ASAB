@@ -316,7 +316,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
             micEnabled: false,
             webcamEnabled: false,
             name: user.username || user.$id || 'Viewer',
-            mode: 'VIEWER',
+            mode: 'RECV_ONLY',
             notification: {
               title: 'ASAB Live',
               message: 'Watching live',
