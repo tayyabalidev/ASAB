@@ -102,10 +102,7 @@
       "router": {},
       "videosdkDebugLogs": true,
       "videosdkTokenBaseUrl": "",
-      "videosdkRoomBaseUrl": "",
-      "eas": {
-        "projectId": "3b1dbfdb-1609-4290-a81b-9d2619f5ec50"
-      }
+      "videosdkRoomBaseUrl": ""
     }
   }
 }
