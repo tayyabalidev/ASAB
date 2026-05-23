@@ -2,7 +2,7 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.0.82",
+    "version": "1.0.83",
     "orientation": "portrait",
     "icon": "./assets/images/asab.png",
     "userInterfaceStyle": "dark",
@@ -67,6 +67,13 @@
       "expo-web-browser",
       "expo-camera",
       "@videosdk.live/expo-config-plugin",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Allow camera access",
+          "microphonePermission": "Allow microphone access"
+        }
+      ],
       [
         "expo-build-properties",
         {

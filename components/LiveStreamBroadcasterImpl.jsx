@@ -11,7 +11,12 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MeetingProvider, useMeeting, RTCView } from '@videosdk.live/react-native-sdk';
+import {
+  MeetingProvider,
+  useMeeting,
+  RTCView,
+  mediaDevices,
+} from '@videosdk.live/react-native-sdk';
 import * as Device from 'expo-device';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import {
@@ -34,6 +39,24 @@ const { width, height } = Dimensions.get('window');
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
+
+/** Mirror official ILS example: warm VideoSDK WebRTC before MeetingProvider mount. */
+async function prewarmMedia(liveMode) {
+  try {
+    videosdkTrace('S3_JOIN', 'PREWARM_START', { liveMode });
+    const stream = await mediaDevices.getUserMedia({
+      audio: true,
+      video: liveMode !== 'screen',
+    });
+    stream?.getTracks()?.forEach((track) => track.stop());
+    videosdkTrace('S3_JOIN', 'PREWARM_SUCCESS', { liveMode });
+  } catch (err) {
+    videosdkTrace('S3_JOIN', 'PREWARM_FAILED', {
+      liveMode,
+      error: String(err?.message || err),
+    });
+  }
+}
 
 function buildHealthUrl(baseUrl) {
   const raw = String(baseUrl || '').trim();
@@ -1233,6 +1256,8 @@ export default function LiveStreamBroadcasterImpl({
         setMediaPermissionsReady(false);
         return;
       }
+      await prewarmMedia(liveMode);
+      if (cancelled) return;
       setMediaPermissionsReady(true);
     })();
     return () => {
@@ -1247,13 +1272,16 @@ export default function LiveStreamBroadcasterImpl({
       mode: 'SEND_AND_RECV',
       micEnabled: false,
       webcamEnabled: false,
-      multiStream: false,
       liveMode,
       hasToken: Boolean(token),
       streamId,
-      buildNote: '1.0.82 permissions-before-provider + multiStream:false at join',
+      buildNote: '1.0.83 register+prewarm+webrtc-plugin; participantId omitted at provider',
     });
-  }, [effectiveRoomId, token, streamId, liveMode, mediaPermissionsReady]);
+    videosdkTrace('S2_SDK', 'PARTICIPANT_OVERRIDE_REMOVED', {
+      jwtParticipantId: tokenParticipantId || null,
+      roomId: effectiveRoomId,
+    });
+  }, [effectiveRoomId, token, streamId, liveMode, mediaPermissionsReady, tokenParticipantId]);
 
   if (loading) {
     return (
@@ -1324,10 +1352,8 @@ export default function LiveStreamBroadcasterImpl({
     mode: 'SEND_AND_RECV',
     micEnabled: false,
     webcamEnabled: false,
-    multiStream: false,
     name: hostDisplayName || hostUserId || 'Host',
     debugMode: __DEV__,
-    ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
   };
 
   return (

@@ -11,6 +11,22 @@ import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser,
 import { useBadgeNotifications } from '../hooks/useBadgeNotifications';
 import IncomingCallHandler from '../components/IncomingCallHandler';
 import VideosdkDebugPanel from '../components/VideosdkDebugPanel';
+import { canLoadVideoSdkNative } from '../lib/videosdkNativeGate';
+import { videosdkTrace } from '../lib/videosdkTrace';
+
+// VideoSDK native bootstrap (mirror official ILS example) — skip in Expo Go.
+if (canLoadVideoSdkNative()) {
+  try {
+    videosdkTrace('S2_SDK', 'VIDEOSDK_REGISTER_INIT', {});
+    const { register } = require('@videosdk.live/react-native-sdk');
+    register();
+    videosdkTrace('S2_SDK', 'VIDEOSDK_REGISTER_SUCCESS', {});
+  } catch (registerErr) {
+    videosdkTrace('S2_SDK', 'VIDEOSDK_REGISTER_FAILED', {
+      error: String(registerErr?.message || registerErr),
+    });
+  }
+}
 
 SplashScreen.preventAutoHideAsync();
 
