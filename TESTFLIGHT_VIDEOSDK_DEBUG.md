@@ -15,7 +15,7 @@ Restart Metro after pulling: `npx expo start -c`
 
 If you only tested in Expo before, you were not using the same UI as TestFlight.
 
-## Build 1.0.83 (1103 join fix — match official ILS native flow)
+## Build 1.0.84 (change webcam after join)
 
 1. **`VIDEOSDK_REGISTER_INIT`** / **`VIDEOSDK_REGISTER_SUCCESS`** — `register()` at app bootstrap ([`app/_layout.jsx`](app/_layout.jsx)).
 2. **`@config-plugins/react-native-webrtc`** in [`app.json`](app.json) (rebuild native app required).
@@ -65,6 +65,9 @@ Verify in LOG panel: `MEETING_PROVIDER_MOUNT` with `"micEnabled":false,"webcamEn
 | `[S3_JOIN][MEETING_JOINED]` | Host in room (required) |
 | `[S3_JOIN][ENABLE_MIC_AFTER_JOIN]` | Mic publish started (400ms after join) |
 | `[S3_JOIN][ENABLE_WEBCAM_AFTER_JOIN]` | Camera publish started (camera mode, ~900ms after join) |
+| `[S3_JOIN][CHANGE_WEBCAM_AFTER_JOIN]` | Official ILS pattern — switches camera after join |
+| `[S3_JOIN][CHANGE_WEBCAM_RETRY]` | Retries if `localWebcamStream` missing |
+| `[S3_JOIN][LOCAL_WEBCAM_STREAM_READY]` | Preview can show (RTCView) |
 | `[S3_JOIN][DISCONNECTED]` | Dropped — read `reason` |
 | `[S3_JOIN][FAIL_DURING_JOIN]` | Never stayed in room |
 
