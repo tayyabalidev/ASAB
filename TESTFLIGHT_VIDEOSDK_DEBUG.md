@@ -15,7 +15,19 @@ Restart Metro after pulling: `npx expo start -c`
 
 If you only tested in Expo before, you were not using the same UI as TestFlight.
 
-## Build 1.0.84 (change webcam after join)
+## Build 1.0.85 (camera preview via useParticipant)
+
+Fixes **“Camera stream loading…”** when join/HLS succeed but `localWebcamStream` from `useMeeting` stays empty (common on iOS).
+
+1. **Local preview** uses official ILS pattern: `useParticipant(localId)` + `MediaStream([webcamStream.track]).toURL()` (fallback: `useMeeting().localWebcamStream`).
+2. **`enableWebcam` only after join** — removed `changeWebcam` retries and `toggleWebcam` (they toggled webcam off).
+3. **`WEBCAM_ENABLE_ONLY`** trace instead of `CHANGE_WEBCAM_RETRY`.
+4. **`LOCAL_WEBCAM_STREAM_READY`** may show `hasParticipantTrack:true` even when `hasMeetingStream:false`.
+5. **`WEBCAM_STATE`** includes `hasParticipantTrack` / `participantWebcamOn`.
+
+In LOG, confirm `buildNote` **1.0.85** and look for **`LOCAL_WEBCAM_STREAM_READY`** then visible preview (not endless spinner).
+
+## Build 1.0.84 (join + HLS; preview stuck)
 
 1. **`VIDEOSDK_REGISTER_INIT`** / **`VIDEOSDK_REGISTER_SUCCESS`** — `register()` at app bootstrap ([`app/_layout.jsx`](app/_layout.jsx)).
 2. **`@config-plugins/react-native-webrtc`** in [`app.json`](app.json) (rebuild native app required).
@@ -24,7 +36,7 @@ If you only tested in Expo before, you were not using the same UI as TestFlight.
 5. Host: `micEnabled:false`, `webcamEnabled:false`; **`PARTICIPANT_OVERRIDE_REMOVED`** (JWT still has `participantId`; omitted from provider config experiment).
 6. No `multiStream` / `multistream` in config (SDK default).
 
-In LOG, confirm `buildNote` with **1.0.83** and sequence: register → prewarm → `TOKEN_OK` → `MEETING_PROVIDER_MOUNT` → `MEETING_JOINED`.
+In LOG, confirm sequence: register → prewarm → `TOKEN_OK` → `MEETING_JOINED` → `HLS_STARTED`. If `hasStream:false` while `on:true`, upgrade to **1.0.85**.
 
 ## Where to find logs on TestFlight (build 1.0.76+)
 

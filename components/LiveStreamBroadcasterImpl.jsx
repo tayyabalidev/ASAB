@@ -14,7 +14,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   MeetingProvider,
   useMeeting,
+  useParticipant,
   RTCView,
+  MediaStream,
   mediaDevices,
 } from '@videosdk.live/react-native-sdk';
 import * as Device from 'expo-device';
@@ -96,8 +98,11 @@ function isPublisherParticipantMode(mode) {
   return m === 'SEND_AND_RECV' || m === 'CONFERENCE' || m === 'SEND_RECV';
 }
 
-function LocalPreview({ liveMode }) {
+function LocalPreviewInner({ liveMode, participantId }) {
   const { localWebcamOn, localWebcamStream } = useMeeting();
+  const { webcamOn: participantWebcamOn, webcamStream: participantWebcamStream } =
+    useParticipant(participantId);
+  const webcamOn = participantWebcamOn ?? localWebcamOn;
 
   if (liveMode === 'screen') {
     return (
@@ -108,12 +113,28 @@ function LocalPreview({ liveMode }) {
     );
   }
 
-  if (!localWebcamOn || !localWebcamStream) {
+  let streamURL = null;
+  try {
+    if (localWebcamStream && typeof localWebcamStream.toURL === 'function') {
+      streamURL = localWebcamStream.toURL();
+    } else if (participantWebcamStream?.track) {
+      streamURL = new MediaStream([participantWebcamStream.track]).toURL();
+    } else if (
+      participantWebcamStream &&
+      typeof participantWebcamStream.toURL === 'function'
+    ) {
+      streamURL = participantWebcamStream.toURL();
+    }
+  } catch (_) {
+    streamURL = null;
+  }
+
+  if (!webcamOn || !streamURL) {
     return (
       <View style={styles.placeholder}>
         <ActivityIndicator color="#fff" />
         <Text style={styles.placeholderText}>
-          {localWebcamOn ? 'Camera stream loading…' : 'Camera starting…'}
+          {webcamOn ? 'Camera stream loading…' : 'Camera starting…'}
         </Text>
       </View>
     );
@@ -121,13 +142,25 @@ function LocalPreview({ liveMode }) {
 
   return (
     <RTCView
-      streamURL={localWebcamStream.toURL()}
+      streamURL={streamURL}
       style={styles.video}
       objectFit="cover"
       mirror
       zOrder={0}
     />
   );
+}
+
+function LocalPreview({ liveMode, localParticipantId }) {
+  if (!localParticipantId) {
+    return (
+      <View style={styles.placeholder}>
+        <ActivityIndicator color="#fff" />
+        <Text style={styles.placeholderText}>Camera starting…</Text>
+      </View>
+    );
+  }
+  return <LocalPreviewInner liveMode={liveMode} participantId={localParticipantId} />;
 }
 
 function BroadcasterMeetingInner({
@@ -169,7 +202,7 @@ function BroadcasterMeetingInner({
   const leaveFnRef = useRef(null);
   const enableMicFnRef = useRef(null);
   const enableWebcamFnRef = useRef(null);
-  const changeWebcamFnRef = useRef(null);
+  const toggleWebcamFnRef = useRef(null);
   const toggleMicFnRef = useRef(null);
   const mediaPublishAttemptedRef = useRef(false);
   const micReadyRef = useRef(false);
@@ -297,41 +330,16 @@ function BroadcasterMeetingInner({
       await Promise.resolve(enableWebcamFnRef.current?.());
       videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
       logEvent('ENABLE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
-      if (typeof changeWebcamFnRef.current === 'function') {
-        await Promise.resolve(changeWebcamFnRef.current());
-        videosdkTrace('S3_JOIN', 'CHANGE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
-        logEvent('CHANGE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
-      }
+      videosdkTrace('S3_JOIN', 'WEBCAM_ENABLE_ONLY', {
+        roomId: roomDebug || null,
+        note: 'enableWebcam only; no toggleWebcam (matches VideoSDKCall)',
+      });
     } catch (e) {
       videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN_ERROR', {
         roomId: roomDebug || null,
         message: e?.message || String(e),
       });
       logEvent('ENABLE_WEBCAM_AFTER_JOIN_ERROR', e);
-    }
-
-    for (let attempt = 1; attempt <= 5; attempt += 1) {
-      if (endedRef.current || cameraReadyRef.current) break;
-      await delay(1500);
-      if (cameraReadyRef.current) break;
-      try {
-        if (typeof changeWebcamFnRef.current === 'function') {
-          await Promise.resolve(changeWebcamFnRef.current());
-        } else {
-          await Promise.resolve(enableWebcamFnRef.current?.());
-        }
-        videosdkTrace('S3_JOIN', 'CHANGE_WEBCAM_RETRY', {
-          roomId: roomDebug || null,
-          attempt,
-        });
-        logEvent('CHANGE_WEBCAM_RETRY', { attempt });
-      } catch (e) {
-        videosdkTrace('S3_JOIN', 'CHANGE_WEBCAM_RETRY_ERROR', {
-          roomId: roomDebug || null,
-          attempt,
-          message: e?.message || String(e),
-        });
-      }
     }
   }, [logEvent, roomDebug]);
 
@@ -342,7 +350,7 @@ function BroadcasterMeetingInner({
     stopHls,
     enableMic,
     enableWebcam,
-    changeWebcam,
+    toggleWebcam,
     toggleMic,
     startScreenShare,
     enableScreenShare,
@@ -702,16 +710,26 @@ function BroadcasterMeetingInner({
   actionsRef.current.startHls = startHls;
   actionsRef.current.enableMic = enableMic;
   actionsRef.current.enableWebcam = enableWebcam;
-  actionsRef.current.changeWebcam = changeWebcam;
+  actionsRef.current.toggleWebcam = toggleWebcam;
   actionsRef.current.startScreenShare = startScreenShare;
   actionsRef.current.enableScreenShare = enableScreenShare;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
   enableMicFnRef.current = enableMic;
   enableWebcamFnRef.current = enableWebcam;
-  changeWebcamFnRef.current = changeWebcam;
+  toggleWebcamFnRef.current = toggleWebcam;
   toggleMicFnRef.current = toggleMic;
   localParticipantRef.current = localParticipant || null;
+
+  const localParticipantIdForMedia = localParticipant?.id || '';
+  const {
+    webcamOn: participantWebcamOn,
+    webcamStream: participantWebcamStream,
+  } = useParticipant(localParticipantIdForMedia || '__asab_pending__');
+
+  const participantHasWebcamTrack = Boolean(
+    participantWebcamOn && participantWebcamStream?.track
+  );
 
   const participantCount = countRoomParticipants(participants, localParticipant);
 
@@ -772,7 +790,8 @@ function BroadcasterMeetingInner({
     if (!hostCanPublish) return undefined;
     if (hlsStartTriggeredRef.current) return undefined;
 
-    const cameraVideoReady = Boolean(localWebcamOn && localWebcamStream);
+    const cameraVideoReady =
+      Boolean(localWebcamOn && localWebcamStream) || participantHasWebcamTrack;
     const cameraAudioOnlyReady =
       liveMode === 'camera' && Boolean(localMicOn) && !cameraVideoReady;
     const producerReady =
@@ -875,37 +894,47 @@ function BroadcasterMeetingInner({
     localWebcamStream,
     localMicOn,
     localParticipant,
+    participantHasWebcamTrack,
     sdkMeetingId,
     logEvent,
+    roomDebug,
+    streamId,
   ]);
 
   useEffect(() => {
-    const cameraReady = Boolean(localWebcamOn && localWebcamStream);
+    const cameraReady =
+      Boolean(localWebcamOn && localWebcamStream) || participantHasWebcamTrack;
     const wasReady = cameraReadyRef.current;
     cameraReadyRef.current = cameraReady;
     micReadyRef.current = Boolean(localMicOn);
     if (cameraReady && !wasReady) {
       videosdkTrace('S3_JOIN', 'LOCAL_WEBCAM_STREAM_READY', {
         roomId: roomDebug || null,
-        hasToURL: typeof localWebcamStream?.toURL === 'function',
+        hasMeetingStream: Boolean(localWebcamStream),
+        hasParticipantTrack: participantHasWebcamTrack,
+        participantId: localParticipantIdForMedia || null,
       });
       logEvent('LOCAL_WEBCAM_STREAM_READY', { roomId: roomDebug || null });
       setPhase((current) => (current === 'error' ? current : 'live'));
     }
     if (liveMode === 'screen') return;
 
-    const hasStream = Boolean(localWebcamStream);
+    const hasMeetingStream = Boolean(localWebcamStream);
+    const hasParticipantTrack = participantHasWebcamTrack;
     let streamURL = null;
     try {
       streamURL =
-        hasStream && typeof localWebcamStream.toURL === 'function'
+        hasMeetingStream && typeof localWebcamStream.toURL === 'function'
           ? localWebcamStream.toURL()
           : null;
     } catch (_) {}
 
     const payload = {
       on: Boolean(localWebcamOn),
-      hasStream,
+      hasStream: hasMeetingStream || hasParticipantTrack,
+      hasMeetingStream,
+      hasParticipantTrack,
+      participantWebcamOn: Boolean(participantWebcamOn),
       streamURL: streamURL ? 'present' : null,
       micOn: Boolean(localMicOn),
       joinRequested: Boolean(joinRequestedRef.current),
@@ -916,19 +945,24 @@ function BroadcasterMeetingInner({
 
     logEvent('WEBCAM_STATE', payload);
     videosdkTrace('S3_JOIN', 'LOCAL_MEDIA_STATE', payload);
-    if (hasStream) {
+    if (hasMeetingStream || hasParticipantTrack) {
       videosdkTrace('S3_JOIN', 'LOCAL_CAMERA_STREAM', {
-        hasToURL: typeof localWebcamStream?.toURL === 'function',
+        hasMeetingToURL: typeof localWebcamStream?.toURL === 'function',
+        hasParticipantTrack,
       });
     }
   }, [
     localWebcamOn,
     localWebcamStream,
     localMicOn,
+    participantHasWebcamTrack,
+    participantWebcamOn,
+    localParticipantIdForMedia,
     liveMode,
     phase,
     lastSdkState,
     logEvent,
+    roomDebug,
   ]);
 
   // Join once after permissions — same pattern as VideoSDKCall (no leave() in this cleanup).
@@ -1101,7 +1135,7 @@ function BroadcasterMeetingInner({
 
   return (
     <View style={styles.container}>
-      <LocalPreview liveMode={liveMode} />
+      <LocalPreview liveMode={liveMode} localParticipantId={localParticipant?.id} />
       {__DEV__ ? (
         <View style={styles.devPanel}>
           <Text style={styles.devPanelText}>phase: {phase}</Text>
@@ -1343,7 +1377,7 @@ export default function LiveStreamBroadcasterImpl({
       liveMode,
       hasToken: Boolean(token),
       streamId,
-      buildNote: '1.0.84 register+prewarm+webrtc-plugin; participantId omitted at provider',
+      buildNote: '1.0.85 useParticipant preview; enableWebcam only; no changeWebcam/toggle',
     });
     videosdkTrace('S2_SDK', 'PARTICIPANT_OVERRIDE_REMOVED', {
       jwtParticipantId: tokenParticipantId || null,
