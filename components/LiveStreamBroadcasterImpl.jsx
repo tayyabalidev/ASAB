@@ -23,6 +23,13 @@ import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import { videosdkTrace, videosdkTraceMirror } from '../lib/videosdkTrace';
 
+let InCallManager = null;
+try {
+  InCallManager = require('@videosdk.live/react-native-incallmanager').default;
+} catch (_) {
+  InCallManager = null;
+}
+
 const { width, height } = Dimensions.get('window');
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
@@ -303,6 +310,8 @@ function BroadcasterMeetingInner({
       }
     },
     onMeetingLeft: (data) => {
+      const leftCode = data?.code != null ? Number(data.code) : null;
+      const leftMessage = data?.message || data?.reason || null;
       videosdkTrace('S3_JOIN', 'MEETING_LEFT', {
         roomId: roomDebug || null,
         streamId,
@@ -310,13 +319,25 @@ function BroadcasterMeetingInner({
         localParticipantId: localParticipantRef.current?.id || null,
         modelName: Device.modelName || null,
         modelId: Device.modelId || null,
+        code: leftCode,
+        message: leftMessage,
         detail: data || null,
       });
       logEvent('MEETING_LEFT', {
         hadEstablishedSession: Boolean(connectedOnceRef.current),
         localParticipantId: localParticipantRef.current?.id || null,
+        code: leftCode,
+        message: leftMessage,
         data: data || null,
       });
+      if (!connectedOnceRef.current && (leftCode === 1103 || String(leftMessage || '').toLowerCase().includes('device not supported'))) {
+        setErrorMessage('Could not join the live room (VideoSDK 1103)');
+        setErrorDetail(
+          leftMessage ||
+            'Device capability check failed during join. Ensure mic/camera permissions and rebuild 1.0.82+.'
+        );
+        setPhase('error');
+      }
     },
     onConnectionOpen: () => {
       connectedOnceRef.current = true;
@@ -867,6 +888,16 @@ function BroadcasterMeetingInner({
         }
 
         videosdkTrace('S3_JOIN', 'JOIN_FN_READY', { roomId: roomDebug || null });
+        try {
+          if (InCallManager && typeof InCallManager.start === 'function') {
+            InCallManager.start({ media: liveMode === 'screen' ? 'audio' : 'video' });
+            videosdkTrace('S3_JOIN', 'INCALL_MANAGER_STARTED', { liveMode });
+          }
+        } catch (incallErr) {
+          videosdkTrace('S3_JOIN', 'INCALL_MANAGER_START_ERROR', {
+            message: incallErr?.message || String(incallErr),
+          });
+        }
         if (Platform.OS === 'ios') {
           await new Promise((r) => setTimeout(r, 450));
           if (cancelled) return;
@@ -1064,6 +1095,8 @@ export default function LiveStreamBroadcasterImpl({
 }) {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [mediaPermissionsReady, setMediaPermissionsReady] = useState(false);
+  const [mediaPermissionsError, setMediaPermissionsError] = useState(null);
   const [tokenError, setTokenError] = useState(null);
   const [tokenDebug, setTokenDebug] = useState('token: n/a');
   const [tokenParticipantId, setTokenParticipantId] = useState(null);
@@ -1169,20 +1202,58 @@ export default function LiveStreamBroadcasterImpl({
     };
   }, [effectiveRoomId, initialToken, streamId, roomId, token]);
 
+  // Grant mic/camera before MeetingProvider mounts — logs showed mic "undetermined" at provider init.
   useEffect(() => {
-    if (!token || !effectiveRoomId) return;
+    if (!token || loading || !effectiveRoomId) {
+      setMediaPermissionsReady(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setMediaPermissionsError(null);
+    setMediaPermissionsReady(false);
+    (async () => {
+      const permCallType = liveMode === 'screen' ? 'audio' : 'video';
+      const before = await getCallMediaPermissionSnapshot(permCallType);
+      if (cancelled) return;
+      videosdkTrace('S2_SDK', 'PERMISSIONS_BEFORE_PROVIDER', { liveMode, ...before });
+      const ok = await ensureCallMediaPermissions(permCallType);
+      if (cancelled) return;
+      const after = await getCallMediaPermissionSnapshot(permCallType);
+      videosdkTrace('S2_SDK', 'PERMISSIONS_BEFORE_PROVIDER_RESULT', {
+        ensureOk: ok,
+        liveMode,
+        ...after,
+      });
+      if (!ok) {
+        setMediaPermissionsError(
+          liveMode === 'screen'
+            ? 'Microphone permission is required for live streaming.'
+            : 'Camera and microphone permissions are required for live streaming.'
+        );
+        setMediaPermissionsReady(false);
+        return;
+      }
+      setMediaPermissionsReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, loading, effectiveRoomId, liveMode]);
+
+  useEffect(() => {
+    if (!token || !effectiveRoomId || !mediaPermissionsReady) return;
     videosdkTrace('S2_SDK', 'MEETING_PROVIDER_MOUNT', {
       meetingId: effectiveRoomId,
       mode: 'SEND_AND_RECV',
       micEnabled: false,
       webcamEnabled: false,
-      multistream: true,
+      multiStream: false,
       liveMode,
       hasToken: Boolean(token),
       streamId,
-      buildNote: '1.0.80 deferred mic/webcam after MEETING_JOINED (VideoSDKCall pattern)',
+      buildNote: '1.0.82 permissions-before-provider + multiStream:false at join',
     });
-  }, [effectiveRoomId, token, streamId, liveMode]);
+  }, [effectiveRoomId, token, streamId, liveMode, mediaPermissionsReady]);
 
   if (loading) {
     return (
@@ -1192,10 +1263,10 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
-  if (tokenError) {
+  if (tokenError || mediaPermissionsError) {
     return (
       <View style={styles.center}>
-        <Text style={styles.err}>{tokenError}</Text>
+        <Text style={styles.err}>{tokenError || mediaPermissionsError}</Text>
         <Text style={styles.sub}>
           Set EXPO_PUBLIC_VIDEOSDK_TOKEN_URL and EXPO_PUBLIC_VIDEOSDK_TOKEN_PATH correctly, then
           rebuild a native dev client.
@@ -1239,12 +1310,21 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
+  if (!mediaPermissionsReady) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator color="#a77df8" style={{ flex: 1 }} />
+        <Text style={styles.sub}>Preparing camera and microphone…</Text>
+      </View>
+    );
+  }
+
   const meetingConfig = {
     meetingId: effectiveRoomId,
     mode: 'SEND_AND_RECV',
     micEnabled: false,
     webcamEnabled: false,
-    multistream: true,
+    multiStream: false,
     name: hostDisplayName || hostUserId || 'Host',
     debugMode: __DEV__,
     ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),

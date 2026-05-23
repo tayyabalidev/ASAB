@@ -15,11 +15,13 @@ Restart Metro after pulling: `npx expo start -c`
 
 If you only tested in Expo before, you were not using the same UI as TestFlight.
 
-## Build 1.0.80 (1103 join fix — deferred media)
+## Build 1.0.82 (1103 join fix — permissions before provider)
 
-Go Live host matches **`VideoSDKCall`**: **`micEnabled:false`** and **`webcamEnabled:false`** at `MeetingProvider`, then `ENABLE_MIC_AFTER_JOIN` (400ms) and `ENABLE_WEBCAM_AFTER_JOIN` (900ms total) after `MEETING_JOINED`.
+1. **`PERMISSIONS_BEFORE_PROVIDER`** / **`PERMISSIONS_BEFORE_PROVIDER_RESULT`** — mic/camera granted **before** `MeetingProvider` mounts (v1.0.81 showed `micGranted:false` at first snapshot).
+2. Host matches **`VideoSDKCall`**: `micEnabled:false`, `webcamEnabled:false`, then `ENABLE_MIC_AFTER_JOIN` / `ENABLE_WEBCAM_AFTER_JOIN` after `MEETING_JOINED`.
+3. Config uses API key **`multiStream:false`** at join (not `multistream`).
 
-In LOG, confirm `MEETING_PROVIDER_MOUNT` shows `micEnabled:false`, `webcamEnabled:false`, `multistream:true`, and `buildNote` with **1.0.80**.
+In LOG, confirm `MEETING_PROVIDER_MOUNT` shows `micEnabled:false`, `webcamEnabled:false`, `multiStream:false`, and `buildNote` with **1.0.82**.
 
 ## Where to find logs on TestFlight (build 1.0.76+)
 
@@ -46,7 +48,7 @@ This build includes:
 
 If Traces show **Loading Device Capabilities** failed with `device not supported`, use build **1.0.73+** (mic/camera off at join, enabled after `MEETING_JOINED`).
 
-Verify in LOG panel: `MEETING_PROVIDER_MOUNT` with `"micEnabled":false,"webcamEnabled":false,"multistream":true`.
+Verify in LOG panel: `MEETING_PROVIDER_MOUNT` with `"micEnabled":false,"webcamEnabled":false,"multiStream":false`.
 
 ## What to look for in shared logs
 
