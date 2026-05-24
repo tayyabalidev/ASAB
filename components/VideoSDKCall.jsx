@@ -96,12 +96,17 @@ function RemoteParticipantCard({ participantId, name, avatarUri, accent }) {
 }
 
 function RemoteParticipantAudioSink({ participantId }) {
-  const { micOn, micStream } = useParticipant(participantId);
-  if (!micOn || !micStream?.track) return null;
+  const { micStream } = useParticipant(participantId);
+  const track = micStream?.track;
+  if (!track || track.enabled === false) return null;
 
   let streamURL = null;
   try {
-    streamURL = new MediaStream([micStream.track]).toURL();
+    if (typeof micStream.toURL === 'function') {
+      streamURL = micStream.toURL();
+    } else if (micStream.track) {
+      streamURL = new MediaStream([micStream.track]).toURL();
+    }
   } catch (_) {
     return null;
   }
@@ -112,7 +117,7 @@ function RemoteParticipantAudioSink({ participantId }) {
       streamURL={streamURL}
       style={styles.hiddenAudioSink}
       objectFit="cover"
-      zOrder={-1}
+      zOrder={0}
     />
   );
 }
@@ -206,25 +211,26 @@ const VideoSDKCallInner = ({
       }
       setTimeout(async () => {
         try {
-          const speechTrack = await createMicrophoneAudioTrack({
-            encoderConfig: 'speech_standard',
-            noiseConfig: {
-              noiseSuppression: true,
-              echoCancellation: true,
-              autoGainControl: true,
-            },
-          });
-          await Promise.resolve(unmuteMic?.(speechTrack));
-        } catch (_) {
+          await Promise.resolve(unmuteMic?.());
+          videosdkTrace('S3_JOIN', 'UNMUTE_MIC_AFTER_JOIN', { roomId });
           try {
-            await Promise.resolve(unmuteMic?.());
-          } catch (micErr) {
-            videosdkTrace('S3_JOIN', 'UNMUTE_MIC_ERROR', {
-              message: micErr?.message || String(micErr),
+            const speechTrack = await createMicrophoneAudioTrack({
+              encoderConfig: 'speech_standard',
+              noiseConfig: {
+                noiseSuppression: true,
+                echoCancellation: true,
+                autoGainControl: true,
+              },
             });
+            await Promise.resolve(unmuteMic?.(speechTrack));
+          } catch (_) {
+            /* default mic track is already live */
           }
+        } catch (micErr) {
+          videosdkTrace('S3_JOIN', 'UNMUTE_MIC_ERROR', {
+            message: micErr?.message || String(micErr),
+          });
         }
-        videosdkTrace('S3_JOIN', 'UNMUTE_MIC_AFTER_JOIN', { roomId });
         if (callType === 'video') {
           setTimeout(() => {
             try {
@@ -529,17 +535,22 @@ const VideoSDKCallInner = ({
         await Promise.resolve(muteMic?.());
       } else {
         try {
-          const speechTrack = await createMicrophoneAudioTrack({
-            encoderConfig: 'speech_standard',
-            noiseConfig: {
-              noiseSuppression: true,
-              echoCancellation: true,
-              autoGainControl: true,
-            },
-          });
-          await Promise.resolve(unmuteMic?.(speechTrack));
-        } catch (_) {
           await Promise.resolve(unmuteMic?.());
+          try {
+            const speechTrack = await createMicrophoneAudioTrack({
+              encoderConfig: 'speech_standard',
+              noiseConfig: {
+                noiseSuppression: true,
+                echoCancellation: true,
+                autoGainControl: true,
+              },
+            });
+            await Promise.resolve(unmuteMic?.(speechTrack));
+          } catch (_) {
+            /* default mic already active */
+          }
+        } catch (unmuteErr) {
+          console.error('Error unmuting mic:', unmuteErr);
         }
       }
     } catch (error) {
@@ -608,6 +619,9 @@ const VideoSDKCallInner = ({
     <View style={styles.container}>
       {callType === 'video' && (
         <>
+          {remoteParticipantId ? (
+            <RemoteParticipantAudioSink participantId={remoteParticipantId} />
+          ) : null}
           {remoteConnected ? (
             <View style={styles.remoteVideoContainer}>
               {remoteParticipants.map((participant) => (
@@ -1123,10 +1137,11 @@ const styles = StyleSheet.create({
   },
   hiddenAudioSink: {
     position: 'absolute',
-    width: 1,
-    height: 1,
-    opacity: 0,
-    left: -9999,
+    width: 2,
+    height: 2,
+    bottom: 0,
+    right: 0,
+    opacity: 0.01,
   },
   audioStatusRow: {
     flexDirection: 'row',

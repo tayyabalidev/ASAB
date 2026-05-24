@@ -28,6 +28,7 @@ import {
 } from '../lib/videosdkMediaPermissions';
 import { endLiveStream } from '../lib/livestream';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
+import { mapLiveQualityToHls } from '../lib/videosdkLiveQuality';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import LiveMeetingChat from './LiveMeetingChat';
 import LiveHostGuestControls from './LiveHostGuestControls';
@@ -177,14 +178,22 @@ function LocalPreviewInner({ liveMode, participantId, mirrorFrontCamera = true }
     );
   }
 
+  const previewMirror = mirrorFrontCamera;
+  const androidBackOrientationFix =
+    Platform.OS === 'android' && !mirrorFrontCamera
+      ? { transform: [{ rotate: '180deg' }] }
+      : null;
+
   return (
-    <RTCView
-      streamURL={streamURL}
-      style={styles.video}
-      objectFit="cover"
-      mirror={mirrorFrontCamera}
-      zOrder={0}
-    />
+    <View style={[styles.video, androidBackOrientationFix]}>
+      <RTCView
+        streamURL={streamURL}
+        style={StyleSheet.absoluteFill}
+        objectFit="cover"
+        mirror={previewMirror}
+        zOrder={0}
+      />
+    </View>
   );
 }
 
@@ -709,7 +718,7 @@ function BroadcasterMeetingInner({
             : { type: 'GRID', priority: 'SPEAKER', gridSize: 4 },
           theme: 'DARK',
           mode: 'video-and-audio',
-          quality: 'high',
+          quality: mapLiveQualityToHls(quality),
           orientation: 'portrait',
         });
       } catch (err) {
@@ -863,6 +872,7 @@ function BroadcasterMeetingInner({
         await new Promise((r) => setTimeout(r, 400));
       }
       await Promise.resolve(changeWebcamFnRef.current?.());
+      setMirrorFrontCamera((prev) => !prev);
     } catch (_) {
       /* ignore — stream may recover without blocking UI */
     } finally {

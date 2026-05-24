@@ -11,7 +11,13 @@ import {
   Platform,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { MeetingProvider, useMeeting, useParticipant } from '@videosdk.live/react-native-sdk';
+import {
+  MeetingProvider,
+  useMeeting,
+  useParticipant,
+  RTCView,
+  MediaStream,
+} from '@videosdk.live/react-native-sdk';
 import LiveMeetingChat from './LiveMeetingChat';
 import { LiveCoHostInviteListener, LiveCoHostGuestMedia } from './LiveCoHostGuest';
 import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
@@ -38,9 +44,77 @@ function pickHlsUrl(hlsUrls) {
   if (!hlsUrls) return null;
   const u =
     hlsUrls.downstreamUrl ||
-    hlsUrls.playbackHlsUrl ||
-    hlsUrls.livestreamUrl;
+    hlsUrls.livestreamUrl ||
+    hlsUrls.playbackHlsUrl;
   return typeof u === 'string' && u.length > 0 ? u : null;
+}
+
+function isPublisherMode(mode) {
+  const m = String(mode || '').trim().toUpperCase();
+  return !m || m === 'SEND_AND_RECV' || m === 'SEND_RECV' || m === 'CONFERENCE';
+}
+
+function pickPrimaryHostPublisherId(participants, localId) {
+  if (!(participants instanceof Map) || !localId) return null;
+  let hostId = null;
+  participants.forEach((p, id) => {
+    if (!id || id === localId || hostId) return;
+    if (isPublisherMode(p?.mode)) hostId = String(id);
+  });
+  return hostId;
+}
+
+function streamToUrl(mediaStream) {
+  if (!mediaStream) return null;
+  try {
+    if (typeof mediaStream.toURL === 'function') return mediaStream.toURL();
+    if (mediaStream.track) return new MediaStream([mediaStream.track]).toURL();
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+/** Low-latency WebRTC watch path (replaces delayed HLS when host media is available). */
+function HostWebRtcLiveLayer({ participantId, onActiveChange }) {
+  const { webcamOn, webcamStream, micOn, micStream, screenShareOn, screenShareStream } =
+    useParticipant(participantId);
+
+  const screenUrl =
+    screenShareOn && screenShareStream ? streamToUrl(screenShareStream) : null;
+  const videoUrl = !screenUrl && webcamOn && webcamStream ? streamToUrl(webcamStream) : null;
+  const primaryVideoUrl = screenUrl || videoUrl;
+  const audioUrl = micOn && micStream ? streamToUrl(micStream) : null;
+
+  const isActive = Boolean(primaryVideoUrl || audioUrl);
+
+  useEffect(() => {
+    onActiveChange?.(isActive);
+  }, [isActive, onActiveChange]);
+
+  if (!isActive) return null;
+
+  return (
+    <View style={styles.webrtcLiveLayer} pointerEvents="none">
+      {primaryVideoUrl ? (
+        <RTCView
+          streamURL={primaryVideoUrl}
+          style={styles.webrtcLiveVideo}
+          objectFit="cover"
+          mirror={false}
+          zOrder={Platform.OS === 'android' ? 1 : 0}
+        />
+      ) : null}
+      {audioUrl ? (
+        <RTCView
+          streamURL={audioUrl}
+          style={styles.webrtcLiveAudioSink}
+          objectFit="cover"
+          zOrder={0}
+        />
+      ) : null}
+    </View>
+  );
 }
 
 function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
@@ -100,7 +174,7 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
     player
       .replaceAsync({ uri: hlsUrl, contentType: 'hls' })
       .then(() => {
-        if (!cancelled) player.play();
+        if (!cancelled && !suppressPlayback) player.play();
       })
       .catch(() => {});
     return () => {
@@ -109,7 +183,18 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
         player.pause();
       } catch (_) {}
     };
-  }, [hlsUrl, player]);
+  }, [hlsUrl, player, suppressPlayback]);
+
+  useEffect(() => {
+    try {
+      player.muted = Boolean(suppressPlayback);
+      if (suppressPlayback) {
+        player.pause();
+      } else if (hlsUrl) {
+        player.play();
+      }
+    } catch (_) {}
+  }, [suppressPlayback, hlsUrl, player]);
 
   actionsRef.current.join = join;
   actionsRef.current.leave = leave;
@@ -177,7 +262,7 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
   return (
     <VideoView
       player={player}
-      style={styles.hlsVideo}
+      style={[styles.hlsVideo, suppressPlayback && styles.hlsSuppressed]}
       contentFit="cover"
       nativeControls={false}
     />
@@ -207,7 +292,12 @@ function RemoteWebRtcAudioMute({ participantId }) {
   return <RemoteWebRtcAudioMuteInner participantId={participantId} />;
 }
 
-function LiveViewerRealtimeLayers({ showChat, displayName, canRaiseHand }) {
+function LiveViewerRealtimeLayers({
+  showChat,
+  displayName,
+  canRaiseHand,
+  webrtcLiveActive = false,
+}) {
   const { participants, localParticipant } = useMeeting();
   const localId = localParticipant?.id;
   const localMode = String(localParticipant?.mode || '').toUpperCase();
@@ -262,18 +352,33 @@ function LiveViewerInMeeting({
   canRaiseHand = false,
 }) {
   const [meetingReady, setMeetingReady] = useState(false);
+  const [webrtcLiveActive, setWebrtcLiveActive] = useState(false);
+  const { participants, localParticipant } = useMeeting();
+  const localId = localParticipant?.id;
+  const hostPublisherId = useMemo(
+    () => pickPrimaryHostPublisherId(participants, localId),
+    [participants, localId]
+  );
 
   return (
     <View style={styles.viewerMeetingRoot}>
       <LiveHlsViewerInner
         onPlaybackEnded={onPlaybackEnded}
         onMeetingReady={() => setMeetingReady(true)}
+        suppressPlayback={webrtcLiveActive}
       />
+      {meetingReady && hostPublisherId ? (
+        <HostWebRtcLiveLayer
+          participantId={hostPublisherId}
+          onActiveChange={setWebrtcLiveActive}
+        />
+      ) : null}
       {meetingReady ? (
         <LiveViewerRealtimeLayers
           showChat={showChat}
           displayName={displayName}
           canRaiseHand={canRaiseHand}
+          webrtcLiveActive={webrtcLiveActive}
         />
       ) : null}
     </View>
@@ -570,6 +675,30 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     backgroundColor: '#000',
+  },
+  hlsSuppressed: {
+    opacity: 0,
+    position: 'absolute',
+    width: 1,
+    height: 1,
+  },
+  webrtcLiveLayer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
+    zIndex: 6,
+  },
+  webrtcLiveVideo: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  webrtcLiveAudioSink: {
+    position: 'absolute',
+    width: 2,
+    height: 2,
+    bottom: 0,
+    right: 0,
+    opacity: 0.01,
   },
   hlsWaiting: {
     flex: 1,
