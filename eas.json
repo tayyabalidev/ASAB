@@ -19,7 +19,7 @@
       "distribution": "internal",
       "environment": "preview",
       "env": {
-        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "1"
+        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "0"
       },
       "ios": {
         "simulator": false
@@ -33,7 +33,7 @@
       "distribution": "store",
       "environment": "production",
       "env": {
-        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "1"
+        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "0"
       },
       "ios": {
         "buildConfiguration": "Release"

@@ -20,7 +20,6 @@ import {
   MediaStream,
   mediaDevices,
 } from '@videosdk.live/react-native-sdk';
-import * as Device from 'expo-device';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import {
   ensureCallMediaPermissions,
@@ -29,7 +28,6 @@ import {
 import { endLiveStream } from '../lib/livestream';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
-import { videosdkTrace } from '../lib/videosdkTrace';
 
 /** Tunable delays — keep small; join/media publish flow is stability-sensitive. */
 const IOS_PRE_JOIN_DELAY_MS = 200;
@@ -53,26 +51,12 @@ const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'mis
 /** Mirror official ILS example: warm VideoSDK WebRTC before MeetingProvider mount. */
 async function prewarmMedia(liveMode) {
   try {
-    videosdkTrace('S3_JOIN', 'PREWARM_START', { liveMode });
     const stream = await mediaDevices.getUserMedia({
       audio: true,
       video: liveMode !== 'screen',
     });
     stream?.getTracks()?.forEach((track) => track.stop());
-    videosdkTrace('S3_JOIN', 'PREWARM_SUCCESS', { liveMode });
-  } catch (err) {
-    videosdkTrace('S3_JOIN', 'PREWARM_FAILED', {
-      liveMode,
-      error: String(err?.message || err),
-    });
-  }
-}
-
-function buildHealthUrl(baseUrl) {
-  const raw = String(baseUrl || '').trim();
-  if (!raw) return '';
-  const joiner = raw.includes('?') ? '&' : '?';
-  return `${raw}${joiner}health=1&debug=1`;
+  } catch (_) {}
 }
 
 /** VideoSDK may fire onMeetingJoined + localParticipant without a CONNECTED meeting-state event. */
@@ -193,7 +177,6 @@ function BroadcasterMeetingInner({
   const hlsStartTimerRef = useRef(null);
   const hlsStartAttemptRef = useRef(0);
   const cameraReadyRef = useRef(false);
-  const lastWebcamStateKeyRef = useRef('');
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef(null);
   const connectedOnceRef = useRef(false);
@@ -209,6 +192,8 @@ function BroadcasterMeetingInner({
   const enableMicFnRef = useRef(null);
   const enableWebcamFnRef = useRef(null);
   const changeWebcamFnRef = useRef(null);
+  const flipInProgressRef = useRef(false);
+  const lastFlipAtRef = useRef(0);
   const toggleMicFnRef = useRef(null);
   const mediaPublishAttemptedRef = useRef(false);
   const micReadyRef = useRef(false);
@@ -218,53 +203,6 @@ function BroadcasterMeetingInner({
   useEffect(() => {
     liveModeRef.current = liveMode;
   }, [liveMode]);
-
-  const stringifyValue = useCallback((value) => {
-    if (typeof value === 'string') return value;
-    try {
-      return JSON.stringify(value);
-    } catch (_) {
-      return String(value);
-    }
-  }, []);
-
-  const logEvent = useCallback(
-    (label, value) => {
-      if (__DEV__) {
-        console.log(`[LiveBroadcast] ${label}`, value == null ? '' : stringifyValue(value));
-      }
-    },
-    [stringifyValue]
-  );
-
-  useEffect(() => {
-    logEvent('INIT', {
-      streamId,
-      roomId: roomDebug || null,
-      liveMode,
-      quality,
-      hostUserId: hostUserId || null,
-      meetingParticipantId: meetingParticipantId || null,
-      tokenParticipantId: tokenParticipantId || null,
-      deviceModel: Device.modelName || Device.modelId || null,
-      osVersion: Device.osVersion || null,
-    });
-    videosdkTrace('S3_JOIN', 'HOST_DEVICE', {
-      roomId: roomDebug || null,
-      modelName: Device.modelName || null,
-      modelId: Device.modelId || null,
-      osVersion: Device.osVersion || null,
-    });
-  }, [
-    streamId,
-    roomDebug,
-    liveMode,
-    quality,
-    hostUserId,
-    meetingParticipantId,
-    tokenParticipantId,
-    logEvent,
-  ]);
 
   const stopMeeting = useCallback(() => {
     const act = actionsRef.current;
@@ -304,18 +242,11 @@ function BroadcasterMeetingInner({
     try {
       await delay(MEDIA_PUBLISH_MIC_MS);
       await Promise.resolve(enableMicFnRef.current?.());
-      videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN', { roomId: roomDebug || null });
       await delay(MEDIA_PUBLISH_MIC_TOGGLE_MS);
       if (!micReadyRef.current && typeof toggleMicFnRef.current === 'function') {
         await Promise.resolve(toggleMicFnRef.current());
-        videosdkTrace('S3_JOIN', 'TOGGLE_MIC_AFTER_JOIN', { roomId: roomDebug || null });
       }
     } catch (e) {
-      videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN_ERROR', {
-        roomId: roomDebug || null,
-        message: e?.message || String(e),
-      });
-      logEvent('ENABLE_MIC_AFTER_JOIN_ERROR', e);
     }
 
     if (liveModeRef.current !== 'camera') return;
@@ -323,15 +254,9 @@ function BroadcasterMeetingInner({
     try {
       await delay(MEDIA_PUBLISH_WEBCAM_MS);
       await Promise.resolve(enableWebcamFnRef.current?.());
-      videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
     } catch (e) {
-      videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN_ERROR', {
-        roomId: roomDebug || null,
-        message: e?.message || String(e),
-      });
-      logEvent('ENABLE_WEBCAM_AFTER_JOIN_ERROR', e);
     }
-  }, [logEvent, roomDebug]);
+  }, [roomDebug]);
 
   const {
     join,
@@ -356,16 +281,6 @@ function BroadcasterMeetingInner({
       connectedOnceRef.current = true;
       setMeetingJoined(true);
       setLastSdkState('MEETING_JOINED');
-      videosdkTrace('S3_JOIN', 'MEETING_JOINED', {
-        roomId: roomDebug || null,
-        streamId,
-      });
-      logEvent('MEETING_JOINED', {
-        sdkMeetingId: sdkMeetingId || null,
-        expected: roomDebug || null,
-        localParticipantId: localParticipantRef.current?.id || null,
-        localParticipantMode: localParticipantRef.current?.mode || null,
-      });
       setPhase('live');
       publishHostMediaAfterJoin();
       // SPOTLIGHT + priority:'PIN' HLS layout only renders pinned participants.
@@ -375,33 +290,13 @@ function BroadcasterMeetingInner({
         if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
           lp.pin();
           pinAttemptedRef.current = true;
-          logEvent('LOCAL_PARTICIPANT_PINNED', { id: lp.id });
         }
       } catch (e) {
-        logEvent('PIN_ERROR', e);
       }
     },
     onMeetingLeft: (data) => {
       const leftCode = data?.code != null ? Number(data.code) : null;
       const leftMessage = data?.message || data?.reason || null;
-      videosdkTrace('S3_JOIN', 'MEETING_LEFT', {
-        roomId: roomDebug || null,
-        streamId,
-        hadEstablishedSession: Boolean(connectedOnceRef.current),
-        localParticipantId: localParticipantRef.current?.id || null,
-        modelName: Device.modelName || null,
-        modelId: Device.modelId || null,
-        code: leftCode,
-        message: leftMessage,
-        detail: data || null,
-      });
-      logEvent('MEETING_LEFT', {
-        hadEstablishedSession: Boolean(connectedOnceRef.current),
-        localParticipantId: localParticipantRef.current?.id || null,
-        code: leftCode,
-        message: leftMessage,
-        data: data || null,
-      });
       if (!connectedOnceRef.current && (leftCode === 1103 || String(leftMessage || '').toLowerCase().includes('device not supported'))) {
         setErrorMessage('Could not join the live room (VideoSDK 1103)');
         setErrorDetail(
@@ -417,61 +312,38 @@ function BroadcasterMeetingInner({
       setMeetingJoined(true);
       setLastSdkState('CONNECTED');
       reconnectAttemptsRef.current = 0;
-      logEvent('CONNECTION_OPEN', {
-        localParticipantId: localParticipantRef.current?.id || null,
-      });
       try {
         const lp = localParticipantRef.current;
         if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
           lp.pin();
           pinAttemptedRef.current = true;
-          logEvent('LOCAL_PARTICIPANT_PINNED_ON_CONNECTION', { id: lp.id });
         }
       } catch (e) {
-        logEvent('PIN_ON_CONNECTION_ERROR', e);
       }
     },
     onConnectionClose: (e) => {
-      videosdkTrace('S3_JOIN', 'CONNECTION_CLOSE', {
-        roomId: roomDebug || null,
-        detail: e || null,
-      });
-      logEvent('CONNECTION_CLOSE', e);
     },
     onParticipantJoined: (p) => {
-      videosdkTrace('S4_PARTICIPANTS', 'JOINED', {
-        roomId: roomDebug || null,
-        id: p?.id || null,
-        mode: p?.mode || null,
-      });
-      logEvent('PARTICIPANT_JOINED', { id: p?.id, mode: p?.mode });
     },
     onParticipantLeft: (p) => {
-      logEvent('PARTICIPANT_LEFT', { id: p?.id });
     },
     onWebcamRequested: ({ accept }) => {
-      logEvent('WEBCAM_REQUESTED');
       accept?.();
     },
     onMicRequested: ({ accept }) => {
-      logEvent('MIC_REQUESTED');
       accept?.();
     },
     onHlsStarted: (e) => {
-      videosdkTrace('S7_HLS', 'STARTED', { roomId: roomDebug || null, streamId });
-      logEvent('HLS_STARTED', e || {});
       if (endedRef.current) return;
       hlsStartedRef.current = true;
       setPhase('live');
     },
     onHlsStopped: (e) => {
-      logEvent('HLS_STOPPED', e || {});
       hlsStartedRef.current = false;
     },
     onHlsStateChanged: (data) => {
       if (!data || endedRef.current) return;
       const statusText = String(data?.status || '');
-      logEvent('HLS_STATE', data);
       setLastSdkState(statusText);
       if (statusText === 'HLS_STARTED' || statusText === 'HLS_PLAYABLE') {
         hlsStartedRef.current = true;
@@ -494,7 +366,6 @@ function BroadcasterMeetingInner({
         (typeof state === 'object' &&
           (state?.message || state?.reason || state?.error || state?.errorMessage)) ||
         null;
-      logEvent('MEETING_STATE', state);
       setLastSdkState(stateText);
 
       if (stateText === 'CONNECTED') {
@@ -514,26 +385,6 @@ function BroadcasterMeetingInner({
           : null;
         const hadEstablishedSession = Boolean(connectedOnceRef.current);
 
-        videosdkTrace('S3_JOIN', 'DISCONNECTED', {
-          roomId: roomDebug || null,
-          streamId,
-          stateText,
-          reason: stateReason,
-          hadEstablishedSession,
-          meetingJoined: meetingJoinedRef.current,
-          localParticipantId: localParticipantRef.current?.id || null,
-          msSinceJoin,
-          raw:
-            typeof state === 'object'
-              ? {
-                  status: state?.status,
-                  state: state?.state,
-                  message: state?.message,
-                  reason: state?.reason,
-                  error: state?.error,
-                }
-              : state,
-        });
 
         // Host never completed a stable join — do not leave/rejoin loop (worsens iOS signaling).
         if (!hadEstablishedSession) {
@@ -547,16 +398,6 @@ function BroadcasterMeetingInner({
           meetingJoinedRef.current = false;
           setMeetingJoined(false);
           setJoinPending(false);
-          logEvent('DISCONNECTED_DURING_JOIN', {
-            localParticipantId: localParticipantRef.current?.id || null,
-            msSinceJoin,
-            reason: stateReason,
-          });
-          videosdkTrace('S3_JOIN', 'FAIL_DURING_JOIN', {
-            roomId: roomDebug || null,
-            reason: stateReason,
-            msSinceJoin,
-          });
           const reasonLower = String(stateReason || '').toLowerCase();
           const deviceUnsupported = reasonLower.includes('device not supported');
           setErrorMessage(
@@ -579,9 +420,6 @@ function BroadcasterMeetingInner({
         }
 
         // Was in room — allow reconnect retries only after a successful join.
-        logEvent('DISCONNECTED_AFTER_ESTABLISHED', {
-          localParticipantId: localParticipantRef.current?.id || null,
-        });
         setMeetingJoined(false);
         meetingJoinedRef.current = false;
         if (disconnectFatalTimerRef.current) {
@@ -603,11 +441,6 @@ function BroadcasterMeetingInner({
         if (nextAttempt <= 4) {
           reconnectAttemptsRef.current = nextAttempt;
           const waitMs = nextAttempt === 1 ? 400 : nextAttempt * 1000;
-          logEvent('DISCONNECTED_RETRY_SCHEDULED', {
-            attempt: nextAttempt,
-            waitMs,
-            connectedOnce: connectedOnceRef.current,
-          });
           if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
@@ -616,7 +449,6 @@ function BroadcasterMeetingInner({
             if (endedRef.current) return;
             (async () => {
               try {
-                logEvent('DISCONNECTED_RETRY_LEAVE', { attempt: nextAttempt });
                 leaveFnRef.current?.();
                 await new Promise((r) => setTimeout(r, 800));
                 await new Promise((resolve) =>
@@ -624,23 +456,12 @@ function BroadcasterMeetingInner({
                 );
                 await new Promise((r) => setTimeout(r, 500));
                 if (endedRef.current) return;
-                logEvent('DISCONNECTED_RETRY_JOIN', {
-                  attempt: nextAttempt,
-                  roomId: roomDebug || null,
-                });
                 joinFnRef.current?.();
               } catch (retryError) {
-                logEvent('DISCONNECTED_RETRY_JOIN_ERROR', retryError);
               }
             })();
           }, waitMs);
         } else {
-          logEvent('DISCONNECTED_RETRY_EXHAUSTED', {
-            attempts: reconnectAttemptsRef.current,
-            connectedOnce: connectedOnceRef.current,
-            localParticipantId: localParticipantRef.current?.id || null,
-          });
-          videosdkTrace('S3_JOIN', 'RETRY_EXHAUSTED', { roomId: roomDebug || null });
           setErrorMessage('Could not join the live room');
           setErrorDetail(
             'VideoSDK disconnected before the host could stay in the room. Start a NEW live stream (do not reuse an old room id). ' +
@@ -667,16 +488,18 @@ function BroadcasterMeetingInner({
       }
     },
     onError: (err) => {
-      if (hlsStartTimerRef.current) {
+      const code = Number(err?.code ?? err?.errorCode ?? 0);
+      const sessionLive =
+        connectedOnceRef.current && meetingJoinedRef.current && !endedRef.current;
+      // 3044 often fires transiently after camera flip / ICE refresh while HLS is still fine.
+      if (sessionLive && code === 3044) {
+        return;
+      }
+
+      if (hlsStartTimerRef.current && !sessionLive) {
         clearTimeout(hlsStartTimerRef.current);
         hlsStartTimerRef.current = null;
       }
-      videosdkTrace('S3_JOIN', 'SDK_ERROR', {
-        roomId: roomDebug || null,
-        message: err?.message || err?.reason || err?.error || null,
-        detail: err || null,
-      });
-      logEvent('SDK_ERROR', err);
       const sdkMessage =
         err?.message || err?.reason || err?.error || err?.errorMessage || 'Meeting error';
       const deviceUnsupported = String(sdkMessage).toLowerCase().includes('device not supported');
@@ -744,35 +567,6 @@ function BroadcasterMeetingInner({
       ? '…'
       : '0';
 
-  useEffect(() => {
-    if (!localParticipant?.id) return;
-    const ids =
-      participants instanceof Map ? Array.from(participants.keys()) : [];
-    videosdkTrace('S4_PARTICIPANTS', 'SNAPSHOT', {
-      roomId: roomDebug || null,
-      localId: localParticipant.id,
-      localMode: localParticipant.mode || null,
-      count: displayParticipantCount,
-      ids,
-      meetingJoined: meetingJoinedRef.current,
-    });
-    logEvent('LOCAL_PARTICIPANT_READY', {
-      id: localParticipant.id,
-      mode: localParticipant.mode || null,
-      participantCount,
-      joinRequested: joinRequestedRef.current,
-      meetingJoined: meetingJoinedRef.current,
-    });
-  }, [
-    localParticipant?.id,
-    localParticipant?.mode,
-    participantCount,
-    displayParticipantCount,
-    meetingJoined,
-    participants,
-    roomDebug,
-    logEvent,
-  ]);
 
   // Start HLS once the host is in-room and publishing audio/video (or screen+audio).
   useEffect(() => {
@@ -790,18 +584,7 @@ function BroadcasterMeetingInner({
         : cameraVideoReady || cameraAudioOnlyReady;
 
     if (!producerReady) {
-      logEvent('HLS_TRIGGER_WAIT_PRODUCER', {
-        liveMode,
-        localWebcamOn: Boolean(localWebcamOn),
-        hasStream: Boolean(localWebcamStream),
-        localMicOn: Boolean(localMicOn),
-      });
       return undefined;
-    }
-
-    if (cameraAudioOnlyReady) {
-      logEvent('HLS_TRIGGER_AUDIO_ONLY', { roomId: roomDebug || null });
-      videosdkTrace('S7_HLS', 'AUDIO_ONLY_PRODUCER', { roomId: roomDebug || null, streamId });
     }
 
     hlsStartTriggeredRef.current = true;
@@ -815,10 +598,8 @@ function BroadcasterMeetingInner({
       if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
         lp.pin();
         pinAttemptedRef.current = true;
-        logEvent('LOCAL_PARTICIPANT_PINNED_FALLBACK', { id: lp.id });
       }
     } catch (e) {
-      logEvent('PIN_FALLBACK_ERROR', e);
     }
 
     // Tiny stabilization delay so the first RTP packet has been transmitted.
@@ -836,17 +617,6 @@ function BroadcasterMeetingInner({
           }
           await Promise.resolve(startScreen());
         }
-        videosdkTrace('S7_HLS', 'START_REQUEST', {
-          roomId: roomDebug || null,
-          streamId,
-          attempt,
-        });
-        logEvent('ACTION_START_HLS', {
-          attempt,
-          liveMode,
-          localParticipantId: localParticipant?.id || null,
-          sdkMeetingId: sdkMeetingId || null,
-        });
         // Use GRID + SPEAKER to match the project's dashboard defaults (HLS Streaming
         // Settings -> Layout Style: Grid, Who to Prioritize: Active Speaker). This avoids
         // the SPOTLIGHT+PIN requirement that the local participant be pinned (which has
@@ -864,7 +634,6 @@ function BroadcasterMeetingInner({
           orientation: 'portrait',
         });
       } catch (err) {
-        logEvent('HLS_START_ERROR', err);
         setErrorMessage(err?.message || 'HLS start error');
         setPhase('error');
         hlsStartTriggeredRef.current = false;
@@ -886,7 +655,6 @@ function BroadcasterMeetingInner({
     localParticipant,
     participantHasWebcamTrack,
     sdkMeetingId,
-    logEvent,
     roomDebug,
     streamId,
   ]);
@@ -898,65 +666,9 @@ function BroadcasterMeetingInner({
     cameraReadyRef.current = cameraReady;
     micReadyRef.current = Boolean(localMicOn);
     if (cameraReady && !wasReady) {
-      videosdkTrace('S3_JOIN', 'LOCAL_WEBCAM_STREAM_READY', {
-        roomId: roomDebug || null,
-        hasMeetingStream: Boolean(localWebcamStream),
-        hasParticipantTrack: participantHasWebcamTrack,
-        participantId: localParticipantIdForMedia || null,
-      });
-      logEvent('LOCAL_WEBCAM_STREAM_READY', { roomId: roomDebug || null });
       setPhase((current) => (current === 'error' ? current : 'live'));
     }
-    if (liveMode === 'screen') return;
-
-    const hasMeetingStream = Boolean(localWebcamStream);
-    const hasParticipantTrack = participantHasWebcamTrack;
-    let streamURL = null;
-    try {
-      streamURL =
-        hasMeetingStream && typeof localWebcamStream.toURL === 'function'
-          ? localWebcamStream.toURL()
-          : null;
-    } catch (_) {}
-
-    const payload = {
-      on: Boolean(localWebcamOn),
-      hasStream: hasMeetingStream || hasParticipantTrack,
-      hasMeetingStream,
-      hasParticipantTrack,
-      participantWebcamOn: Boolean(participantWebcamOn),
-      streamURL: streamURL ? 'present' : null,
-      micOn: Boolean(localMicOn),
-      joinRequested: Boolean(joinRequestedRef.current),
-      meetingJoined: Boolean(meetingJoinedRef.current),
-      phase,
-      lastSdkState,
-    };
-
-    const stateKey = `${payload.on}|${payload.hasStream}|${payload.micOn}|${phase}|${lastSdkState}`;
-    if (stateKey !== lastWebcamStateKeyRef.current) {
-      lastWebcamStateKeyRef.current = stateKey;
-      videosdkTrace('S3_JOIN', 'LOCAL_MEDIA_STATE', payload);
-    }
-    if (hasMeetingStream || hasParticipantTrack) {
-      videosdkTrace('S3_JOIN', 'LOCAL_CAMERA_STREAM', {
-        hasMeetingToURL: typeof localWebcamStream?.toURL === 'function',
-        hasParticipantTrack,
-      });
-    }
-  }, [
-    localWebcamOn,
-    localWebcamStream,
-    localMicOn,
-    participantHasWebcamTrack,
-    participantWebcamOn,
-    localParticipantIdForMedia,
-    liveMode,
-    phase,
-    lastSdkState,
-    logEvent,
-    roomDebug,
-  ]);
+  }, [localWebcamOn, localWebcamStream, localMicOn, participantHasWebcamTrack, liveMode]);
 
   // Join once — permissions already granted before MeetingProvider (S2 gate).
   useEffect(() => {
@@ -973,40 +685,25 @@ function BroadcasterMeetingInner({
         }
         if (cancelled) return;
         if (!joinFn) {
-          videosdkTrace('S3_JOIN', 'JOIN_FN_TIMEOUT', { roomId: roomDebug || null });
           throw new Error('VideoSDK join() was not ready');
         }
 
-        videosdkTrace('S3_JOIN', 'JOIN_FN_READY', { roomId: roomDebug || null });
         try {
           if (InCallManager && typeof InCallManager.start === 'function') {
             InCallManager.start({ media: liveMode === 'screen' ? 'audio' : 'video' });
-            videosdkTrace('S3_JOIN', 'INCALL_MANAGER_STARTED', { liveMode });
           }
         } catch (incallErr) {
-          videosdkTrace('S3_JOIN', 'INCALL_MANAGER_START_ERROR', {
-            message: incallErr?.message || String(incallErr),
-          });
         }
         if (Platform.OS === 'ios') {
           await new Promise((r) => setTimeout(r, IOS_PRE_JOIN_DELAY_MS));
           if (cancelled) return;
-          videosdkTrace('S3_JOIN', 'IOS_STABILIZE_DELAY', { ms: IOS_PRE_JOIN_DELAY_MS });
         }
         joinStartedAtRef.current = Date.now();
         joinRequestedRef.current = true;
         setJoinPending(true);
-        videosdkTrace('S3_JOIN', 'START', { liveMode, roomId: roomDebug || null, streamId });
         await Promise.resolve(joinFn());
-        videosdkTrace('S3_JOIN', 'REQUESTED', { roomId: roomDebug || null });
-        logEvent('ACTION_JOIN_REQUESTED', { roomId: roomDebug || null });
       } catch (e) {
         if (!cancelled) {
-          videosdkTrace('S3_JOIN', 'FAIL', {
-            roomId: roomDebug || null,
-            message: e?.message || String(e),
-          });
-          logEvent('JOIN_FAILED', e);
           setErrorMessage('Failed to join meeting');
           setPhase('error');
         }
@@ -1027,7 +724,7 @@ function BroadcasterMeetingInner({
         disconnectFatalTimerRef.current = null;
       }
     };
-  }, [liveMode, roomDebug, logEvent]);
+  }, [liveMode, roomDebug]);
 
   // Leave only when the broadcast screen unmounts (not on join-effect re-run / Strict Mode).
   useEffect(() => {
@@ -1043,19 +740,13 @@ function BroadcasterMeetingInner({
       }
       try {
         if (!connectedOnceRef.current && !joinRequestedRef.current) {
-          logEvent('UNMOUNT_SKIP_LEAVE', { reason: 'never_joined' });
           return;
         }
         if (hlsStartedRef.current) actionsRef.current.stopHls?.();
         leaveFnRef.current?.();
-        logEvent('UNMOUNT_LEAVE', { hadEstablishedSession: Boolean(connectedOnceRef.current) });
-        videosdkTrace('S3_JOIN', 'UNMOUNT_LEAVE', {
-          roomId: roomDebug || null,
-          hadEstablishedSession: Boolean(connectedOnceRef.current),
-        });
       } catch (_) {}
     };
-  }, [logEvent]);
+  }, []);
 
   useEffect(() => {
     if (phase !== 'joining' || meetingJoined) return undefined;
@@ -1064,34 +755,42 @@ function BroadcasterMeetingInner({
       setErrorMessage(
         `Could not join the live room (SDK: ${lastSdkState}). Start a new stream and confirm camera/mic permissions.`
       );
-      logEvent('TIMEOUT_JOINING', { lastSdkState, joinRequested: joinRequestedRef.current });
       setPhase((current) => (current === 'joining' ? 'error' : current));
     }, 45000);
     return () => clearTimeout(t);
-  }, [phase, meetingJoined, lastSdkState, logEvent]);
+  }, [phase, meetingJoined, lastSdkState]);
 
   const handleEndPress = () => {
     finalizeEnd(true);
   };
 
-  const handleFlipCamera = useCallback(() => {
-    if (liveMode !== 'camera' || !meetingJoined) return;
+  const handleFlipCamera = useCallback(async () => {
+    if (liveMode !== 'camera' || !meetingJoined || flipInProgressRef.current) return;
+    const now = Date.now();
+    if (now - lastFlipAtRef.current < 3500) return;
+
+    flipInProgressRef.current = true;
+    lastFlipAtRef.current = now;
     try {
-      changeWebcamFnRef.current?.();
-      videosdkTrace('S3_JOIN', 'CHANGE_WEBCAM_USER', { roomId: roomDebug || null });
-    } catch (e) {
-      videosdkTrace('S3_JOIN', 'CHANGE_WEBCAM_USER_ERROR', {
-        roomId: roomDebug || null,
-        message: e?.message || String(e),
-      });
+      if (!localWebcamOn && enableWebcamFnRef.current) {
+        await Promise.resolve(enableWebcamFnRef.current());
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      await Promise.resolve(changeWebcamFnRef.current?.());
+    } catch (_) {
+      /* ignore — stream may recover without blocking UI */
+    } finally {
+      setTimeout(() => {
+        flipInProgressRef.current = false;
+      }, 2000);
     }
-  }, [liveMode, meetingJoined, roomDebug]);
+  }, [liveMode, meetingJoined, localWebcamOn]);
 
   if (phase === 'error' && errorMessage) {
     return (
       <View style={styles.center}>
         <Text style={styles.err}>{errorMessage}</Text>
-        {errorDetail ? <Text style={styles.sub}>{errorDetail}</Text> : null}
+        {__DEV__ && errorDetail ? <Text style={styles.sub}>{errorDetail}</Text> : null}
         <TouchableOpacity style={styles.endBtn} onPress={handleEndPress}>
           <Text style={styles.endBtnText}>Close</Text>
         </TouchableOpacity>
@@ -1170,7 +869,6 @@ export default function LiveStreamBroadcasterImpl({
   const [mediaPermissionsReady, setMediaPermissionsReady] = useState(false);
   const [mediaPermissionsError, setMediaPermissionsError] = useState(null);
   const [tokenError, setTokenError] = useState(null);
-  const [tokenDebug, setTokenDebug] = useState('token: n/a');
   const [tokenParticipantId, setTokenParticipantId] = useState(null);
   const hlsStartedRef = useRef(false);
   const validatedTokenRef = useRef('');
@@ -1192,10 +890,6 @@ export default function LiveStreamBroadcasterImpl({
     const applyHostToken = (meetingToken) => {
       const validation = validateMeetingToken(meetingToken, effectiveRoomId, { requireMod: true });
       if (!validation.ok) {
-        videosdkTrace('S2_SDK', 'TOKEN_FAIL', {
-          roomId: effectiveRoomId,
-          error: validation.error,
-        });
         setTokenError(validation.error);
         return false;
       }
@@ -1209,40 +903,11 @@ export default function LiveStreamBroadcasterImpl({
       );
       validatedTokenRef.current = meetingToken;
       setToken(meetingToken);
-      videosdkTrace('S2_SDK', 'TOKEN_OK', {
-        roomId: effectiveRoomId,
-        participantId: validation.participantId || null,
-      });
       return true;
     };
 
     (async () => {
-      videosdkTrace('S2_SDK', 'TOKEN_FETCH_START', { roomId: effectiveRoomId, streamId });
       try {
-        if (__DEV__) {
-          try {
-            const healthUrl = buildHealthUrl(VIDEOSDK_CONFIG.tokenServerUrl);
-            if (healthUrl) {
-              const response = await fetch(healthUrl, { method: 'GET', headers: { Accept: 'application/json' } });
-              const raw = await response.text();
-              let payload = null;
-              try {
-                payload = raw ? JSON.parse(raw) : null;
-              } catch (_) {
-                payload = raw;
-              }
-              console.log('[LiveBroadcast] token-backend health', {
-                url: healthUrl,
-                status: response.status,
-                ok: response.ok,
-                payload,
-              });
-            }
-          } catch (healthError) {
-            console.warn('[LiveBroadcast] token-backend health probe failed', healthError);
-          }
-        }
-
         if (!effectiveRoomId) {
           throw new Error(
             `Missing videosdkRoomId for host broadcast. streamId=${streamId || 'n/a'}, roomId=${
@@ -1287,15 +952,9 @@ export default function LiveStreamBroadcasterImpl({
       const permCallType = liveMode === 'screen' ? 'audio' : 'video';
       const before = await getCallMediaPermissionSnapshot(permCallType);
       if (cancelled) return;
-      videosdkTrace('S2_SDK', 'PERMISSIONS_BEFORE_PROVIDER', { liveMode, ...before });
       const ok = await ensureCallMediaPermissions(permCallType);
       if (cancelled) return;
       const after = await getCallMediaPermissionSnapshot(permCallType);
-      videosdkTrace('S2_SDK', 'PERMISSIONS_BEFORE_PROVIDER_RESULT', {
-        ensureOk: ok,
-        liveMode,
-        ...after,
-      });
       if (!ok) {
         setMediaPermissionsError(
           liveMode === 'screen'
@@ -1313,24 +972,6 @@ export default function LiveStreamBroadcasterImpl({
       cancelled = true;
     };
   }, [token, loading, effectiveRoomId, liveMode]);
-
-  useEffect(() => {
-    if (!token || !effectiveRoomId || !mediaPermissionsReady) return;
-    videosdkTrace('S2_SDK', 'MEETING_PROVIDER_MOUNT', {
-      meetingId: effectiveRoomId,
-      mode: 'SEND_AND_RECV',
-      micEnabled: false,
-      webcamEnabled: false,
-      liveMode,
-      hasToken: Boolean(token),
-      streamId,
-      buildNote: '1.0.86 faster join; flip camera; preview mirror off; chat host input',
-    });
-    videosdkTrace('S2_SDK', 'PARTICIPANT_OVERRIDE_REMOVED', {
-      jwtParticipantId: tokenParticipantId || null,
-      roomId: effectiveRoomId,
-    });
-  }, [effectiveRoomId, token, streamId, liveMode, mediaPermissionsReady, tokenParticipantId]);
 
   if (loading) {
     return (

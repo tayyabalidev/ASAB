@@ -3,7 +3,6 @@ import { View, StyleSheet, Dimensions, Modal, Alert, TouchableOpacity, Text } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { LiveStreamBroadcaster, LiveChatPanel, LiveReactions } from '../components';
-import { VideosdkLogsOpenerButton } from '../components/VideosdkDebugPanel';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { useTranslation } from 'react-i18next';
 import { peekLiveHostSession, clearLiveHostSession } from '../lib/pendingLiveBroadcast';
@@ -155,12 +154,6 @@ const styles = StyleSheet.create({
   backBtnText: {
     color: '#fff',
     fontWeight: '700',
-  },
-  logsRow: {
-    position: 'absolute',
-    top: 8,
-    left: 12,
-    zIndex: 50,
   },
   chatFab: {
     position: 'absolute',

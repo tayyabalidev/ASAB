@@ -15,6 +15,12 @@ Restart Metro after pulling: `npx expo start -c`
 
 If you only tested in Expo before, you were not using the same UI as TestFlight.
 
+## Build 1.0.87 (production — no debug UI, 3044 fix)
+
+1. **Error 3044** no longer ends the stream when you are already joined and live (common after camera flip).
+2. **Camera flip** has a 3.5s cooldown and waits for webcam to be on before `changeWebcam()`.
+3. **Debug removed** — no LOG button, no Open VideoSDK logs on broadcast; `EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS=0` in EAS builds.
+
 ## Build 1.0.86 (faster join, flip camera, chat, mirror fix)
 
 1. **Faster startup** — shorter publish/HLS/iOS delays; no duplicate permission request at join (S2 gate only); direct `join()` when ready.

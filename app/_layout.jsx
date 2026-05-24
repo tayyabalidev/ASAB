@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Alert, AppState, StyleSheet, View } from 'react-native';
+import { Alert, AppState, View } from 'react-native';
 import { Stack, SplashScreen } from 'expo-router';
 import GlobalProvider, { useGlobalContext } from '../context/GlobalProvider';
 import { useFonts } from 'expo-font';
@@ -10,21 +10,17 @@ import Constants from 'expo-constants';
 import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser, getOrCreateGoogleUser, appwriteConfig } from '../lib/appwrite';
 import { useBadgeNotifications } from '../hooks/useBadgeNotifications';
 import IncomingCallHandler from '../components/IncomingCallHandler';
-import VideosdkDebugPanel from '../components/VideosdkDebugPanel';
 import { canLoadVideoSdkNative } from '../lib/videosdkNativeGate';
-import { videosdkTrace } from '../lib/videosdkTrace';
 
 // VideoSDK native bootstrap (mirror official ILS example) — skip in Expo Go.
 if (canLoadVideoSdkNative()) {
   try {
-    videosdkTrace('S2_SDK', 'VIDEOSDK_REGISTER_INIT', {});
     const { register } = require('@videosdk.live/react-native-sdk');
     register();
-    videosdkTrace('S2_SDK', 'VIDEOSDK_REGISTER_SUCCESS', {});
   } catch (registerErr) {
-    videosdkTrace('S2_SDK', 'VIDEOSDK_REGISTER_FAILED', {
-      error: String(registerErr?.message || registerErr),
-    });
+    if (__DEV__) {
+      console.warn('[VideoSDK] register failed', registerErr);
+    }
   }
 }
 
@@ -492,10 +488,3 @@ export default function RootLayout() {
   );
 }
 
-const layoutStyles = StyleSheet.create({
-  debugOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 999999,
-    elevation: 999999,
-  },
-});

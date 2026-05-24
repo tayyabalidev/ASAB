@@ -33,7 +33,7 @@ module.exports = () => {
   const videosdkDebugLogs =
     debugLogsRaw !== undefined && debugLogsRaw !== null
       ? String(debugLogsRaw).trim() !== '0'
-      : true;
+      : false;
 
   return {
     ...appJson,
