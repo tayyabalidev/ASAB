@@ -11,6 +11,9 @@ import {
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { MeetingProvider, useMeeting } from '@videosdk.live/react-native-sdk';
+import LiveMeetingChat from './LiveMeetingChat';
+import LiveCoHostGuest from './LiveCoHostGuest';
+import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 import { useGlobalContext } from '../context/GlobalProvider';
 import {
   subscribeLiveStreamUpdates,
@@ -200,7 +203,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
     setTokenLoading(true);
     (async () => {
       try {
-        const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'viewer' });
+        const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'live' });
         if (cancelled) return;
         if (t) {
           const claims = decodeJwtPayload(t);
@@ -325,7 +328,12 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
           }}
           token={authToken}
         >
-          <LiveHlsViewerInner onPlaybackEnded={handlePlaybackEnded} />
+          <LiveViewerInMeeting
+            onPlaybackEnded={handlePlaybackEnded}
+            showChat={showChat}
+            displayName={user.username || 'Viewer'}
+            canRaiseHand={Boolean(stream.hostId && user.$id !== stream.hostId)}
+          />
         </MeetingProvider>
 
         <View style={styles.viewerBadge} pointerEvents="none">
@@ -339,7 +347,12 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
         )}
       </View>
 
-      <View style={styles.bottomOverlay}>
+      <View
+        style={[
+          styles.bottomOverlay,
+          showChat && { paddingBottom: height * 0.44 },
+        ]}
+      >
         <View style={styles.hostInfoContainer}>
           <View style={styles.hostInfo}>
             <Image
@@ -397,6 +410,17 @@ const styles = StyleSheet.create({
   videoArea: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  chatOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '42%',
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    zIndex: 28,
   },
   hlsVideo: {
     flex: 1,
@@ -473,7 +497,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     paddingHorizontal: 15,
-    paddingBottom: 120,
+    paddingBottom: 24,
+    zIndex: 8,
   },
   hostInfoContainer: {
     flexDirection: 'row',

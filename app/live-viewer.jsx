@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Dimensions, TouchableOpacity, Alert, Text, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { LiveStreamPlayer, LiveChatPanel, LiveReactions } from '../components';
+import { LiveStreamPlayer, LiveReactions } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/livestream';
 import { useTranslation } from 'react-i18next';
@@ -97,9 +97,10 @@ const LiveViewer = () => {
       >
         <View style={styles.container}>
           {/* Video Player - Integrate your new live streaming SDK */}
-          <LiveStreamPlayer 
+          <LiveStreamPlayer
             stream={stream}
             onClose={handleClose}
+            showChat={showChat}
           />
 
           {stream.liveMode === 'screen' ? (
@@ -114,16 +115,12 @@ const LiveViewer = () => {
           {/* Live Reactions Overlay */}
           <LiveReactions streamId={streamId} isHost={false} />
 
-          {/* Live Chat Panel */}
-          {showChat && (
-            <View style={styles.chatPanel}>
-              <LiveChatPanel streamId={streamId} isHost={false} />
-            </View>
-          )}
-
-          {/* Chat Toggle Button */}
-          <TouchableOpacity 
-            style={styles.chatToggle}
+          {/* Chat Toggle Button — in-meeting chat is inside LiveStreamPlayer (VideoSDK PubSub) */}
+          <TouchableOpacity
+            style={[
+              styles.chatToggle,
+              { bottom: showChat ? height * 0.44 : Math.max(24, height * 0.06) },
+            ]}
             onPress={toggleChat}
           >
             <View style={styles.chatToggleIcon}>
@@ -187,8 +184,8 @@ const styles = StyleSheet.create({
   },
   chatToggle: {
     position: 'absolute',
-    bottom: height * 0.42,
     left: 20,
+    zIndex: 32,
     width: 50,
     height: 50,
     borderRadius: 25,

@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Dimensions, Modal, Alert, TouchableOpacity, Text } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, StyleSheet, Alert, TouchableOpacity, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { LiveStreamBroadcaster, LiveChatPanel, LiveReactions } from '../components';
+import { LiveStreamBroadcaster, LiveReactions } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { useTranslation } from 'react-i18next';
 import { peekLiveHostSession, clearLiveHostSession } from '../lib/pendingLiveBroadcast';
-
-const { height } = Dimensions.get('window');
 
 /** Expo Router may pass a param as string or string[] */
 function firstRouteParam(value) {
@@ -19,14 +17,12 @@ function firstRouteParam(value) {
 const LiveBroadcast = () => {
   const params = useLocalSearchParams();
   const streamId = firstRouteParam(params.streamId);
-  /** Full JWT must not live in URL params (iOS can truncate); use in-memory stash from go-live when present. */
   const stashed = streamId ? peekLiveHostSession(streamId) : null;
   const roomId = stashed?.roomId || firstRouteParam(params.roomId);
   const hostToken = stashed?.hostToken || firstRouteParam(params.hostToken);
   const quality = stashed?.quality ?? firstRouteParam(params.quality);
   const liveMode = stashed?.liveMode ?? firstRouteParam(params.liveMode);
   const { user } = useGlobalContext();
-  const [showChat, setShowChat] = useState(false);
   const { t } = useTranslation();
 
   const handleStreamEnd = () => {
@@ -93,37 +89,7 @@ const LiveBroadcast = () => {
           liveMode={liveModeParam}
           onStreamEnd={handleStreamEnd}
         />
-
-        <View style={styles.logsRow} pointerEvents="box-none">
-          <VideosdkLogsOpenerButton label="Open VideoSDK logs" />
-        </View>
-
         <LiveReactions streamId={streamId} isHost={true} />
-
-        <TouchableOpacity
-          style={styles.chatFab}
-          onPress={() => setShowChat(true)}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.chatFabText}>💬</Text>
-        </TouchableOpacity>
-
-        <Modal
-          visible={showChat}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowChat(false)}
-        >
-          <View style={styles.chatModal}>
-            <View style={styles.chatHeader}>
-              <Text style={styles.chatTitle}>Live chat</Text>
-              <TouchableOpacity onPress={() => setShowChat(false)} hitSlop={12}>
-                <Text style={styles.chatClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <LiveChatPanel streamId={streamId} isHost={true} />
-          </View>
-        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -154,48 +120,6 @@ const styles = StyleSheet.create({
   backBtnText: {
     color: '#fff',
     fontWeight: '700',
-  },
-  chatFab: {
-    position: 'absolute',
-    bottom: Math.max(32, height * 0.06),
-    right: 20,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  chatFabText: {
-    fontSize: 24,
-  },
-  chatModal: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.95)',
-    marginTop: height * 0.28,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  chatHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.15)',
-  },
-  chatTitle: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  chatClose: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '600',
   },
 });
 

@@ -9,6 +9,7 @@ import {
   Dimensions,
   InteractionManager,
   Platform,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -28,6 +29,9 @@ import {
 import { endLiveStream } from '../lib/livestream';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
+import LiveMeetingChat from './LiveMeetingChat';
+import LiveHostGuestControls from './LiveHostGuestControls';
+import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 
 /** Tunable delays — keep small; join/media publish flow is stability-sensitive. */
 const IOS_PRE_JOIN_DELAY_MS = 200;
@@ -165,8 +169,11 @@ function BroadcasterMeetingInner({
   hostUserId,
   meetingParticipantId,
   roomDebug,
+  hostDisplayName,
 }) {
   const insets = useSafeAreaInsets();
+  const [showChat, setShowChat] = useState(false);
+  const [showGuests, setShowGuests] = useState(false);
   const [phase, setPhase] = useState('joining');
   const [errorMessage, setErrorMessage] = useState(null);
   const [errorDetail, setErrorDetail] = useState(null);
@@ -801,6 +808,7 @@ function BroadcasterMeetingInner({
   return (
     <View style={styles.container}>
       <LocalPreview liveMode={liveMode} localParticipantId={localParticipant?.id} />
+      <LiveRemoteRtcTiles excludeParticipantId={localParticipant?.id} />
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={styles.topBarRow}>
           <View
@@ -834,9 +842,11 @@ function BroadcasterMeetingInner({
           <Text style={styles.bannerText}> Starting stream…</Text>
         </View>
       )}
+      <LiveHostGuestControls visible={showGuests} onClose={() => setShowGuests(false)} />
+
       {liveMode === 'camera' && meetingJoined ? (
         <TouchableOpacity
-          style={[styles.flipCameraBtn, { bottom: Math.max(insets.bottom, 16) + 88 }]}
+          style={[styles.sideFab, styles.sideFabLeft, { bottom: Math.max(insets.bottom, 16) + 88 }]}
           onPress={handleFlipCamera}
           activeOpacity={0.85}
           accessibilityLabel="Switch camera"
@@ -844,6 +854,35 @@ function BroadcasterMeetingInner({
           <Feather name="refresh-cw" size={22} color="#fff" />
         </TouchableOpacity>
       ) : null}
+      <TouchableOpacity
+        style={[styles.sideFab, styles.sideFabRight, { bottom: Math.max(insets.bottom, 16) + 88 }]}
+        onPress={() => setShowChat(true)}
+        activeOpacity={0.85}
+        accessibilityLabel="Open chat"
+      >
+        <Text style={styles.chatFabText}>💬</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.sideFab, styles.sideFabRight, { bottom: Math.max(insets.bottom, 16) + 152 }]}
+        onPress={() => setShowGuests(true)}
+        activeOpacity={0.85}
+        accessibilityLabel="Manage guests"
+      >
+        <Feather name="users" size={20} color="#fff" />
+      </TouchableOpacity>
+
+      <Modal visible={showChat} animationType="slide" transparent onRequestClose={() => setShowChat(false)}>
+        <View style={styles.chatModal}>
+          <View style={styles.chatModalHeader}>
+            <Text style={styles.chatModalTitle}>Live chat</Text>
+            <TouchableOpacity onPress={() => setShowChat(false)} hitSlop={12}>
+              <Text style={styles.chatModalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <LiveMeetingChat displayName={hostDisplayName || 'Host'} showRaiseHand={false} />
+        </View>
+      </Modal>
+
       <TouchableOpacity
         style={[styles.endStream, { bottom: Math.max(insets.bottom, 16) + 16 }]}
         onPress={handleEndPress}
@@ -897,10 +936,6 @@ export default function LiveStreamBroadcasterImpl({
       if (validation.participantId) {
         setTokenParticipantId(validation.participantId);
       }
-      const perms = Array.isArray(claims.permissions) ? claims.permissions : [];
-      setTokenDebug(
-        `key:${claims?.apikey || 'n/a'} v2 perms:${perms.join('|')} room:${claims.roomId || effectiveRoomId}`
-      );
       validatedTokenRef.current = meetingToken;
       setToken(meetingToken);
       return true;
@@ -1058,6 +1093,7 @@ export default function LiveStreamBroadcasterImpl({
         hostUserId={hostUserId}
         meetingParticipantId={meetingParticipantId}
         roomDebug={effectiveRoomId}
+        hostDisplayName={hostDisplayName}
       />
     </MeetingProvider>
   );
@@ -1153,9 +1189,8 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 15,
   },
-  flipCameraBtn: {
+  sideFab: {
     position: 'absolute',
-    alignSelf: 'center',
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -1164,11 +1199,47 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.25)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 12,
+    zIndex: 16,
+  },
+  sideFabLeft: {
+    left: 16,
+  },
+  sideFabRight: {
+    right: 16,
+  },
+  chatFabText: {
+    fontSize: 22,
+  },
+  chatModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    marginTop: height * 0.28,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  chatModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.15)',
+  },
+  chatModalTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  chatModalClose: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '600',
   },
   endStream: {
     position: 'absolute',
     alignSelf: 'center',
+    zIndex: 16,
     backgroundColor: '#F44336',
     paddingHorizontal: 36,
     paddingVertical: 14,
