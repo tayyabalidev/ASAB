@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import {
   useMeeting,
   useParticipant,
@@ -26,7 +26,12 @@ function RemoteTile({ participantId }) {
     streamURL = null;
   }
 
-  if (!webcamOn || !streamURL) {
+  const canRenderRtc =
+    webcamOn &&
+    typeof streamURL === 'string' &&
+    streamURL.length > 0;
+
+  if (!canRenderRtc) {
     return (
       <View style={styles.tile}>
         <Text style={styles.tileName} numberOfLines={1}>
@@ -44,7 +49,13 @@ function RemoteTile({ participantId }) {
       <Text style={styles.tileName} numberOfLines={1}>
         {displayName || 'Guest'}
       </Text>
-      <RTCView streamURL={streamURL} style={styles.tileVideo} objectFit="cover" mirror={false} />
+      <RTCView
+        streamURL={streamURL}
+        style={styles.tileVideo}
+        objectFit="cover"
+        mirror={false}
+        zOrder={Platform.OS === 'android' ? 1 : 0}
+      />
     </View>
   );
 }

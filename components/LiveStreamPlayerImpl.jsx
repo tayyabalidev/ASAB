@@ -8,6 +8,7 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { MeetingProvider, useMeeting } from '@videosdk.live/react-native-sdk';
@@ -104,12 +105,23 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
   useEffect(() => {
     if (joinOnceRef.current) return undefined;
     joinOnceRef.current = true;
-    Promise.resolve(actionsRef.current.join?.()).catch((e) => {
-      console.error('[LiveViewer] join failed', e);
-      setHlsStateText('ERROR');
-      onPlaybackEnded?.();
-    });
+    let cancelled = false;
+    (async () => {
+      try {
+        if (VIEWER_PRE_JOIN_DELAY_MS > 0) {
+          await new Promise((r) => setTimeout(r, VIEWER_PRE_JOIN_DELAY_MS));
+        }
+        if (cancelled) return;
+        await Promise.resolve(actionsRef.current.join?.());
+      } catch (e) {
+        if (cancelled) return;
+        console.error('[LiveViewer] join failed', e);
+        setHlsStateText('ERROR');
+        onPlaybackEnded?.();
+      }
+    })();
     return () => {
+      cancelled = true;
       try {
         actionsRef.current.leave?.();
       } catch (_) {}
@@ -410,6 +422,13 @@ const styles = StyleSheet.create({
   videoArea: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  viewerMeetingRoot: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  chatOverlayInner: {
+    flex: 1,
   },
   chatOverlay: {
     position: 'absolute',

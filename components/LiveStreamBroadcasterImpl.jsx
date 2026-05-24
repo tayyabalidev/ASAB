@@ -35,6 +35,8 @@ import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 
 /** Tunable delays — keep small; join/media publish flow is stability-sensitive. */
 const IOS_PRE_JOIN_DELAY_MS = 200;
+const ANDROID_PRE_JOIN_DELAY_MS = 500;
+const ANDROID_POST_PREWARM_MS = 350;
 const HLS_START_DELAY_MS = 200;
 const MEDIA_PUBLISH_MIC_MS = 250;
 const MEDIA_PUBLISH_MIC_TOGGLE_MS = 250;
@@ -52,14 +54,24 @@ const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'mis
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
 
-/** Mirror official ILS example: warm VideoSDK WebRTC before MeetingProvider mount. */
+/**
+ * Warm permissions on iOS. On Android, getUserMedia before join often leaves the camera
+ * locked and VideoSDK reports meeting state FAILED — use permission APIs only there.
+ */
 async function prewarmMedia(liveMode) {
+  if (Platform.OS === 'android') {
+    return;
+  }
   try {
     const stream = await mediaDevices.getUserMedia({
       audio: true,
       video: liveMode !== 'screen',
     });
-    stream?.getTracks()?.forEach((track) => track.stop());
+    stream?.getTracks()?.forEach((track) => {
+      try {
+        track.stop();
+      } catch (_) {}
+    });
   } catch (_) {}
 }
 
@@ -386,12 +398,11 @@ function BroadcasterMeetingInner({
         }
       }
 
-      if (stateText === 'DISCONNECTED' && !endedRef.current) {
-        const msSinceJoin = joinStartedAtRef.current
-          ? Date.now() - joinStartedAtRef.current
-          : null;
+      if (
+        (stateText === 'DISCONNECTED' || stateText === 'FAILED') &&
+        !endedRef.current
+      ) {
         const hadEstablishedSession = Boolean(connectedOnceRef.current);
-
 
         // Host never completed a stable join — do not leave/rejoin loop (worsens iOS signaling).
         if (!hadEstablishedSession) {
@@ -410,18 +421,27 @@ function BroadcasterMeetingInner({
           setErrorMessage(
             deviceUnsupported
               ? 'Camera not supported on this device for VideoSDK'
-              : 'Could not join the live room'
+              : stateText === 'FAILED'
+                ? 'Could not join the live room (SDK: FAILED). Start a new stream and confirm camera/mic permissions.'
+                : 'Could not join the live room'
           );
           setErrorDetail(
             deviceUnsupported
               ? `VideoSDK: ${stateReason || 'device not supported'}. iPhone X and some iOS builds fail when the camera is enabled at join. Use build 1.0.72+ (camera enabled after join).`
               : (stateReason
                   ? `${stateReason}. `
-                  : 'VideoSDK disconnected before the host could stay in the room. ') +
+                  : `VideoSDK ${stateText} before the host could stay in the room. `) +
                   'Start a NEW live stream (do not reuse an old room id). ' +
                   'Check camera/mic permissions and network (Wi‑Fi or cellular). ' +
                   `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}.`
           );
+          setPhase('error');
+          return;
+        }
+
+        if (stateText === 'FAILED') {
+          setErrorMessage('Lost connection to the live room');
+          setErrorDetail(stateReason || 'VideoSDK meeting state FAILED after join.');
           setPhase('error');
           return;
         }
@@ -701,8 +721,14 @@ function BroadcasterMeetingInner({
           }
         } catch (incallErr) {
         }
-        if (Platform.OS === 'ios') {
-          await new Promise((r) => setTimeout(r, IOS_PRE_JOIN_DELAY_MS));
+        const preJoinDelay =
+          Platform.OS === 'ios'
+            ? IOS_PRE_JOIN_DELAY_MS
+            : Platform.OS === 'android'
+              ? ANDROID_PRE_JOIN_DELAY_MS
+              : 0;
+        if (preJoinDelay > 0) {
+          await new Promise((r) => setTimeout(r, preJoinDelay));
           if (cancelled) return;
         }
         joinStartedAtRef.current = Date.now();
@@ -1001,6 +1027,10 @@ export default function LiveStreamBroadcasterImpl({
       }
       await prewarmMedia(liveMode);
       if (cancelled) return;
+      if (Platform.OS === 'android' && ANDROID_POST_PREWARM_MS > 0) {
+        await new Promise((r) => setTimeout(r, ANDROID_POST_PREWARM_MS));
+        if (cancelled) return;
+      }
       setMediaPermissionsReady(true);
     })();
     return () => {
@@ -1079,6 +1109,11 @@ export default function LiveStreamBroadcasterImpl({
     webcamEnabled: false,
     name: hostDisplayName || hostUserId || 'Host',
     debugMode: __DEV__,
+    notification: {
+      title: 'ASAB Live',
+      message: 'You are live',
+    },
+    ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
   };
 
   return (
