@@ -563,10 +563,19 @@ const VideoSDKCallInner = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const remoteParticipant = remoteParticipants[0] ?? null;
+  const remoteParticipantId =
+    remoteParticipant && remoteParticipant.id != null
+      ? String(remoteParticipant.id)
+      : null;
   const remoteLabel =
-    remoteParticipants[0]?.displayName || peerDisplayName || 'Participant';
-  const remoteInitial = (remoteLabel.charAt(0) || 'P').toUpperCase();
+    peerDisplayName ||
+    remoteParticipant?.displayName ||
+    'Participant';
+  const remoteInitial = participantInitial(remoteLabel);
   const voiceAccent = callType === 'audio' ? UI.accentVoice : UI.accent;
+  const isMuted = !localMicOn;
+  const isVideoEnabled = Boolean(localWebcamOn);
 
   const audioStatusText = !meetingJoined
     ? 'Joining call…'

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,9 @@ import {
   Platform,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { MeetingProvider, useMeeting } from '@videosdk.live/react-native-sdk';
+import { MeetingProvider, useMeeting, useParticipant } from '@videosdk.live/react-native-sdk';
 import LiveMeetingChat from './LiveMeetingChat';
-import LiveCoHostGuest from './LiveCoHostGuest';
+import { LiveCoHostInviteListener, LiveCoHostGuestMedia } from './LiveCoHostGuest';
 import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 import { useGlobalContext } from '../context/GlobalProvider';
 import {
@@ -105,6 +105,9 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
       .catch(() => {});
     return () => {
       cancelled = true;
+      try {
+        player.pause();
+      } catch (_) {}
     };
   }, [hlsUrl, player]);
 
@@ -182,6 +185,73 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
 }
 
 /**
+ * Prevents duplicate host audio: viewers watch via HLS; mute remote WebRTC mic tracks.
+ */
+function RemoteWebRtcAudioMuteInner({ participantId }) {
+  const { micStream } = useParticipant(participantId);
+  useEffect(() => {
+    const track = micStream?.track;
+    if (!track) return undefined;
+    track.enabled = false;
+    return () => {
+      try {
+        track.enabled = true;
+      } catch (_) {}
+    };
+  }, [micStream?.track?.id, participantId]);
+  return null;
+}
+
+function RemoteWebRtcAudioMute({ participantId }) {
+  if (!participantId) return null;
+  return <RemoteWebRtcAudioMuteInner participantId={participantId} />;
+}
+
+function LiveViewerRealtimeLayers({ showChat, displayName, canRaiseHand }) {
+  const { participants, localParticipant } = useMeeting();
+  const localId = localParticipant?.id;
+  const localMode = String(localParticipant?.mode || '').toUpperCase();
+  const localIsSpeaker =
+    localMode === 'SEND_AND_RECV' ||
+    localMode === 'SEND_RECV' ||
+    localMode === 'CONFERENCE';
+
+  const remotePublisherIds = useMemo(() => {
+    const ids = [];
+    if (!(participants instanceof Map) || !localId) return ids;
+    participants.forEach((p, id) => {
+      if (!id || id === localId) return;
+      const m = String(p?.mode || '').trim().toUpperCase();
+      if (!m || m === 'SEND_AND_RECV' || m === 'CONFERENCE' || m === 'SEND_RECV') {
+        ids.push(String(id));
+      }
+    });
+    return ids;
+  }, [participants, localId]);
+
+  return (
+    <>
+      {!localIsSpeaker &&
+        remotePublisherIds.map((id) => (
+          <RemoteWebRtcAudioMute key={`rtc-mute-${id}`} participantId={id} />
+        ))}
+      <LiveRemoteRtcTiles hideWhenSinglePublisher />
+      <LiveCoHostInviteListener />
+      {localIsSpeaker ? <LiveCoHostGuestMedia /> : null}
+      {showChat ? (
+        <View style={styles.chatOverlay} pointerEvents="box-none">
+          <LiveMeetingChat
+            displayName={displayName}
+            showRaiseHand={canRaiseHand}
+            style={styles.chatOverlayInner}
+          />
+        </View>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * Viewer shell inside MeetingProvider — HLS first, realtime layers after join.
  * Matches VideoSDK ILS: RECV_ONLY + join() + HLS playback.
  */
@@ -200,19 +270,11 @@ function LiveViewerInMeeting({
         onMeetingReady={() => setMeetingReady(true)}
       />
       {meetingReady ? (
-        <>
-          <LiveRemoteRtcTiles hideWhenSinglePublisher />
-          <LiveCoHostGuest />
-          {showChat ? (
-            <View style={styles.chatOverlay} pointerEvents="box-none">
-              <LiveMeetingChat
-                displayName={displayName}
-                showRaiseHand={canRaiseHand}
-                style={styles.chatOverlayInner}
-              />
-            </View>
-          ) : null}
-        </>
+        <LiveViewerRealtimeLayers
+          showChat={showChat}
+          displayName={displayName}
+          canRaiseHand={canRaiseHand}
+        />
       ) : null}
     </View>
   );

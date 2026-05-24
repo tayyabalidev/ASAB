@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,35 +15,8 @@ import {
   MediaStream,
 } from '@videosdk.live/react-native-sdk';
 
-function GuestPreview({ participantId }) {
-  const { webcamStream, webcamOn } = useParticipant(participantId);
-  let previewUrl = null;
-  try {
-    if (webcamOn && webcamStream?.track) {
-      previewUrl = new MediaStream([webcamStream.track]).toURL();
-    } else if (webcamStream && typeof webcamStream.toURL === 'function') {
-      previewUrl = webcamStream.toURL();
-    }
-  } catch (_) {
-    previewUrl = null;
-  }
-  if (!previewUrl) return null;
-  return (
-    <View style={styles.preview}>
-      <RTCView
-        streamURL={previewUrl}
-        style={styles.previewVideo}
-        objectFit="cover"
-        mirror={false}
-        zOrder={1}
-      />
-    </View>
-  );
-}
-
-function CoHostModeListener({ participantId, changeMode }) {
-  const topic = `CHANGE_MODE_${participantId}`;
-  usePubSub(topic, {
+function CoHostInviteListenerInner({ participantId, changeMode }) {
+  usePubSub(`CHANGE_MODE_${participantId}`, {
     onMessageReceived: (data) => {
       const nextMode = data?.message?.mode || data?.mode;
       if (nextMode === 'RECV_ONLY') {
@@ -65,49 +38,18 @@ function CoHostModeListener({ participantId, changeMode }) {
   return null;
 }
 
-/**
- * Viewer co-host: accept host invite, publish mic/cam when SEND_AND_RECV.
- * Must render inside MeetingProvider.
- */
-export default function LiveCoHostGuest() {
-  const {
-    localParticipant,
-    changeMode,
-    enableMic,
-    enableWebcam,
-    toggleMic,
-    localMicOn,
-  } = useMeeting();
+/** Listens for host invite — no mic/cam (safe for all viewers). */
+export function LiveCoHostInviteListener() {
+  const { localParticipant, changeMode } = useMeeting();
+  const participantId = localParticipant?.id;
+  if (!participantId) return null;
+  return (
+    <CoHostInviteListenerInner participantId={participantId} changeMode={changeMode} />
+  );
+}
 
-  const participantId = localParticipant?.id || '';
-  const mode = String(localParticipant?.mode || '').toUpperCase();
-  const isSpeaker =
-    mode === 'SEND_AND_RECV' || mode === 'SEND_RECV' || mode === 'CONFERENCE';
-  const mediaStartedRef = useRef(false);
-
-  const startGuestMedia = useCallback(async () => {
-    if (mediaStartedRef.current || !isSpeaker) return;
-    mediaStartedRef.current = true;
-    try {
-      await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 500 : 400));
-      await Promise.resolve(enableMic?.());
-      await new Promise((r) => setTimeout(r, 300));
-      if (!localMicOn) await Promise.resolve(toggleMic?.());
-      await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 500 : 400));
-      await Promise.resolve(enableWebcam?.());
-    } catch (_) {
-      mediaStartedRef.current = false;
-    }
-  }, [isSpeaker, enableMic, enableWebcam, toggleMic, localMicOn]);
-
-  useEffect(() => {
-    if (isSpeaker) {
-      startGuestMedia();
-    } else {
-      mediaStartedRef.current = false;
-    }
-  }, [isSpeaker, startGuestMedia]);
-
+function GuestPreview({ participantId }) {
+  const { webcamStream, webcamOn } = useParticipant(participantId);
   let previewUrl = null;
   try {
     if (webcamOn && webcamStream?.track) {
@@ -118,27 +60,80 @@ export default function LiveCoHostGuest() {
   } catch (_) {
     previewUrl = null;
   }
+  if (!previewUrl) return null;
+  return (
+    <View style={styles.preview}>
+      <RTCView
+        streamURL={previewUrl}
+        style={styles.previewVideo}
+        objectFit="cover"
+        mirror={true}
+        zOrder={1}
+      />
+    </View>
+  );
+}
 
-  if (!isSpeaker) {
-    return participantId ? (
-      <CoHostModeListener participantId={participantId} changeMode={changeMode} />
-    ) : null;
-  }
+/**
+ * Guest on-stage media — only mount when local mode is SEND_AND_RECV.
+ */
+export function LiveCoHostGuestMedia() {
+  const { localParticipant, enableWebcam, muteMic, unmuteMic, localMicOn } = useMeeting();
+
+  const participantId = localParticipant?.id || '';
+  const mediaStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (!participantId) return undefined;
+    let cancelled = false;
+    mediaStartedRef.current = true;
+
+    (async () => {
+      try {
+        await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 500 : 400));
+        if (cancelled) return;
+        await Promise.resolve(unmuteMic?.());
+        await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 500 : 400));
+        if (cancelled) return;
+        await Promise.resolve(enableWebcam?.());
+      } catch (_) {
+        mediaStartedRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      mediaStartedRef.current = false;
+      try {
+        muteMic?.();
+      } catch (_) {}
+    };
+  }, [participantId, unmuteMic, enableWebcam, muteMic]);
+
+  return (
+    <View style={styles.wrap} pointerEvents="box-none">
+      <View style={styles.pill}>
+        <Text style={styles.pillText}>You're on stage</Text>
+        {!localMicOn ? (
+          <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
+        ) : null}
+      </View>
+      {participantId ? <GuestPreview participantId={participantId} /> : null}
+    </View>
+  );
+}
+
+/** @deprecated Use LiveCoHostInviteListener + LiveCoHostGuestMedia */
+export default function LiveCoHostGuest() {
+  const { localParticipant } = useMeeting();
+  const mode = String(localParticipant?.mode || '').toUpperCase();
+  const isSpeaker =
+    mode === 'SEND_AND_RECV' || mode === 'SEND_RECV' || mode === 'CONFERENCE';
 
   return (
     <>
-      {participantId ? (
-        <CoHostModeListener participantId={participantId} changeMode={changeMode} />
-      ) : null}
-      <View style={styles.wrap} pointerEvents="box-none">
-        <View style={styles.pill}>
-          <Text style={styles.pillText}>You're on stage</Text>
-          {!localMicOn ? (
-            <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
-          ) : null}
-        </View>
-      {participantId ? <GuestPreview participantId={participantId} /> : null}
-      </View>
+      <LiveCoHostInviteListener />
+      {isSpeaker ? <LiveCoHostGuestMedia /> : null}
     </>
   );
 }
