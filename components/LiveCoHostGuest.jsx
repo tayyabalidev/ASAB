@@ -15,6 +15,32 @@ import {
   MediaStream,
 } from '@videosdk.live/react-native-sdk';
 
+function GuestPreview({ participantId }) {
+  const { webcamStream, webcamOn } = useParticipant(participantId);
+  let previewUrl = null;
+  try {
+    if (webcamOn && webcamStream?.track) {
+      previewUrl = new MediaStream([webcamStream.track]).toURL();
+    } else if (webcamStream && typeof webcamStream.toURL === 'function') {
+      previewUrl = webcamStream.toURL();
+    }
+  } catch (_) {
+    previewUrl = null;
+  }
+  if (!previewUrl) return null;
+  return (
+    <View style={styles.preview}>
+      <RTCView
+        streamURL={previewUrl}
+        style={styles.previewVideo}
+        objectFit="cover"
+        mirror={false}
+        zOrder={1}
+      />
+    </View>
+  );
+}
+
 function CoHostModeListener({ participantId, changeMode }) {
   const topic = `CHANGE_MODE_${participantId}`;
   usePubSub(topic, {
@@ -58,8 +84,6 @@ export default function LiveCoHostGuest() {
   const isSpeaker =
     mode === 'SEND_AND_RECV' || mode === 'SEND_RECV' || mode === 'CONFERENCE';
   const mediaStartedRef = useRef(false);
-
-  const { webcamStream, webcamOn } = useParticipant(participantId || '__pending__');
 
   const startGuestMedia = useCallback(async () => {
     if (mediaStartedRef.current || !isSpeaker) return;
@@ -113,17 +137,7 @@ export default function LiveCoHostGuest() {
             <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
           ) : null}
         </View>
-        {previewUrl ? (
-          <View style={styles.preview}>
-            <RTCView
-              streamURL={previewUrl}
-              style={styles.previewVideo}
-              objectFit="cover"
-              mirror={false}
-              zOrder={1}
-            />
-          </View>
-        ) : null}
+      {participantId ? <GuestPreview participantId={participantId} /> : null}
       </View>
     </>
   );

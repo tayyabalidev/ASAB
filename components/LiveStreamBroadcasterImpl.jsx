@@ -41,6 +41,8 @@ const HLS_START_DELAY_MS = 200;
 const MEDIA_PUBLISH_MIC_MS = 250;
 const MEDIA_PUBLISH_MIC_TOGGLE_MS = 250;
 const MEDIA_PUBLISH_WEBCAM_MS = 350;
+const SCREEN_SHARE_AFTER_MIC_MS = 500;
+const SCREEN_HLS_EXTRA_DELAY_MS = 600;
 
 let InCallManager = null;
 try {
@@ -108,15 +110,42 @@ function isPublisherParticipantMode(mode) {
 
 function LocalPreviewInner({ liveMode, participantId }) {
   const { localWebcamOn, localWebcamStream } = useMeeting();
-  const { webcamOn: participantWebcamOn, webcamStream: participantWebcamStream } =
-    useParticipant(participantId);
+  const {
+    webcamOn: participantWebcamOn,
+    webcamStream: participantWebcamStream,
+    screenShareOn,
+    screenShareStream,
+  } = useParticipant(participantId);
   const webcamOn = participantWebcamOn ?? localWebcamOn;
 
   if (liveMode === 'screen') {
+    let screenUrl = null;
+    try {
+      if (screenShareOn && screenShareStream?.track) {
+        screenUrl = new MediaStream([screenShareStream.track]).toURL();
+      } else if (screenShareStream && typeof screenShareStream.toURL === 'function') {
+        screenUrl = screenShareStream.toURL();
+      }
+    } catch (_) {
+      screenUrl = null;
+    }
+    if (screenUrl) {
+      return (
+        <RTCView
+          streamURL={screenUrl}
+          style={styles.video}
+          objectFit="contain"
+          mirror={false}
+          zOrder={0}
+        />
+      );
+    }
     return (
       <View style={styles.placeholder}>
         <ActivityIndicator color="#fff" />
-        <Text style={styles.placeholderText}>Screen sharing live…</Text>
+        <Text style={styles.placeholderText}>
+          Approve screen capture when prompted, then your screen will appear here…
+        </Text>
       </View>
     );
   }
@@ -214,6 +243,8 @@ function BroadcasterMeetingInner({
   const flipInProgressRef = useRef(false);
   const lastFlipAtRef = useRef(0);
   const toggleMicFnRef = useRef(null);
+  const toggleScreenShareFnRef = useRef(null);
+  const startScreenShareFnRef = useRef(null);
   const mediaPublishAttemptedRef = useRef(false);
   const micReadyRef = useRef(false);
   const [meetingJoined, setMeetingJoined] = useState(false);
@@ -268,7 +299,22 @@ function BroadcasterMeetingInner({
     } catch (e) {
     }
 
-    if (liveModeRef.current !== 'camera') return;
+    if (liveModeRef.current === 'screen') {
+      try {
+        await delay(SCREEN_SHARE_AFTER_MIC_MS);
+        const startScreen =
+          toggleScreenShareFnRef.current ||
+          startScreenShareFnRef.current ||
+          actionsRef.current.startScreenShare ||
+          actionsRef.current.enableScreenShare;
+        if (typeof startScreen === 'function') {
+          await Promise.resolve(startScreen());
+        }
+      } catch (_) {
+        /* user may deny MediaProjection — HLS will not start until share is on */
+      }
+      return;
+    }
 
     try {
       await delay(MEDIA_PUBLISH_WEBCAM_MS);
@@ -288,9 +334,12 @@ function BroadcasterMeetingInner({
     toggleMic,
     startScreenShare,
     enableScreenShare,
+    toggleScreenShare,
     localWebcamOn,
     localWebcamStream,
     localMicOn,
+    localScreenShareOn,
+    presenterId,
     localParticipant,
     participants,
     meetingId: sdkMeetingId,
@@ -553,6 +602,8 @@ function BroadcasterMeetingInner({
   actionsRef.current.changeWebcam = changeWebcam;
   actionsRef.current.startScreenShare = startScreenShare;
   actionsRef.current.enableScreenShare = enableScreenShare;
+  toggleScreenShareFnRef.current = toggleScreenShare;
+  startScreenShareFnRef.current = startScreenShare;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
   enableMicFnRef.current = enableMic;
@@ -607,7 +658,7 @@ function BroadcasterMeetingInner({
       liveMode === 'camera' && Boolean(localMicOn) && !cameraVideoReady;
     const producerReady =
       liveMode === 'screen'
-        ? Boolean(localMicOn)
+        ? Boolean(localMicOn && localScreenShareOn)
         : cameraVideoReady || cameraAudioOnlyReady;
 
     if (!producerReady) {
@@ -630,31 +681,24 @@ function BroadcasterMeetingInner({
     }
 
     // Tiny stabilization delay so the first RTP packet has been transmitted.
+    const hlsDelay =
+      liveMode === 'screen' ? HLS_START_DELAY_MS + SCREEN_HLS_EXTRA_DELAY_MS : HLS_START_DELAY_MS;
+
     hlsStartTimerRef.current = setTimeout(async () => {
       if (endedRef.current) return;
       try {
-        if (liveMode === 'screen') {
-          const startScreen =
-            (typeof actionsRef.current.startScreenShare === 'function' &&
-              actionsRef.current.startScreenShare) ||
-            (typeof actionsRef.current.enableScreenShare === 'function' &&
-              actionsRef.current.enableScreenShare);
-          if (!startScreen) {
-            throw new Error('Screen share is not available in this build');
-          }
-          await Promise.resolve(startScreen());
+        const lp = localParticipant || localParticipantRef.current;
+        if (liveMode === 'screen' && lp && typeof lp.pin === 'function') {
+          try {
+            lp.pin();
+            pinAttemptedRef.current = true;
+          } catch (_) {}
         }
-        // Use GRID + SPEAKER to match the project's dashboard defaults (HLS Streaming
-        // Settings -> Layout Style: Grid, Who to Prioritize: Active Speaker). This avoids
-        // the SPOTLIGHT+PIN requirement that the local participant be pinned (which has
-        // failed silently when the pin call doesn't apply in time), and matches the layout
-        // the dashboard is provisioned for. `portrait` is kept for the mobile UX.
+        const isScreen = liveModeRef.current === 'screen';
         actionsRef.current.startHls?.({
-          layout: {
-            type: 'GRID',
-            priority: 'SPEAKER',
-            gridSize: 4,
-          },
+          layout: isScreen
+            ? { type: 'SPOTLIGHT', priority: 'PIN', gridSize: 1 }
+            : { type: 'GRID', priority: 'SPEAKER', gridSize: 4 },
           theme: 'DARK',
           mode: 'video-and-audio',
           quality: 'high',
@@ -665,7 +709,7 @@ function BroadcasterMeetingInner({
         setPhase('error');
         hlsStartTriggeredRef.current = false;
       }
-    }, HLS_START_DELAY_MS);
+    }, hlsDelay);
 
     return () => {
       if (hlsStartTimerRef.current) {
@@ -679,6 +723,7 @@ function BroadcasterMeetingInner({
     localWebcamOn,
     localWebcamStream,
     localMicOn,
+    localScreenShareOn,
     localParticipant,
     participantHasWebcamTrack,
     sdkMeetingId,

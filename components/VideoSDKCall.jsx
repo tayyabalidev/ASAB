@@ -13,6 +13,7 @@ import {
   Alert,
   Dimensions,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,15 +25,17 @@ import {
   useMeeting,
   useParticipant,
   RTCView,
+  MediaStream,
+  createMicrophoneAudioTrack,
 } from '@videosdk.live/react-native-sdk';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken, waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { videosdkTrace } from '../lib/videosdkTrace';
 import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
+import { startCallAudioSession, stopCallAudioSession } from '../lib/videosdkCallSession';
 import { updateCallStatus } from '../lib/calls';
 import { CallState } from '../lib/callHelper';
-
 const { width, height } = Dimensions.get('window');
 
 const UI = {
@@ -47,6 +50,73 @@ const UI = {
 /** How long to wait for the other person after we joined the room (no auto-hangup before this). */
 const WAIT_FOR_PEER_MS = 120000;
 
+function participantInitial(name) {
+  const n = String(name || '').trim();
+  return (n.charAt(0) || '?').toUpperCase();
+}
+
+function CallParticipantCard({ title, name, avatarUri, micOn, accent }) {
+  const label = String(name || 'Participant').trim() || 'Participant';
+  return (
+    <View style={styles.audioParticipantCard}>
+      <Text style={styles.audioParticipantTitle}>{title}</Text>
+      <View style={[styles.audioAvatarRing, { borderColor: accent + '88' }]}>
+        {avatarUri ? (
+          <Image source={{ uri: avatarUri }} style={styles.audioAvatarImage} />
+        ) : (
+          <LinearGradient colors={['#312e81', '#1e1b4b']} style={styles.audioAvatarInner}>
+            <Text style={styles.audioAvatarText}>{participantInitial(label)}</Text>
+          </LinearGradient>
+        )}
+        {micOn === false ? (
+          <View style={styles.audioMicOffBadge}>
+            <Feather name="mic-off" size={14} color="#fff" />
+          </View>
+        ) : null}
+      </View>
+      <Text style={styles.audioParticipantName} numberOfLines={2}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+/** Keeps remote mic playback attached (RN WebRTC audio sink). */
+function RemoteParticipantCard({ participantId, name, avatarUri, accent }) {
+  const { micOn } = useParticipant(participantId);
+  return (
+    <CallParticipantCard
+      title="Contact"
+      name={name}
+      avatarUri={avatarUri}
+      micOn={micOn}
+      accent={accent}
+    />
+  );
+}
+
+function RemoteParticipantAudioSink({ participantId }) {
+  const { micOn, micStream } = useParticipant(participantId);
+  if (!micOn || !micStream?.track) return null;
+
+  let streamURL = null;
+  try {
+    streamURL = new MediaStream([micStream.track]).toURL();
+  } catch (_) {
+    return null;
+  }
+  if (!streamURL) return null;
+
+  return (
+    <RTCView
+      streamURL={streamURL}
+      style={styles.hiddenAudioSink}
+      objectFit="cover"
+      zOrder={-1}
+    />
+  );
+}
+
 // Inner component that uses VideoSDK hooks
 const VideoSDKCallInner = ({
   roomId,
@@ -57,11 +127,12 @@ const VideoSDKCallInner = ({
   onCallEnd,
   onError,
   peerDisplayName = 'Participant',
+  localDisplayName = 'You',
+  localAvatarUri = null,
+  peerAvatarUri = null,
 }) => {
   const isPrecall = phase === 'precall';
   const insets = useSafeAreaInsets();
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(callType === 'video');
   const [callDuration, setCallDuration] = useState(0);
   /** Room joined (VideoSDK) vs peer visible — Appwrite CONNECTED only after peer is in the room */
   const [meetingJoined, setMeetingJoined] = useState(false);
@@ -91,8 +162,24 @@ const VideoSDKCallInner = ({
     setMeetingJoined(false);
   }, [callId, roomId]);
 
-  const { join, leave, toggleMic, toggleWebcam, enableMic, enableWebcam, participants, localParticipant } =
-    useMeeting({
+  const {
+    join,
+    leave,
+    muteMic,
+    unmuteMic,
+    toggleWebcam,
+    enableWebcam,
+    localMicOn,
+    localWebcamOn,
+    participants,
+    localParticipant,
+  } = useMeeting({
+    onMicRequested: ({ accept }) => {
+      accept?.();
+    },
+    onWebcamRequested: ({ accept }) => {
+      accept?.();
+    },
     onMeetingJoined: () => {
       const parts = participantsRef.current;
       const count = parts instanceof Map ? parts.size : 0;
@@ -114,15 +201,30 @@ const VideoSDKCallInner = ({
       }
       meetingJoinedRef.current = true;
       setMeetingJoined(true);
-      setTimeout(() => {
+      if (!isPrecall) {
+        startCallAudioSession(callType);
+      }
+      setTimeout(async () => {
         try {
-          enableMic?.();
-          videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN', { roomId });
-        } catch (e) {
-          videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN_ERROR', {
-            message: e?.message || String(e),
+          const speechTrack = await createMicrophoneAudioTrack({
+            encoderConfig: 'speech_standard',
+            noiseConfig: {
+              noiseSuppression: true,
+              echoCancellation: true,
+              autoGainControl: true,
+            },
           });
+          await Promise.resolve(unmuteMic?.(speechTrack));
+        } catch (_) {
+          try {
+            await Promise.resolve(unmuteMic?.());
+          } catch (micErr) {
+            videosdkTrace('S3_JOIN', 'UNMUTE_MIC_ERROR', {
+              message: micErr?.message || String(micErr),
+            });
+          }
         }
+        videosdkTrace('S3_JOIN', 'UNMUTE_MIC_AFTER_JOIN', { roomId });
         if (callType === 'video') {
           setTimeout(() => {
             try {
@@ -385,6 +487,7 @@ const VideoSDKCallInner = ({
     } catch (e) {
       console.warn('Error leaving meeting:', e);
     }
+    stopCallAudioSession();
     console.log('[CALL_END_DONE]', {
       roomId,
       callId: callIdRef.current,
@@ -412,6 +515,7 @@ const VideoSDKCallInner = ({
       }
       if (!endingRef.current) {
         endingRef.current = true;
+        stopCallAudioSession();
         try {
           leaveFnRef.current?.();
         } catch (_) {}
@@ -421,8 +525,23 @@ const VideoSDKCallInner = ({
 
   const toggleMute = async () => {
     try {
-      await toggleMic();
-      setIsMuted(prev => !prev);
+      if (localMicOn) {
+        await Promise.resolve(muteMic?.());
+      } else {
+        try {
+          const speechTrack = await createMicrophoneAudioTrack({
+            encoderConfig: 'speech_standard',
+            noiseConfig: {
+              noiseSuppression: true,
+              echoCancellation: true,
+              autoGainControl: true,
+            },
+          });
+          await Promise.resolve(unmuteMic?.(speechTrack));
+        } catch (_) {
+          await Promise.resolve(unmuteMic?.());
+        }
+      }
     } catch (error) {
       console.error('Error toggling mute:', error);
     }
@@ -433,7 +552,6 @@ const VideoSDKCallInner = ({
 
     try {
       await toggleWebcam();
-      setIsVideoEnabled(prev => !prev);
     } catch (error) {
       console.error('Error toggling video:', error);
     }
@@ -526,12 +644,34 @@ const VideoSDKCallInner = ({
           start={{ x: 0.2, y: 0 }}
           end={{ x: 0.8, y: 1 }}
         >
-          <View style={[styles.audioAvatarRing, { borderColor: UI.accentVoice + '66' }]}>
-            <LinearGradient colors={['#312e81', '#1e1b4b']} style={styles.audioAvatarInner}>
-              <Text style={styles.audioAvatarText}>{remoteInitial}</Text>
-            </LinearGradient>
+          {remoteParticipantId ? (
+            <RemoteParticipantAudioSink participantId={remoteParticipantId} />
+          ) : null}
+          <View style={styles.audioParticipantsRow}>
+            <CallParticipantCard
+              title="You"
+              name={localDisplayName}
+              avatarUri={localAvatarUri}
+              micOn={localMicOn}
+              accent={UI.accentVoice}
+            />
+            {remoteParticipantId ? (
+              <RemoteParticipantCard
+                participantId={remoteParticipantId}
+                name={remoteLabel}
+                avatarUri={peerAvatarUri}
+                accent={UI.accentVoice}
+              />
+            ) : (
+              <CallParticipantCard
+                title="Contact"
+                name={remoteLabel}
+                avatarUri={peerAvatarUri}
+                micOn={false}
+                accent={UI.accentVoice}
+              />
+            )}
           </View>
-          <Text style={styles.audioName}>{remoteLabel}</Text>
           <View style={styles.audioStatusRow}>
             <View style={[styles.statusDot, remoteConnected && styles.statusDotLive]} />
             <Text style={styles.callStatus}>{audioStatusText}</Text>
@@ -630,6 +770,9 @@ const VideoSDKCall = ({
   phase = 'active',
   initialToken = null,
   peerDisplayName,
+  localDisplayName,
+  localAvatarUri,
+  peerAvatarUri,
   onCallEnd,
   onError,
 }) => {
@@ -801,7 +944,7 @@ const VideoSDKCall = ({
         ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
         micEnabled: false,
         webcamEnabled: false,
-        name: currentUserId || 'User',
+        name: localDisplayName || currentUserId || 'User',
         debugMode: __DEV__,
         notification: {
           title: 'VideoSDK Call',
@@ -817,6 +960,9 @@ const VideoSDKCall = ({
         callId={callId}
         phase={phase}
         peerDisplayName={peerDisplayName}
+        localDisplayName={localDisplayName || 'You'}
+        localAvatarUri={localAvatarUri}
+        peerAvatarUri={peerAvatarUri}
         onCallEnd={onCallEnd}
         onError={onError}
       />
@@ -899,33 +1045,79 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
+  },
+  audioParticipantsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'flex-start',
+    width: '100%',
+    maxWidth: 400,
+    marginBottom: 28,
+  },
+  audioParticipantCard: {
+    alignItems: 'center',
+    width: '42%',
+    maxWidth: 160,
+  },
+  audioParticipantTitle: {
+    color: UI.muted,
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   audioAvatarRing: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+    width: 108,
+    height: 108,
+    borderRadius: 54,
     borderWidth: 3,
-    padding: 4,
-    marginBottom: 28,
+    padding: 3,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  audioAvatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 50,
   },
   audioAvatarInner: {
     flex: 1,
-    borderRadius: 64,
+    borderRadius: 50,
     alignItems: 'center',
     justifyContent: 'center',
   },
   audioAvatarText: {
-    fontSize: 52,
+    fontSize: 40,
     fontWeight: '700',
     color: UI.text,
   },
-  audioName: {
-    fontSize: 24,
+  audioMicOffBadge: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(239,68,68,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#0f172a',
+  },
+  audioParticipantName: {
+    fontSize: 16,
     fontWeight: '700',
     color: UI.text,
     textAlign: 'center',
-    marginBottom: 12,
+  },
+  hiddenAudioSink: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
+    left: -9999,
   },
   audioStatusRow: {
     flexDirection: 'row',

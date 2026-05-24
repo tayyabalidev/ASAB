@@ -31,6 +31,7 @@ import {
 import { CallState } from '../../lib/callHelper';
 import { stashCallSession, peekCallSession, clearCallSession } from '../../lib/pendingCallSession';
 import { videosdkTrace } from '../../lib/videosdkTrace';
+import { databases, appwriteConfig } from '../../lib/appwrite';
 import VideoSDKCallWrapper from '../../components/VideoSDKCallWrapper';
 
 const COLORS = {
@@ -78,6 +79,7 @@ const CallScreen = () => {
   const [callType, setCallType] = useState('video');
   const [isIncoming, setIsIncoming] = useState(false);
   const [error, setError] = useState(null);
+  const [peerAvatarUri, setPeerAvatarUri] = useState(null);
 
   const pulse = useRef(new Animated.Value(1)).current;
   const ringOpacity = useRef(new Animated.Value(0.35)).current;
@@ -372,6 +374,9 @@ const CallScreen = () => {
           callType={callType}
           callId={callData.$id}
           peerDisplayName={peerDisplayName(callData, isIncoming)}
+          localDisplayName={user?.username || user?.name || 'You'}
+          localAvatarUri={user?.avatar || null}
+          peerAvatarUri={peerAvatarUri}
           onCallEnd={handleCallEnd}
           onError={handleCallError}
         />

@@ -24,10 +24,12 @@ import {
   getFollowerCount,
 } from '../lib/livestream';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
-import { decodeJwtPayload, getVideoSDKToken } from '../lib/videosdkHelper';
+import { getVideoSDKToken, waitForMeetingJoinFn } from '../lib/videosdkHelper';
+import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
+const VIEWER_PRE_JOIN_DELAY_MS = Platform.OS === 'android' ? 500 : 200;
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
@@ -41,19 +43,27 @@ function pickHlsUrl(hlsUrls) {
   return typeof u === 'string' && u.length > 0 ? u : null;
 }
 
-function LiveHlsViewerInner({ onPlaybackEnded }) {
+function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
   const [hlsUrl, setHlsUrl] = useState(null);
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
   const [waitSeconds, setWaitSeconds] = useState(0);
   const joinOnceRef = useRef(false);
   const actionsRef = useRef({});
+  const onMeetingReadyRef = useRef(onMeetingReady);
+
+  useEffect(() => {
+    onMeetingReadyRef.current = onMeetingReady;
+  }, [onMeetingReady]);
   const player = useVideoPlayer(null, (p) => {
     p.loop = false;
     p.muted = false;
   });
 
   const { join, leave, hlsUrls } = useMeeting({
-    onMeetingJoined: () => setHlsStateText('MEETING_JOINED'),
+    onMeetingJoined: () => {
+      setHlsStateText('MEETING_JOINED');
+      onMeetingReadyRef.current?.();
+    },
     onHlsStarted: (payload = {}) => {
       const downstreamUrl = payload?.downstreamUrl;
       setHlsStateText('HLS_STARTED');
@@ -73,9 +83,9 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
       }
     },
     onMeetingLeft: () => onPlaybackEnded?.(),
-    onError: () => {
+    onError: (err) => {
+      console.warn('[LiveViewer] meeting error', err);
       setHlsStateText('ERROR');
-      onPlaybackEnded?.();
     },
   });
 
@@ -101,7 +111,7 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
   actionsRef.current.join = join;
   actionsRef.current.leave = leave;
 
-  // Join once — re-running on every `join` identity change called leave() mid-handshake.
+  // Join once — wait for join() binding like host/call flows.
   useEffect(() => {
     if (joinOnceRef.current) return undefined;
     joinOnceRef.current = true;
@@ -112,12 +122,22 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
           await new Promise((r) => setTimeout(r, VIEWER_PRE_JOIN_DELAY_MS));
         }
         if (cancelled) return;
-        await Promise.resolve(actionsRef.current.join?.());
+        let joinFn = actionsRef.current.join;
+        if (typeof joinFn !== 'function') {
+          joinFn = await waitForMeetingJoinFn(() => actionsRef.current.join, {
+            isCancelled: () => cancelled,
+            timeoutMs: 6000,
+            intervalMs: 50,
+          });
+        }
+        if (cancelled || !joinFn) {
+          throw new Error('VideoSDK viewer join() was not ready');
+        }
+        await Promise.resolve(joinFn());
       } catch (e) {
         if (cancelled) return;
         console.error('[LiveViewer] join failed', e);
         setHlsStateText('ERROR');
-        onPlaybackEnded?.();
       }
     })();
     return () => {
@@ -126,7 +146,7 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
         actionsRef.current.leave?.();
       } catch (_) {}
     };
-  }, [onPlaybackEnded]);
+  }, []);
 
   useEffect(() => {
     if (hlsUrl) return;
@@ -161,7 +181,44 @@ function LiveHlsViewerInner({ onPlaybackEnded }) {
   );
 }
 
-export default function LiveStreamPlayerImpl({ stream, onClose }) {
+/**
+ * Viewer shell inside MeetingProvider — HLS first, realtime layers after join.
+ * Matches VideoSDK ILS: RECV_ONLY + join() + HLS playback.
+ */
+function LiveViewerInMeeting({
+  onPlaybackEnded,
+  showChat = true,
+  displayName = 'Viewer',
+  canRaiseHand = false,
+}) {
+  const [meetingReady, setMeetingReady] = useState(false);
+
+  return (
+    <View style={styles.viewerMeetingRoot}>
+      <LiveHlsViewerInner
+        onPlaybackEnded={onPlaybackEnded}
+        onMeetingReady={() => setMeetingReady(true)}
+      />
+      {meetingReady ? (
+        <>
+          <LiveRemoteRtcTiles hideWhenSinglePublisher />
+          <LiveCoHostGuest />
+          {showChat ? (
+            <View style={styles.chatOverlay} pointerEvents="box-none">
+              <LiveMeetingChat
+                displayName={displayName}
+                showRaiseHand={canRaiseHand}
+                style={styles.chatOverlayInner}
+              />
+            </View>
+          ) : null}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true }) {
   const { user } = useGlobalContext();
   const effectiveRoomId = stream?.videosdkRoomId || null;
   const [viewerCount, setViewerCount] = useState(stream?.viewerCount || 0);
@@ -218,9 +275,13 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
         const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'live' });
         if (cancelled) return;
         if (t) {
-          const claims = decodeJwtPayload(t);
-          if (claims?.participantId) {
-            setMeetingParticipantId(String(claims.participantId));
+          const validation = validateMeetingToken(t, effectiveRoomId, { requireMod: false });
+          if (!validation.ok) {
+            setTokenError(validation.error);
+            return;
+          }
+          if (validation.participantId) {
+            setMeetingParticipantId(validation.participantId);
           }
           setToken(t);
           return;
@@ -326,12 +387,14 @@ export default function LiveStreamPlayerImpl({ stream, onClose }) {
     <View style={styles.container}>
       <View style={styles.videoArea}>
         <MeetingProvider
+          key={effectiveRoomId}
           config={{
             meetingId: effectiveRoomId,
             micEnabled: false,
             webcamEnabled: false,
             name: user.username || user.$id || 'Viewer',
             mode: 'RECV_ONLY',
+            debugMode: __DEV__,
             notification: {
               title: 'ASAB Live',
               message: 'Watching live',
