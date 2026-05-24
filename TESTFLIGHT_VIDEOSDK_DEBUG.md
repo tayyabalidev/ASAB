@@ -15,6 +15,15 @@ Restart Metro after pulling: `npx expo start -c`
 
 If you only tested in Expo before, you were not using the same UI as TestFlight.
 
+## Build 1.0.86 (faster join, flip camera, chat, mirror fix)
+
+1. **Faster startup** — shorter publish/HLS/iOS delays; no duplicate permission request at join (S2 gate only); direct `join()` when ready.
+2. **Flip camera** — center button (`refresh-cw`) calls VideoSDK `changeWebcam()` during live camera mode.
+3. **Preview mirror off** — local `RTCView` uses `mirror={false}` (published HLS unchanged).
+4. **Live chat** — host can type/send (was hidden with `isHost`); optimistic send + faster comment poll.
+
+Confirm `buildNote` **1.0.86** and traces: `CHANGE_WEBCAM_USER`, `WEBCAM_ENABLE_ONLY` removed.
+
 ## Build 1.0.85 (camera preview via useParticipant)
 
 Fixes **“Camera stream loading…”** when join/HLS succeed but `localWebcamStream` from `useMeeting` stays empty (common on iOS).

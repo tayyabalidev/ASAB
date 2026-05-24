@@ -1,101 +1,116 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  StyleSheet,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+} from 'react-native';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { addLiveComment, getLiveComments, subscribeLiveComments } from '../lib/livestream';
 import { images } from '../constants';
+
+function isValidStreamId(streamId) {
+  if (!streamId || typeof streamId !== 'string') return false;
+  const trimmedId = streamId.trim();
+  if (trimmedId === '' || trimmedId === 'null' || trimmedId === 'undefined') return false;
+  if (trimmedId.length < 16 || trimmedId.length > 24 || !/^[a-zA-Z0-9]+$/.test(trimmedId)) {
+    return false;
+  }
+  return true;
+}
 
 const LiveChatPanel = ({ streamId, isHost = false }) => {
   const { user } = useGlobalContext();
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [posting, setPosting] = useState(false);
-  const [lastCommentTime, setLastCommentTime] = useState(null);
   const flatListRef = useRef(null);
 
-  // Helper function to validate streamId
-  const isValidStreamId = (streamId) => {
-    if (!streamId || typeof streamId !== 'string') {
-      return false;
-    }
-    
-    const trimmedId = streamId.trim();
-    if (trimmedId === '' || trimmedId === 'null' || trimmedId === 'undefined') {
-      return false;
-    }
-    
-    // Check if it looks like a valid Appwrite document ID (16-24 characters, alphanumeric)
-    if (trimmedId.length < 16 || trimmedId.length > 24 || !/^[a-zA-Z0-9]+$/.test(trimmedId)) {
-      return false;
-    }
-    
-    return true;
-  };
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 80);
+  }, []);
 
   useEffect(() => {
-    // Validate streamId before proceeding
-    if (!isValidStreamId(streamId)) {
-      return;
-    }
+    if (!isValidStreamId(streamId)) return undefined;
 
-    let unsubscribe;
+    let cancelled = false;
 
-    // Load initial comments
     const loadComments = async () => {
       try {
         const initialComments = await getLiveComments(streamId);
+        if (cancelled) return;
         setComments(initialComments);
-        // Set the timestamp of the most recent comment
-        if (initialComments.length > 0) {
-          setLastCommentTime(initialComments[initialComments.length - 1].$createdAt);
-        }
-      } catch (error) {
+        scrollToBottom();
+      } catch (_) {
+        /* ignore */
       }
     };
 
     loadComments();
 
-    // Subscribe to new comments using polling
-    unsubscribe = subscribeLiveComments(streamId, (response) => {
-      if (response.events && response.events.includes('databases.*.collections.*.documents.*.create')) {
-        const newComment = response.payload;
-        
-        // Only add if it's a new comment (not already in the list)
-        setComments(prev => {
-          const exists = prev.some(comment => comment.$id === newComment.$id);
-          if (!exists) {
-            return [...prev, newComment];
-          }
-          return prev;
-        });
-        
-        // Auto-scroll to bottom
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      }
+    const unsubscribe = subscribeLiveComments(streamId, (response) => {
+      const newItem = response?.payload;
+      if (!newItem?.$id) return;
+      setComments((prev) => {
+        if (prev.some((c) => c.$id === newItem.$id)) return prev;
+        return [...prev, newItem];
+      });
+      scrollToBottom();
     });
 
     return () => {
-      if (unsubscribe && typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
+      cancelled = true;
+      unsubscribe?.();
     };
-  }, [streamId]);
+  }, [streamId, scrollToBottom]);
 
   const handleSendComment = async () => {
-    if (!newComment.trim() || !user?.$id) return;
+    const text = newComment.trim();
+    if (!text || !user?.$id || posting) return;
+
+    const tempId = `temp-${Date.now()}`;
+    const optimistic = {
+      $id: tempId,
+      streamId,
+      userId: user.$id,
+      username: user.username || 'You',
+      avatar: user.avatar,
+      content: text,
+      $createdAt: new Date().toISOString(),
+      _optimistic: true,
+    };
 
     setPosting(true);
+    setNewComment('');
+    setComments((prev) => [...prev, optimistic]);
+    scrollToBottom();
+
     try {
-      await addLiveComment(
+      const saved = await addLiveComment(
         streamId,
         user.$id,
         user.username,
         user.avatar,
-        newComment.trim()
+        text
       );
-      setNewComment('');
+      setComments((prev) =>
+        prev.map((c) => (c.$id === tempId ? saved : c))
+      );
     } catch (error) {
+      setComments((prev) => prev.filter((c) => c.$id !== tempId));
+      setNewComment(text);
+      Alert.alert(
+        'Chat',
+        error?.message || 'Could not send message. Check your connection and try again.'
+      );
     } finally {
       setPosting(false);
     }
@@ -103,25 +118,31 @@ const LiveChatPanel = ({ streamId, isHost = false }) => {
 
   const renderComment = ({ item }) => (
     <View style={styles.commentItem}>
-      <Image 
-        source={{ uri: item.avatar || images.profile }} 
-        style={styles.commentAvatar}
-      />
+      <Image source={{ uri: item.avatar || images.profile }} style={styles.commentAvatar} />
       <View style={styles.commentContent}>
-        <Text style={styles.commentUsername}>{item.username}</Text>
+        <Text style={styles.commentUsername}>
+          {item.userId === user?.$id ? 'You' : item.username}
+          {isHost && item.userId === user?.$id ? ' (Host)' : ''}
+        </Text>
         <Text style={styles.commentText}>{item.content}</Text>
       </View>
     </View>
   );
 
+  if (!isValidStreamId(streamId)) {
+    return (
+      <View style={styles.emptyWrap}>
+        <Text style={styles.emptyText}>Chat unavailable for this stream.</Text>
+      </View>
+    );
+  }
+
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-      enabled={true}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
     >
-      {/* Comments List */}
       <FlatList
         ref={flatListRef}
         data={comments}
@@ -129,33 +150,31 @@ const LiveChatPanel = ({ streamId, isHost = false }) => {
         renderItem={renderComment}
         contentContainerStyle={styles.commentsContainer}
         showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        onContentSizeChange={scrollToBottom}
+        ListEmptyComponent={
+          <Text style={styles.emptyText}>No messages yet. Say hello!</Text>
+        }
       />
 
-      {/* Input Box */}
-      {!isHost && (
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="Say something..."
-            placeholderTextColor="#888"
-            value={newComment}
-            onChangeText={setNewComment}
-            editable={!posting}
-            multiline
-            maxLength={200}
-          />
-          <TouchableOpacity 
-            style={[styles.sendButton, posting && styles.sendButtonDisabled]}
-            onPress={handleSendComment}
-            disabled={posting || !newComment.trim()}
-          >
-            <Text style={styles.sendButtonText}>
-              {posting ? '...' : '➤'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder={isHost ? 'Message viewers…' : 'Say something…'}
+          placeholderTextColor="#888"
+          value={newComment}
+          onChangeText={setNewComment}
+          editable={!posting}
+          multiline
+          maxLength={200}
+        />
+        <TouchableOpacity
+          style={[styles.sendButton, posting && styles.sendButtonDisabled]}
+          onPress={handleSendComment}
+          disabled={posting || !newComment.trim()}
+        >
+          <Text style={styles.sendButtonText}>{posting ? '…' : '➤'}</Text>
+        </TouchableOpacity>
+      </View>
     </KeyboardAvoidingView>
   );
 };
@@ -165,9 +184,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
   },
+  emptyWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  emptyText: {
+    color: '#888',
+    fontSize: 14,
+    textAlign: 'center',
+  },
   commentsContainer: {
     paddingHorizontal: 10,
     paddingVertical: 10,
+    flexGrow: 1,
   },
   commentItem: {
     flexDirection: 'row',
@@ -235,4 +266,3 @@ const styles = StyleSheet.create({
 });
 
 export default LiveChatPanel;
-

@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
 import {
   MeetingProvider,
   useMeeting,
@@ -28,7 +29,14 @@ import {
 import { endLiveStream } from '../lib/livestream';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
-import { videosdkTrace, videosdkTraceMirror } from '../lib/videosdkTrace';
+import { videosdkTrace } from '../lib/videosdkTrace';
+
+/** Tunable delays — keep small; join/media publish flow is stability-sensitive. */
+const IOS_PRE_JOIN_DELAY_MS = 200;
+const HLS_START_DELAY_MS = 200;
+const MEDIA_PUBLISH_MIC_MS = 250;
+const MEDIA_PUBLISH_MIC_TOGGLE_MS = 250;
+const MEDIA_PUBLISH_WEBCAM_MS = 350;
 
 let InCallManager = null;
 try {
@@ -145,7 +153,7 @@ function LocalPreviewInner({ liveMode, participantId }) {
       streamURL={streamURL}
       style={styles.video}
       objectFit="cover"
-      mirror
+      mirror={false}
       zOrder={0}
     />
   );
@@ -169,7 +177,6 @@ function BroadcasterMeetingInner({
   liveMode,
   onStreamEnd,
   hlsStartedRef,
-  tokenDebug,
   tokenParticipantId,
   hostUserId,
   meetingParticipantId,
@@ -180,14 +187,13 @@ function BroadcasterMeetingInner({
   const [errorMessage, setErrorMessage] = useState(null);
   const [errorDetail, setErrorDetail] = useState(null);
   const [lastSdkState, setLastSdkState] = useState('INIT');
-  const [debugLines, setDebugLines] = useState([]);
   const endedRef = useRef(false);
   const actionsRef = useRef({});
   const hlsStartTriggeredRef = useRef(false);
   const hlsStartTimerRef = useRef(null);
-  const sessionIdRef = useRef(`LS-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`);
   const hlsStartAttemptRef = useRef(0);
   const cameraReadyRef = useRef(false);
+  const lastWebcamStateKeyRef = useRef('');
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef(null);
   const connectedOnceRef = useRef(false);
@@ -202,7 +208,7 @@ function BroadcasterMeetingInner({
   const leaveFnRef = useRef(null);
   const enableMicFnRef = useRef(null);
   const enableWebcamFnRef = useRef(null);
-  const toggleWebcamFnRef = useRef(null);
+  const changeWebcamFnRef = useRef(null);
   const toggleMicFnRef = useRef(null);
   const mediaPublishAttemptedRef = useRef(false);
   const micReadyRef = useRef(false);
@@ -222,22 +228,13 @@ function BroadcasterMeetingInner({
     }
   }, []);
 
-  const pushDebugLine = useCallback(
-    (label, value) => {
-      const line = `${new Date().toISOString()} [${sessionIdRef.current}] ${label}: ${stringifyValue(value)}`;
-      setDebugLines((prev) => [line, ...prev].slice(0, 40));
-      videosdkTraceMirror(label, value == null ? '' : value);
-    },
-    [stringifyValue]
-  );
-
   const logEvent = useCallback(
     (label, value) => {
-      const payload = value == null ? '' : stringifyValue(value);
-      console.log(`[LiveBroadcast][${sessionIdRef.current}] ${label}`, payload);
-      pushDebugLine(label, value == null ? '' : value);
+      if (__DEV__) {
+        console.log(`[LiveBroadcast] ${label}`, value == null ? '' : stringifyValue(value));
+      }
     },
-    [pushDebugLine, stringifyValue]
+    [stringifyValue]
   );
 
   useEffect(() => {
@@ -305,15 +302,13 @@ function BroadcasterMeetingInner({
     const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
     try {
-      await delay(400);
+      await delay(MEDIA_PUBLISH_MIC_MS);
       await Promise.resolve(enableMicFnRef.current?.());
       videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN', { roomId: roomDebug || null });
-      logEvent('ENABLE_MIC_AFTER_JOIN', { roomId: roomDebug || null });
-      await delay(400);
+      await delay(MEDIA_PUBLISH_MIC_TOGGLE_MS);
       if (!micReadyRef.current && typeof toggleMicFnRef.current === 'function') {
         await Promise.resolve(toggleMicFnRef.current());
         videosdkTrace('S3_JOIN', 'TOGGLE_MIC_AFTER_JOIN', { roomId: roomDebug || null });
-        logEvent('TOGGLE_MIC_AFTER_JOIN', { roomId: roomDebug || null });
       }
     } catch (e) {
       videosdkTrace('S3_JOIN', 'ENABLE_MIC_AFTER_JOIN_ERROR', {
@@ -326,14 +321,9 @@ function BroadcasterMeetingInner({
     if (liveModeRef.current !== 'camera') return;
 
     try {
-      await delay(500);
+      await delay(MEDIA_PUBLISH_WEBCAM_MS);
       await Promise.resolve(enableWebcamFnRef.current?.());
       videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
-      logEvent('ENABLE_WEBCAM_AFTER_JOIN', { roomId: roomDebug || null });
-      videosdkTrace('S3_JOIN', 'WEBCAM_ENABLE_ONLY', {
-        roomId: roomDebug || null,
-        note: 'enableWebcam only; no toggleWebcam (matches VideoSDKCall)',
-      });
     } catch (e) {
       videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN_ERROR', {
         roomId: roomDebug || null,
@@ -350,7 +340,7 @@ function BroadcasterMeetingInner({
     stopHls,
     enableMic,
     enableWebcam,
-    toggleWebcam,
+    changeWebcam,
     toggleMic,
     startScreenShare,
     enableScreenShare,
@@ -710,14 +700,14 @@ function BroadcasterMeetingInner({
   actionsRef.current.startHls = startHls;
   actionsRef.current.enableMic = enableMic;
   actionsRef.current.enableWebcam = enableWebcam;
-  actionsRef.current.toggleWebcam = toggleWebcam;
+  actionsRef.current.changeWebcam = changeWebcam;
   actionsRef.current.startScreenShare = startScreenShare;
   actionsRef.current.enableScreenShare = enableScreenShare;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
   enableMicFnRef.current = enableMic;
   enableWebcamFnRef.current = enableWebcam;
-  toggleWebcamFnRef.current = toggleWebcam;
+  changeWebcamFnRef.current = changeWebcam;
   toggleMicFnRef.current = toggleMic;
   localParticipantRef.current = localParticipant || null;
 
@@ -879,7 +869,7 @@ function BroadcasterMeetingInner({
         setPhase('error');
         hlsStartTriggeredRef.current = false;
       }
-    }, 600);
+    }, HLS_START_DELAY_MS);
 
     return () => {
       if (hlsStartTimerRef.current) {
@@ -943,8 +933,11 @@ function BroadcasterMeetingInner({
       lastSdkState,
     };
 
-    logEvent('WEBCAM_STATE', payload);
-    videosdkTrace('S3_JOIN', 'LOCAL_MEDIA_STATE', payload);
+    const stateKey = `${payload.on}|${payload.hasStream}|${payload.micOn}|${phase}|${lastSdkState}`;
+    if (stateKey !== lastWebcamStateKeyRef.current) {
+      lastWebcamStateKeyRef.current = stateKey;
+      videosdkTrace('S3_JOIN', 'LOCAL_MEDIA_STATE', payload);
+    }
     if (hasMeetingStream || hasParticipantTrack) {
       videosdkTrace('S3_JOIN', 'LOCAL_CAMERA_STREAM', {
         hasMeetingToURL: typeof localWebcamStream?.toURL === 'function',
@@ -965,47 +958,19 @@ function BroadcasterMeetingInner({
     roomDebug,
   ]);
 
-  // Join once after permissions — same pattern as VideoSDKCall (no leave() in this cleanup).
+  // Join once — permissions already granted before MeetingProvider (S2 gate).
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const permCallType = liveMode === 'screen' ? 'audio' : 'video';
-      const beforePerm = await getCallMediaPermissionSnapshot(permCallType);
-      if (cancelled) return;
-      videosdkTrace('S3_JOIN', 'PERMISSION_SNAPSHOT_BEFORE', {
-        roomId: roomDebug || null,
-        liveMode,
-        ...beforePerm,
-      });
-      logEvent('PERMISSION_SNAPSHOT_BEFORE', beforePerm);
-
-      const ok = await ensureCallMediaPermissions(permCallType);
-      if (cancelled) return;
-
-      const afterPerm = await getCallMediaPermissionSnapshot(permCallType);
-      videosdkTrace('S3_JOIN', 'PERMISSION_SNAPSHOT_AFTER_ENSURE', {
-        roomId: roomDebug || null,
-        ensureOk: ok,
-        ...afterPerm,
-      });
-      logEvent('PERMISSION_ENSURE_RESULT', { ok, ...afterPerm });
-
-      if (!ok) {
-        logEvent('PERMISSION_DENIED', { liveMode, ...afterPerm });
-        Alert.alert(
-          'Permissions required',
-          liveMode === 'screen'
-            ? 'Microphone permission is required for screen live streaming.'
-            : 'Camera and microphone permissions are required for camera live streaming.'
-        );
-        setErrorMessage('Permissions denied');
-        setPhase('error');
-        return;
-      }
       try {
-        const joinFn = await waitForMeetingJoinFn(() => joinFnRef.current, {
-          isCancelled: () => cancelled,
-        });
+        let joinFn = joinFnRef.current;
+        if (typeof joinFn !== 'function') {
+          joinFn = await waitForMeetingJoinFn(() => joinFnRef.current, {
+            isCancelled: () => cancelled,
+            timeoutMs: 4000,
+            intervalMs: 40,
+          });
+        }
         if (cancelled) return;
         if (!joinFn) {
           videosdkTrace('S3_JOIN', 'JOIN_FN_TIMEOUT', { roomId: roomDebug || null });
@@ -1024,26 +989,14 @@ function BroadcasterMeetingInner({
           });
         }
         if (Platform.OS === 'ios') {
-          await new Promise((r) => setTimeout(r, 450));
+          await new Promise((r) => setTimeout(r, IOS_PRE_JOIN_DELAY_MS));
           if (cancelled) return;
-          videosdkTrace('S3_JOIN', 'IOS_STABILIZE_DELAY', { ms: 450 });
+          videosdkTrace('S3_JOIN', 'IOS_STABILIZE_DELAY', { ms: IOS_PRE_JOIN_DELAY_MS });
         }
         joinStartedAtRef.current = Date.now();
         joinRequestedRef.current = true;
         setJoinPending(true);
         videosdkTrace('S3_JOIN', 'START', { liveMode, roomId: roomDebug || null, streamId });
-        logEvent('ACTION_JOIN_MEETING', { liveMode, roomId: roomDebug || null });
-        videosdkTrace('S3_JOIN', 'LOCAL_MEDIA_BEFORE_JOIN', {
-          localWebcamOn: Boolean(localWebcamOn),
-          localMicOn: Boolean(localMicOn),
-          hasWebcamStream: Boolean(localWebcamStream),
-          webcamEnabledAtProvider: false,
-        });
-        logEvent('LOCAL_MEDIA_BEFORE_JOIN', {
-          localWebcamOn: Boolean(localWebcamOn),
-          localMicOn: Boolean(localMicOn),
-          hasWebcamStream: Boolean(localWebcamStream),
-        });
         await Promise.resolve(joinFn());
         videosdkTrace('S3_JOIN', 'REQUESTED', { roomId: roomDebug || null });
         logEvent('ACTION_JOIN_REQUESTED', { roomId: roomDebug || null });
@@ -1121,6 +1074,19 @@ function BroadcasterMeetingInner({
     finalizeEnd(true);
   };
 
+  const handleFlipCamera = useCallback(() => {
+    if (liveMode !== 'camera' || !meetingJoined) return;
+    try {
+      changeWebcamFnRef.current?.();
+      videosdkTrace('S3_JOIN', 'CHANGE_WEBCAM_USER', { roomId: roomDebug || null });
+    } catch (e) {
+      videosdkTrace('S3_JOIN', 'CHANGE_WEBCAM_USER_ERROR', {
+        roomId: roomDebug || null,
+        message: e?.message || String(e),
+      });
+    }
+  }, [liveMode, meetingJoined, roomDebug]);
+
   if (phase === 'error' && errorMessage) {
     return (
       <View style={styles.center}>
@@ -1136,14 +1102,6 @@ function BroadcasterMeetingInner({
   return (
     <View style={styles.container}>
       <LocalPreview liveMode={liveMode} localParticipantId={localParticipant?.id} />
-      {__DEV__ ? (
-        <View style={styles.devPanel}>
-          <Text style={styles.devPanelText}>phase: {phase}</Text>
-          <Text style={styles.devPanelText}>sdk: {lastSdkState || 'n/a'}</Text>
-          <Text style={styles.devPanelText}>mode: {liveMode}</Text>
-          <Text style={styles.devPanelText}>{tokenDebug}</Text>
-        </View>
-      ) : null}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={styles.topBarRow}>
           <View
@@ -1177,26 +1135,15 @@ function BroadcasterMeetingInner({
           <Text style={styles.bannerText}> Starting stream…</Text>
         </View>
       )}
-      {__DEV__ ? (
-        <View style={styles.statePanel}>
-          <Text style={styles.statePanelText}>phase: {phase}</Text>
-          <Text style={styles.statePanelText}>sdk: {lastSdkState || 'n/a'}</Text>
-          <Text style={styles.statePanelText}>joined: {meetingJoined ? 'yes' : 'no'}</Text>
-          <Text style={styles.statePanelText}>room: {roomDebug || 'n/a'}</Text>
-          <Text style={styles.statePanelText}>token: {tokenDebug || 'n/a'}</Text>
-          <Text style={styles.statePanelText}>
-            participants: {displayParticipantCount} local: {localParticipant?.id || 'none'}
-          </Text>
-          <Text style={styles.statePanelText}>
-            meetingPid: {meetingParticipantId || '(omit)'} host: {hostUserId || 'n/a'}
-          </Text>
-          <Text style={styles.statePanelText}>session: {sessionIdRef.current}</Text>
-          {debugLines.slice(0, 12).map((line, idx) => (
-            <Text key={`${idx}-${line}`} style={styles.statePanelText}>
-              {line}
-            </Text>
-          ))}
-        </View>
+      {liveMode === 'camera' && meetingJoined ? (
+        <TouchableOpacity
+          style={[styles.flipCameraBtn, { bottom: Math.max(insets.bottom, 16) + 88 }]}
+          onPress={handleFlipCamera}
+          activeOpacity={0.85}
+          accessibilityLabel="Switch camera"
+        >
+          <Feather name="refresh-cw" size={22} color="#fff" />
+        </TouchableOpacity>
       ) : null}
       <TouchableOpacity
         style={[styles.endStream, { bottom: Math.max(insets.bottom, 16) + 16 }]}
@@ -1377,7 +1324,7 @@ export default function LiveStreamBroadcasterImpl({
       liveMode,
       hasToken: Boolean(token),
       streamId,
-      buildNote: '1.0.85 useParticipant preview; enableWebcam only; no changeWebcam/toggle',
+      buildNote: '1.0.86 faster join; flip camera; preview mirror off; chat host input',
     });
     videosdkTrace('S2_SDK', 'PARTICIPANT_OVERRIDE_REMOVED', {
       jwtParticipantId: tokenParticipantId || null,
@@ -1466,7 +1413,6 @@ export default function LiveStreamBroadcasterImpl({
         liveMode={liveMode}
         onStreamEnd={onStreamEnd}
         hlsStartedRef={hlsStartedRef}
-        tokenDebug={tokenDebug}
         tokenParticipantId={tokenParticipantId}
         hostUserId={hostUserId}
         meetingParticipantId={meetingParticipantId}
@@ -1566,41 +1512,18 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 15,
   },
-  statePanel: {
+  flipCameraBtn: {
     position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 96,
-    zIndex: 20,
+    alignSelf: 'center',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: 'rgba(0,0,0,0.55)',
-    borderColor: 'rgba(255,255,255,0.2)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  statePanelText: {
-    color: '#b9f6ff',
-    fontSize: 11,
-    fontFamily: 'monospace',
-  },
-  devPanel: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
-    zIndex: 30,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  devPanelText: {
-    color: '#8df2ff',
-    fontSize: 11,
-    fontFamily: 'monospace',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 12,
   },
   endStream: {
     position: 'absolute',
