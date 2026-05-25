@@ -525,9 +525,17 @@ const VideoSDKCallInner = ({
         try {
           leaveFnRef.current?.();
         } catch (_) {}
+        if (
+          (meetingJoinedRef.current || connectedReportedRef.current) &&
+          typeof onCallEnd === 'function'
+        ) {
+          try {
+            onCallEnd();
+          } catch (_) {}
+        }
       }
     };
-  }, []);
+  }, [onCallEnd]);
 
   const toggleMute = async () => {
     try {

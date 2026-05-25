@@ -3,6 +3,7 @@ import { I18nManager } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { getCurrentUser } from "../lib/appwrite.js";
+import { releaseOrphanCalls } from "../lib/calls";
 import i18n, { supportedLanguages } from "../localization/i18n";
 
 const GlobalContext = createContext();
@@ -140,6 +141,7 @@ const GlobalProvider = ({ children }) => {
         if (res) {
           setIsLogged(true);
           setUser(res);
+          releaseOrphanCalls(res.$id).catch(() => {});
         } else {
           setIsLogged(false);
           setUser(null);

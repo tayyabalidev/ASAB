@@ -6,10 +6,9 @@
 
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
-import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useGlobalContext } from '../context/GlobalProvider';
-import { getActiveCall } from '../lib/calls';
+import { startOutgoingCall } from '../lib/startOutgoingCall';
 
 const CallButton = ({ 
   receiverId, 
@@ -23,33 +22,22 @@ const CallButton = ({
 
   const handleCall = async () => {
     try {
-      // Check if user is already in a call
-      const activeCall = await getActiveCall(user.$id);
-      if (activeCall) {
-        Alert.alert(
-          'Call in Progress',
-          'You are already in a call. Please end the current call first.'
-        );
+      if (!user?.$id) {
+        Alert.alert('Error', 'Please sign in to place a call');
         return;
       }
-
-      // Check if trying to call yourself
-      if (receiverId === user.$id) {
-        Alert.alert('Error', 'You cannot call yourself');
-        return;
-      }
-
-      // Navigate to call screen with parameters
-      router.push({
-        pathname: '/call',
-        params: {
-          receiverId: receiverId,
-          callType: callType,
-        },
+      await startOutgoingCall({
+        userId: user.$id,
+        receiverId,
+        callType,
       });
     } catch (error) {
       console.error('Error initiating call:', error);
-      Alert.alert('Error', 'Failed to initiate call. Please try again.');
+      const message =
+        error?.message === 'You cannot call yourself'
+          ? error.message
+          : 'Failed to initiate call. Please try again.';
+      Alert.alert('Error', message);
     }
   };
 

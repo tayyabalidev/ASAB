@@ -27,6 +27,8 @@ import {
   endCall,
   getCallById,
   subscribeCallUpdates,
+  releaseOrphanCalls,
+  forceEndCallDocument,
 } from '../../lib/calls';
 import { CallState } from '../../lib/callHelper';
 import { stashCallSession, peekCallSession, clearCallSession } from '../../lib/pendingCallSession';
@@ -87,6 +89,9 @@ const CallScreen = () => {
   const unsubscribeRef = useRef(null);
   const isInitializedRef = useRef(false);
   const paramsRef = useRef(params);
+  const callDataRef = useRef(null);
+  const callStateRef = useRef('idle');
+  const endedRef = useRef(false);
 
   useEffect(() => {
     const paramsChanged = JSON.stringify(paramsRef.current) !== JSON.stringify(params);
@@ -135,6 +140,14 @@ const CallScreen = () => {
   }, [callState, isIncoming, pulse, ringOpacity]);
 
   useEffect(() => {
+    callDataRef.current = callData;
+  }, [callData]);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  useEffect(() => {
     if (!user || !user.$id) {
       return;
     }
@@ -142,12 +155,26 @@ const CallScreen = () => {
       return;
     }
     isInitializedRef.current = true;
+    endedRef.current = false;
     initializeCall();
 
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
+      }
+      const openStates = ['calling', 'ringing', 'connecting', 'connected', 'preparing'];
+      if (
+        !endedRef.current &&
+        callDataRef.current?.$id &&
+        openStates.includes(callStateRef.current)
+      ) {
+        endedRef.current = true;
+        clearCallSession(callDataRef.current.$id);
+        const orphanId = callDataRef.current.$id;
+        endCall(orphanId, user.$id).catch(() => {
+          forceEndCallDocument(orphanId, user.$id).catch(() => {});
+        });
       }
       isInitializedRef.current = false;
     };
@@ -226,6 +253,7 @@ const CallScreen = () => {
 
   const initiateCall = async (receiverId, type) => {
     try {
+      await releaseOrphanCalls(user.$id);
       const call = await createCall(user.$id, receiverId, type, user.username);
       setCallData(call);
 
@@ -293,6 +321,8 @@ const CallScreen = () => {
   };
 
   const handleCallEnd = async () => {
+    if (endedRef.current) return;
+    endedRef.current = true;
     try {
       if (callData?.$id) {
         clearCallSession(callData.$id);
@@ -300,6 +330,7 @@ const CallScreen = () => {
           await endCall(callData.$id, user.$id);
         } catch (e) {
           console.warn('Error ending call document:', e);
+          await forceEndCallDocument(callData.$id, user.$id).catch(() => {});
         }
       }
       if (unsubscribeRef.current) {

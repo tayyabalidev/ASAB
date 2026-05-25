@@ -18,6 +18,7 @@ import { Video } from 'expo-av';
 // ZegoCloud calling functionality has been removed
 import CallInterface from '../../components/CallInterface';
 import CallButton from '../../components/CallButton';
+import { startOutgoingCall } from '../../lib/startOutgoingCall';
 import { useTranslation } from "react-i18next";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { images } from "../../constants";
@@ -1175,13 +1176,14 @@ const Chat = () => {
         Alert.alert(t('error'), t('chat.noUserSelected'));
         return;
       }
-
-      router.push({
-        pathname: '/call',
-        params: {
-          receiverId: selectedUser.$id,
-          callType: 'audio',
-        },
+      if (!user?.$id) {
+        Alert.alert(t('error'), t('chat.signInRequired') || 'Please sign in');
+        return;
+      }
+      await startOutgoingCall({
+        userId: user.$id,
+        receiverId: selectedUser.$id,
+        callType: 'audio',
       });
     } catch (error) {
       Alert.alert(t('error'), t('chat.audioCallError', { message: error.message || '' }));
@@ -1194,13 +1196,14 @@ const Chat = () => {
         Alert.alert(t('error'), t('chat.noUserSelected'));
         return;
       }
-
-      router.push({
-        pathname: '/call',
-        params: {
-          receiverId: selectedUser.$id,
-          callType: 'video',
-        },
+      if (!user?.$id) {
+        Alert.alert(t('error'), t('chat.signInRequired') || 'Please sign in');
+        return;
+      }
+      await startOutgoingCall({
+        userId: user.$id,
+        receiverId: selectedUser.$id,
+        callType: 'video',
       });
     } catch (error) {
       Alert.alert(t('error'), t('chat.videoCallError', { message: error.message || '' }));
