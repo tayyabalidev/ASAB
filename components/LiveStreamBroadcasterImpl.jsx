@@ -109,7 +109,7 @@ function isPublisherParticipantMode(mode) {
   return m === 'SEND_AND_RECV' || m === 'CONFERENCE' || m === 'SEND_RECV';
 }
 
-function LocalPreviewInner({ liveMode, participantId, mirrorFrontCamera = true }) {
+function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
   const { localWebcamOn, localWebcamStream } = useMeeting();
   const {
     webcamOn: participantWebcamOn,
@@ -153,15 +153,17 @@ function LocalPreviewInner({ liveMode, participantId, mirrorFrontCamera = true }
 
   let streamURL = null;
   try {
-    if (localWebcamStream && typeof localWebcamStream.toURL === 'function') {
-      streamURL = localWebcamStream.toURL();
-    } else if (participantWebcamStream?.track) {
+    if (participantWebcamStream?.track) {
       streamURL = new MediaStream([participantWebcamStream.track]).toURL();
+    } else if (localWebcamStream?.track) {
+      streamURL = new MediaStream([localWebcamStream.track]).toURL();
     } else if (
       participantWebcamStream &&
       typeof participantWebcamStream.toURL === 'function'
     ) {
       streamURL = participantWebcamStream.toURL();
+    } else if (localWebcamStream && typeof localWebcamStream.toURL === 'function') {
+      streamURL = localWebcamStream.toURL();
     }
   } catch (_) {
     streamURL = null;
@@ -178,26 +180,24 @@ function LocalPreviewInner({ liveMode, participantId, mirrorFrontCamera = true }
     );
   }
 
-  const previewMirror = mirrorFrontCamera;
-  const androidBackOrientationFix =
-    Platform.OS === 'android' && !mirrorFrontCamera
-      ? { transform: [{ rotate: '180deg' }] }
-      : null;
+  // VideoSDK ILS ParticipantView: mirror={isLocal ? true : false} for remote tiles.
+  // Full-screen local preview on Android: RTCView mirror flips L/R on many devices for
+  // both sensors — leave mirror off on Android; iOS front uses mirror for natural selfie.
+  const previewMirror =
+    Platform.OS === 'android' ? false : Boolean(useFrontCamera);
 
   return (
-    <View style={[styles.video, androidBackOrientationFix]}>
-      <RTCView
-        streamURL={streamURL}
-        style={StyleSheet.absoluteFill}
-        objectFit="cover"
-        mirror={previewMirror}
-        zOrder={0}
-      />
-    </View>
+    <RTCView
+      streamURL={streamURL}
+      style={styles.video}
+      objectFit="cover"
+      mirror={previewMirror}
+      zOrder={0}
+    />
   );
 }
 
-function LocalPreview({ liveMode, localParticipantId, mirrorFrontCamera }) {
+function LocalPreview({ liveMode, localParticipantId, useFrontCamera }) {
   if (!localParticipantId) {
     return (
       <View style={styles.placeholder}>
@@ -210,7 +210,7 @@ function LocalPreview({ liveMode, localParticipantId, mirrorFrontCamera }) {
     <LocalPreviewInner
       liveMode={liveMode}
       participantId={localParticipantId}
-      mirrorFrontCamera={mirrorFrontCamera}
+      useFrontCamera={useFrontCamera}
     />
   );
 }
@@ -230,8 +230,8 @@ function BroadcasterMeetingInner({
   const insets = useSafeAreaInsets();
   const [showChat, setShowChat] = useState(false);
   const [showGuests, setShowGuests] = useState(false);
-  /** Front camera preview uses mirror=true (natural selfie); back camera uses false. */
-  const [mirrorFrontCamera, setMirrorFrontCamera] = useState(true);
+  /** Tracks front vs back for preview mirroring (VideoSDK ILS: mirror only for local front). */
+  const [useFrontCamera, setUseFrontCamera] = useState(true);
   const [phase, setPhase] = useState('joining');
   const [errorMessage, setErrorMessage] = useState(null);
   const [errorDetail, setErrorDetail] = useState(null);
@@ -872,7 +872,7 @@ function BroadcasterMeetingInner({
         await new Promise((r) => setTimeout(r, 400));
       }
       await Promise.resolve(changeWebcamFnRef.current?.());
-      setMirrorFrontCamera((prev) => !prev);
+      setUseFrontCamera((prev) => !prev);
     } catch (_) {
       /* ignore — stream may recover without blocking UI */
     } finally {
@@ -899,7 +899,7 @@ function BroadcasterMeetingInner({
       <LocalPreview
         liveMode={liveMode}
         localParticipantId={localParticipant?.id}
-        mirrorFrontCamera={mirrorFrontCamera}
+        useFrontCamera={useFrontCamera}
       />
       <LiveRemoteRtcTiles excludeParticipantId={localParticipant?.id} />
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>

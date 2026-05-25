@@ -35,7 +35,10 @@ import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
-const VIEWER_PRE_JOIN_DELAY_MS = Platform.OS === 'android' ? 500 : 200;
+/** VideoSDK ILS example joins after ~1000ms; Android needs the binding delay. */
+const VIEWER_PRE_JOIN_DELAY_MS = Platform.OS === 'android' ? 1000 : 400;
+/** Match ILSContainer: mount viewer UI shortly after onMeetingJoined. */
+const VIEWER_POST_JOIN_UI_DELAY_MS = 500;
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
@@ -75,8 +78,7 @@ function streamToUrl(mediaStream) {
   return null;
 }
 
-/** Low-latency WebRTC watch path (replaces delayed HLS when host media is available). */
-function HostWebRtcLiveLayer({ participantId, onActiveChange }) {
+function HostWebRtcLiveLayerInner({ participantId, onActiveChange }) {
   const { webcamOn, webcamStream, micOn, micStream, screenShareOn, screenShareStream } =
     useParticipant(participantId);
 
@@ -117,7 +119,19 @@ function HostWebRtcLiveLayer({ participantId, onActiveChange }) {
   );
 }
 
-function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
+/** Low-latency WebRTC watch path (replaces delayed HLS when host media is available). */
+function HostWebRtcLiveLayer({ participantId, onActiveChange }) {
+  if (!participantId || typeof participantId !== 'string') return null;
+  return (
+    <HostWebRtcLiveLayerInner participantId={participantId} onActiveChange={onActiveChange} />
+  );
+}
+
+function LiveHlsViewerInner({
+  onPlaybackEnded,
+  onMeetingReady,
+  suppressPlayback = false,
+}) {
   const [hlsUrl, setHlsUrl] = useState(null);
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
   const [waitSeconds, setWaitSeconds] = useState(0);
@@ -292,11 +306,12 @@ function RemoteWebRtcAudioMute({ participantId }) {
   return <RemoteWebRtcAudioMuteInner participantId={participantId} />;
 }
 
-function LiveViewerRealtimeLayers({
+function LiveViewerJoinedLayers({
   showChat,
   displayName,
   canRaiseHand,
-  webrtcLiveActive = false,
+  webrtcLiveActive,
+  onWebRtcLiveActive,
 }) {
   const { participants, localParticipant } = useMeeting();
   const localId = localParticipant?.id;
@@ -305,6 +320,11 @@ function LiveViewerRealtimeLayers({
     localMode === 'SEND_AND_RECV' ||
     localMode === 'SEND_RECV' ||
     localMode === 'CONFERENCE';
+
+  const hostPublisherId = useMemo(
+    () => pickPrimaryHostPublisherId(participants, localId),
+    [participants, localId]
+  );
 
   const remotePublisherIds = useMemo(() => {
     const ids = [];
@@ -321,7 +341,14 @@ function LiveViewerRealtimeLayers({
 
   return (
     <>
-      {!localIsSpeaker &&
+      {hostPublisherId ? (
+        <HostWebRtcLiveLayer
+          participantId={hostPublisherId}
+          onActiveChange={onWebRtcLiveActive}
+        />
+      ) : null}
+      {!webrtcLiveActive &&
+        !localIsSpeaker &&
         remotePublisherIds.map((id) => (
           <RemoteWebRtcAudioMute key={`rtc-mute-${id}`} participantId={id} />
         ))}
@@ -353,32 +380,39 @@ function LiveViewerInMeeting({
 }) {
   const [meetingReady, setMeetingReady] = useState(false);
   const [webrtcLiveActive, setWebrtcLiveActive] = useState(false);
-  const { participants, localParticipant } = useMeeting();
-  const localId = localParticipant?.id;
-  const hostPublisherId = useMemo(
-    () => pickPrimaryHostPublisherId(participants, localId),
-    [participants, localId]
-  );
+  const postJoinTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (postJoinTimerRef.current) {
+        clearTimeout(postJoinTimerRef.current);
+        postJoinTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleMeetingJoined = () => {
+    if (postJoinTimerRef.current) clearTimeout(postJoinTimerRef.current);
+    postJoinTimerRef.current = setTimeout(() => {
+      setMeetingReady(true);
+      postJoinTimerRef.current = null;
+    }, VIEWER_POST_JOIN_UI_DELAY_MS);
+  };
 
   return (
     <View style={styles.viewerMeetingRoot}>
       <LiveHlsViewerInner
         onPlaybackEnded={onPlaybackEnded}
-        onMeetingReady={() => setMeetingReady(true)}
+        onMeetingReady={handleMeetingJoined}
         suppressPlayback={webrtcLiveActive}
       />
-      {meetingReady && hostPublisherId ? (
-        <HostWebRtcLiveLayer
-          participantId={hostPublisherId}
-          onActiveChange={setWebrtcLiveActive}
-        />
-      ) : null}
       {meetingReady ? (
-        <LiveViewerRealtimeLayers
+        <LiveViewerJoinedLayers
           showChat={showChat}
           displayName={displayName}
           canRaiseHand={canRaiseHand}
           webrtcLiveActive={webrtcLiveActive}
+          onWebRtcLiveActive={setWebrtcLiveActive}
         />
       ) : null}
     </View>
