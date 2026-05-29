@@ -163,19 +163,6 @@ const CallScreen = () => {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
-      const openStates = ['calling', 'ringing', 'connecting', 'connected', 'preparing'];
-      if (
-        !endedRef.current &&
-        callDataRef.current?.$id &&
-        openStates.includes(callStateRef.current)
-      ) {
-        endedRef.current = true;
-        clearCallSession(callDataRef.current.$id);
-        const orphanId = callDataRef.current.$id;
-        endCall(orphanId, user.$id).catch(() => {
-          forceEndCallDocument(orphanId, user.$id).catch(() => {});
-        });
-      }
       isInitializedRef.current = false;
     };
   }, [user?.$id, params.callId, params.receiverId, params.callType]);
@@ -379,10 +366,14 @@ const CallScreen = () => {
   const roomId = callRoomId(callData);
   const showActiveCallUi = callState === 'connecting' || callState === 'connected';
   const showOutgoingPrecall = !isIncoming && callState === 'calling' && Boolean(roomId);
+  const showIncomingPrecall = isIncoming && callState === 'ringing' && Boolean(roomId);
   const showVideoSdk = Boolean(
-    roomId && callData?.$id && user?.$id && (showOutgoingPrecall || showActiveCallUi)
+    roomId &&
+      callData?.$id &&
+      user?.$id &&
+      (showOutgoingPrecall || showIncomingPrecall || showActiveCallUi)
   );
-  const sdkPhase = showOutgoingPrecall ? 'precall' : 'active';
+  const sdkPhase = showOutgoingPrecall || showIncomingPrecall ? 'precall' : 'active';
   const stashedCallToken = callData?.$id ? peekCallSession(callData.$id)?.token : null;
 
   const renderVideoSdkLayer = () => {

@@ -152,6 +152,7 @@ const VideoSDKCallInner = ({
   const waitForPeerTimeoutRef = useRef(null);
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
+  const localParticipantIdRef = useRef(null);
   const phaseRef = useRef(phase);
   const joinRequestedRef = useRef(false);
 
@@ -273,14 +274,19 @@ const VideoSDKCallInner = ({
     },
     onParticipantLeft: (participant) => {
       console.log('👋 Participant left:', participant.id);
+      const leftId = participant?.id != null ? String(participant.id) : null;
       setTimeout(() => {
         if (endingRef.current || !connectedReportedRef.current) return;
         const parts = participantsRef.current;
-        const count = parts instanceof Map ? parts.size : 0;
-        if (count <= 1) {
+        if (!(parts instanceof Map)) return;
+        const localPid = localParticipantIdRef.current;
+        const stillHasRemote = Array.from(parts.values()).some(
+          (p) => p?.id && (!localPid || String(p.id) !== String(localPid))
+        );
+        if (!stillHasRemote && leftId && leftId !== localPid) {
           handleCallEnd();
         }
-      }, 400);
+      }, 800);
     },
   });
 
@@ -290,6 +296,8 @@ const VideoSDKCallInner = ({
 
   // VideoSDK participant ids are not Appwrite user ids — exclude local by SDK localParticipant
   const localId = localParticipant?.id;
+  localParticipantIdRef.current = localId || null;
+
   const participantCount = (() => {
     if (!localId) return meetingJoined ? 1 : 0;
     const size = participants instanceof Map ? participants.size : 0;
@@ -308,11 +316,20 @@ const VideoSDKCallInner = ({
     });
   }, [meetingJoined, localId, participantCount, participants, roomId]);
 
-  const remoteParticipants = localId
-    ? Array.from(participants.values()).filter((p) => p.id !== localId)
-    : [];
-  // Do not treat "everyone as remote" before localParticipant exists (avoids false "Connected")
-  const remoteConnected = Boolean(localId) && remoteParticipants.length > 0;
+  const remoteParticipants = (() => {
+    if (!(participants instanceof Map) || participants.size === 0) return [];
+    if (!localId) {
+      return Array.from(participants.values()).filter((p) => p?.id);
+    }
+    return Array.from(participants.values()).filter((p) => p.id && p.id !== localId);
+  })();
+  const remoteConnected =
+    meetingJoined &&
+    participants instanceof Map &&
+    participants.size > 1 &&
+    (localId
+      ? remoteParticipants.length > 0
+      : true);
 
   // Mark Appwrite call CONNECTED only once both sides are in the same VideoSDK room
   useEffect(() => {
@@ -525,14 +542,8 @@ const VideoSDKCallInner = ({
         try {
           leaveFnRef.current?.();
         } catch (_) {}
-        if (
-          (meetingJoinedRef.current || connectedReportedRef.current) &&
-          typeof onCallEnd === 'function'
-        ) {
-          try {
-            onCallEnd();
-          } catch (_) {}
-        }
+        // Do not call onCallEnd here — React remount/Strict Mode and precall→active
+        // phase changes must not hang up an active call or navigate home.
       }
     };
   }, [onCallEnd]);

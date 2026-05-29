@@ -20,6 +20,7 @@ import {
   RTCView,
   MediaStream,
   mediaDevices,
+  ReactNativeForegroundService,
 } from '@videosdk.live/react-native-sdk';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import {
@@ -91,6 +92,15 @@ function normalizeMeetingState(state) {
   if (upper === 'CONNECTING' || upper === 'RECONNECTING') return 'CONNECTING';
   if (upper === 'DISCONNECTED' || upper === 'CLOSED' || upper === 'FAILED') return upper;
   return String(raw || 'INIT');
+}
+
+/** Tracks local webcam track without calling useParticipant with a fake id (crashes on Android). */
+function HostLocalWebcamProbe({ participantId, onTrackReady }) {
+  const { webcamOn, webcamStream } = useParticipant(participantId);
+  useEffect(() => {
+    onTrackReady(Boolean(webcamOn && webcamStream?.track));
+  }, [webcamOn, webcamStream?.track, onTrackReady]);
+  return null;
 }
 
 function countRoomParticipants(participants, localParticipant) {
@@ -262,6 +272,8 @@ function BroadcasterMeetingInner({
   const toggleMicFnRef = useRef(null);
   const toggleScreenShareFnRef = useRef(null);
   const startScreenShareFnRef = useRef(null);
+  const enableScreenShareFnRef = useRef(null);
+  const screenSharePendingRef = useRef(false);
   const mediaPublishAttemptedRef = useRef(false);
   const micReadyRef = useRef(false);
   const [meetingJoined, setMeetingJoined] = useState(false);
@@ -319,15 +331,22 @@ function BroadcasterMeetingInner({
     if (liveModeRef.current === 'screen') {
       try {
         await delay(SCREEN_SHARE_AFTER_MIC_MS);
+        screenSharePendingRef.current = true;
+        if (Platform.OS === 'android' && ReactNativeForegroundService?.startAll) {
+          try {
+            ReactNativeForegroundService.startAll();
+          } catch (_) {}
+        }
         const startScreen =
-          toggleScreenShareFnRef.current ||
           startScreenShareFnRef.current ||
           actionsRef.current.startScreenShare ||
+          enableScreenShareFnRef.current ||
           actionsRef.current.enableScreenShare;
         if (typeof startScreen === 'function') {
           await Promise.resolve(startScreen());
         }
       } catch (_) {
+        screenSharePendingRef.current = false;
         /* user may deny MediaProjection — HLS will not start until share is on */
       }
       return;
@@ -468,6 +487,10 @@ function BroadcasterMeetingInner({
         (stateText === 'DISCONNECTED' || stateText === 'FAILED') &&
         !endedRef.current
       ) {
+        if (liveModeRef.current === 'screen' && screenSharePendingRef.current) {
+          return;
+        }
+
         const hadEstablishedSession = Boolean(connectedOnceRef.current);
 
         // Host never completed a stable join — do not leave/rejoin loop (worsens iOS signaling).
@@ -621,6 +644,7 @@ function BroadcasterMeetingInner({
   actionsRef.current.enableScreenShare = enableScreenShare;
   toggleScreenShareFnRef.current = toggleScreenShare;
   startScreenShareFnRef.current = startScreenShare;
+  enableScreenShareFnRef.current = enableScreenShare;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
   enableMicFnRef.current = enableMic;
@@ -630,14 +654,13 @@ function BroadcasterMeetingInner({
   localParticipantRef.current = localParticipant || null;
 
   const localParticipantIdForMedia = localParticipant?.id || '';
-  const {
-    webcamOn: participantWebcamOn,
-    webcamStream: participantWebcamStream,
-  } = useParticipant(localParticipantIdForMedia || '__asab_pending__');
+  const [participantHasWebcamTrack, setParticipantHasWebcamTrack] = useState(false);
 
-  const participantHasWebcamTrack = Boolean(
-    participantWebcamOn && participantWebcamStream?.track
-  );
+  useEffect(() => {
+    if (localScreenShareOn) {
+      screenSharePendingRef.current = false;
+    }
+  }, [localScreenShareOn]);
 
   const participantCount = countRoomParticipants(participants, localParticipant);
 
@@ -839,6 +862,11 @@ function BroadcasterMeetingInner({
         }
         if (hlsStartedRef.current) actionsRef.current.stopHls?.();
         leaveFnRef.current?.();
+        if (ReactNativeForegroundService?.stopAll) {
+          try {
+            ReactNativeForegroundService.stopAll();
+          } catch (_) {}
+        }
       } catch (_) {}
     };
   }, []);
@@ -896,6 +924,12 @@ function BroadcasterMeetingInner({
 
   return (
     <View style={styles.container}>
+      {localParticipantIdForMedia ? (
+        <HostLocalWebcamProbe
+          participantId={localParticipantIdForMedia}
+          onTrackReady={setParticipantHasWebcamTrack}
+        />
+      ) : null}
       <LocalPreview
         liveMode={liveMode}
         localParticipantId={localParticipant?.id}

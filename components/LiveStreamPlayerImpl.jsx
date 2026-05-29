@@ -136,6 +136,7 @@ function LiveHlsViewerInner({
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
   const [waitSeconds, setWaitSeconds] = useState(0);
   const joinOnceRef = useRef(false);
+  const meetingJoinedRef = useRef(false);
   const actionsRef = useRef({});
   const onMeetingReadyRef = useRef(onMeetingReady);
 
@@ -149,6 +150,7 @@ function LiveHlsViewerInner({
 
   const { join, leave, hlsUrls } = useMeeting({
     onMeetingJoined: () => {
+      meetingJoinedRef.current = true;
       setHlsStateText('MEETING_JOINED');
       onMeetingReadyRef.current?.();
     },
@@ -170,7 +172,11 @@ function LiveHlsViewerInner({
         onPlaybackEnded?.();
       }
     },
-    onMeetingLeft: () => onPlaybackEnded?.(),
+    onMeetingLeft: () => {
+      // Do not navigate home on transient SDK leave during join/reconnect.
+      // Stream end is handled via onHlsStateChanged (HLS_STOPPED) or isLive=false subscription.
+      if (!meetingJoinedRef.current) return;
+    },
     onError: (err) => {
       console.warn('[LiveViewer] meeting error', err);
       setHlsStateText('ERROR');
