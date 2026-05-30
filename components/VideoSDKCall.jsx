@@ -122,6 +122,18 @@ function RemoteParticipantAudioSink({ participantId }) {
   );
 }
 
+function countRemoteParticipants(participants, localId) {
+  if (!(participants instanceof Map) || participants.size === 0) return 0;
+  let remote = 0;
+  participants.forEach((p, mapId) => {
+    const pid = p?.id != null ? String(p.id) : mapId != null ? String(mapId) : '';
+    if (!pid) return;
+    if (localId && String(pid) === String(localId)) return;
+    remote += 1;
+  });
+  return remote;
+}
+
 // Inner component that uses VideoSDK hooks
 const VideoSDKCallInner = ({
   roomId,
@@ -139,6 +151,7 @@ const VideoSDKCallInner = ({
   const isPrecall = phase === 'precall';
   const insets = useSafeAreaInsets();
   const [callDuration, setCallDuration] = useState(0);
+  const [peerPresent, setPeerPresent] = useState(false);
   /** Room joined (VideoSDK) vs peer visible — Appwrite CONNECTED only after peer is in the room */
   const [meetingJoined, setMeetingJoined] = useState(false);
   
@@ -166,6 +179,7 @@ const VideoSDKCallInner = ({
     joinRequestedRef.current = false;
     meetingJoinedRef.current = false;
     setMeetingJoined(false);
+    setPeerPresent(false);
   }, [callId, roomId]);
 
   const {
@@ -248,12 +262,19 @@ const VideoSDKCallInner = ({
     },
     onMeetingLeft: () => {
       console.log('👋 Left VideoSDK meeting');
-      const hadJoined = meetingJoinedRef.current;
       meetingJoinedRef.current = false;
-      // Precall: stay on ring UI if signaling drops; active call ends when peer leaves.
-      if (!endingRef.current && hadJoined && phaseRef.current === 'active') {
-        handleCallEnd();
-      }
+      setMeetingJoined(false);
+      if (endingRef.current || phaseRef.current !== 'active') return;
+      // Ignore transient signaling drops; only end if peer is still gone after a short grace period.
+      setTimeout(() => {
+        if (endingRef.current || meetingJoinedRef.current) return;
+        const parts = participantsRef.current;
+        const localPid = localParticipantIdRef.current;
+        const remoteCount = countRemoteParticipants(parts, localPid);
+        if (remoteCount === 0 && connectedReportedRef.current) {
+          handleCallEnd();
+        }
+      }, 2500);
     },
     onError: (error) => {
       console.error('❌ VideoSDK error:', error);
@@ -265,6 +286,10 @@ const VideoSDKCallInner = ({
     onParticipantJoined: (participant) => {
       const parts = participantsRef.current;
       const count = parts instanceof Map ? parts.size : 0;
+      const localPid = localParticipantIdRef.current;
+      if (participant?.id && String(participant.id) !== String(localPid)) {
+        setPeerPresent(true);
+      }
       videosdkTrace('S4_PARTICIPANTS', 'JOINED', {
         roomId,
         id: participant?.id || null,
@@ -278,12 +303,10 @@ const VideoSDKCallInner = ({
       setTimeout(() => {
         if (endingRef.current || !connectedReportedRef.current) return;
         const parts = participantsRef.current;
-        if (!(parts instanceof Map)) return;
         const localPid = localParticipantIdRef.current;
-        const stillHasRemote = Array.from(parts.values()).some(
-          (p) => p?.id && (!localPid || String(p.id) !== String(localPid))
-        );
-        if (!stillHasRemote && leftId && leftId !== localPid) {
+        const remoteCount = countRemoteParticipants(parts, localPid);
+        setPeerPresent(remoteCount > 0);
+        if (remoteCount === 0 && leftId && leftId !== localPid) {
           handleCallEnd();
         }
       }, 800);
@@ -318,18 +341,25 @@ const VideoSDKCallInner = ({
 
   const remoteParticipants = (() => {
     if (!(participants instanceof Map) || participants.size === 0) return [];
-    if (!localId) {
-      return Array.from(participants.values()).filter((p) => p?.id);
-    }
-    return Array.from(participants.values()).filter((p) => p.id && p.id !== localId);
+    const localPid = localId != null ? String(localId) : null;
+    const remotes = [];
+    participants.forEach((p, mapId) => {
+      const pid = p?.id != null ? String(p.id) : mapId != null ? String(mapId) : '';
+      if (!pid || (localPid && pid === localPid)) return;
+      remotes.push(p?.id != null ? p : { ...p, id: mapId });
+    });
+    return remotes;
   })();
+
+  useEffect(() => {
+    if (!meetingJoined) return;
+    const remoteCount = countRemoteParticipants(participants, localId);
+    if (remoteCount > 0) setPeerPresent(true);
+  }, [meetingJoined, participants, localId]);
+
   const remoteConnected =
     meetingJoined &&
-    participants instanceof Map &&
-    participants.size > 1 &&
-    (localId
-      ? remoteParticipants.length > 0
-      : true);
+    (peerPresent || countRemoteParticipants(participants, localId) > 0);
 
   // Mark Appwrite call CONNECTED only once both sides are in the same VideoSDK room
   useEffect(() => {
@@ -987,7 +1017,7 @@ const VideoSDKCall = ({
         micEnabled: false,
         webcamEnabled: false,
         name: localDisplayName || currentUserId || 'User',
-        debugMode: __DEV__,
+        debugMode: false,
         notification: {
           title: 'VideoSDK Call',
           message: 'You are in a call',

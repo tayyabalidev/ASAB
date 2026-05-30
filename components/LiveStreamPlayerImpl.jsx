@@ -15,8 +15,6 @@ import {
   MeetingProvider,
   useMeeting,
   useParticipant,
-  RTCView,
-  MediaStream,
 } from '@videosdk.live/react-native-sdk';
 import LiveMeetingChat from './LiveMeetingChat';
 import { LiveCoHostInviteListener, LiveCoHostGuestMedia } from './LiveCoHostGuest';
@@ -35,10 +33,8 @@ import { validateMeetingToken } from '../lib/videosdkTokenValidate';
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
-/** VideoSDK ILS example joins after ~1000ms; Android needs the binding delay. */
-const VIEWER_PRE_JOIN_DELAY_MS = Platform.OS === 'android' ? 1000 : 400;
-/** Match ILSContainer: mount viewer UI shortly after onMeetingJoined. */
-const VIEWER_POST_JOIN_UI_DELAY_MS = 500;
+const VIEWER_PRE_JOIN_DELAY_MS = Platform.OS === 'android' ? 800 : 200;
+const VIEWER_POST_JOIN_UI_DELAY_MS = Platform.OS === 'ios' ? 200 : 400;
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
@@ -52,86 +48,7 @@ function pickHlsUrl(hlsUrls) {
   return typeof u === 'string' && u.length > 0 ? u : null;
 }
 
-function isPublisherMode(mode) {
-  const m = String(mode || '').trim().toUpperCase();
-  return !m || m === 'SEND_AND_RECV' || m === 'SEND_RECV' || m === 'CONFERENCE';
-}
-
-function pickPrimaryHostPublisherId(participants, localId) {
-  if (!(participants instanceof Map) || !localId) return null;
-  let hostId = null;
-  participants.forEach((p, id) => {
-    if (!id || id === localId || hostId) return;
-    if (isPublisherMode(p?.mode)) hostId = String(id);
-  });
-  return hostId;
-}
-
-function streamToUrl(mediaStream) {
-  if (!mediaStream) return null;
-  try {
-    if (typeof mediaStream.toURL === 'function') return mediaStream.toURL();
-    if (mediaStream.track) return new MediaStream([mediaStream.track]).toURL();
-  } catch (_) {
-    return null;
-  }
-  return null;
-}
-
-function HostWebRtcLiveLayerInner({ participantId, onActiveChange }) {
-  const { webcamOn, webcamStream, micOn, micStream, screenShareOn, screenShareStream } =
-    useParticipant(participantId);
-
-  const screenUrl =
-    screenShareOn && screenShareStream ? streamToUrl(screenShareStream) : null;
-  const videoUrl = !screenUrl && webcamOn && webcamStream ? streamToUrl(webcamStream) : null;
-  const primaryVideoUrl = screenUrl || videoUrl;
-  const audioUrl = micOn && micStream ? streamToUrl(micStream) : null;
-
-  const isActive = Boolean(primaryVideoUrl || audioUrl);
-
-  useEffect(() => {
-    onActiveChange?.(isActive);
-  }, [isActive, onActiveChange]);
-
-  if (!isActive) return null;
-
-  return (
-    <View style={styles.webrtcLiveLayer} pointerEvents="none">
-      {primaryVideoUrl ? (
-        <RTCView
-          streamURL={primaryVideoUrl}
-          style={styles.webrtcLiveVideo}
-          objectFit="cover"
-          mirror={false}
-          zOrder={Platform.OS === 'android' ? 1 : 0}
-        />
-      ) : null}
-      {audioUrl ? (
-        <RTCView
-          streamURL={audioUrl}
-          style={styles.webrtcLiveAudioSink}
-          objectFit="cover"
-          zOrder={0}
-        />
-      ) : null}
-    </View>
-  );
-}
-
-/** Low-latency WebRTC watch path (replaces delayed HLS when host media is available). */
-function HostWebRtcLiveLayer({ participantId, onActiveChange }) {
-  if (!participantId || typeof participantId !== 'string') return null;
-  return (
-    <HostWebRtcLiveLayerInner participantId={participantId} onActiveChange={onActiveChange} />
-  );
-}
-
-function LiveHlsViewerInner({
-  onPlaybackEnded,
-  onMeetingReady,
-  suppressPlayback = false,
-}) {
+function pickHlsUrl(hlsUrls) {
   const [hlsUrl, setHlsUrl] = useState(null);
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
   const [waitSeconds, setWaitSeconds] = useState(0);
@@ -194,7 +111,7 @@ function LiveHlsViewerInner({
     player
       .replaceAsync({ uri: hlsUrl, contentType: 'hls' })
       .then(() => {
-        if (!cancelled && !suppressPlayback) player.play();
+        if (!cancelled) player.play();
       })
       .catch(() => {});
     return () => {
@@ -203,18 +120,7 @@ function LiveHlsViewerInner({
         player.pause();
       } catch (_) {}
     };
-  }, [hlsUrl, player, suppressPlayback]);
-
-  useEffect(() => {
-    try {
-      player.muted = Boolean(suppressPlayback);
-      if (suppressPlayback) {
-        player.pause();
-      } else if (hlsUrl) {
-        player.play();
-      }
-    } catch (_) {}
-  }, [suppressPlayback, hlsUrl, player]);
+  }, [hlsUrl, player]);
 
   actionsRef.current.join = join;
   actionsRef.current.leave = leave;
@@ -282,7 +188,7 @@ function LiveHlsViewerInner({
   return (
     <VideoView
       player={player}
-      style={[styles.hlsVideo, suppressPlayback && styles.hlsSuppressed]}
+      style={styles.hlsVideo}
       contentFit="cover"
       nativeControls={false}
     />
@@ -312,13 +218,7 @@ function RemoteWebRtcAudioMute({ participantId }) {
   return <RemoteWebRtcAudioMuteInner participantId={participantId} />;
 }
 
-function LiveViewerJoinedLayers({
-  showChat,
-  displayName,
-  canRaiseHand,
-  webrtcLiveActive,
-  onWebRtcLiveActive,
-}) {
+function LiveViewerJoinedLayers({ showChat, displayName, canRaiseHand }) {
   const { participants, localParticipant } = useMeeting();
   const localId = localParticipant?.id;
   const localMode = String(localParticipant?.mode || '').toUpperCase();
@@ -327,16 +227,11 @@ function LiveViewerJoinedLayers({
     localMode === 'SEND_RECV' ||
     localMode === 'CONFERENCE';
 
-  const hostPublisherId = useMemo(
-    () => pickPrimaryHostPublisherId(participants, localId),
-    [participants, localId]
-  );
-
   const remotePublisherIds = useMemo(() => {
     const ids = [];
     if (!(participants instanceof Map) || !localId) return ids;
     participants.forEach((p, id) => {
-      if (!id || id === localId) return;
+      if (!id || String(id) === String(localId)) return;
       const m = String(p?.mode || '').trim().toUpperCase();
       if (!m || m === 'SEND_AND_RECV' || m === 'CONFERENCE' || m === 'SEND_RECV') {
         ids.push(String(id));
@@ -347,14 +242,7 @@ function LiveViewerJoinedLayers({
 
   return (
     <>
-      {hostPublisherId ? (
-        <HostWebRtcLiveLayer
-          participantId={hostPublisherId}
-          onActiveChange={onWebRtcLiveActive}
-        />
-      ) : null}
-      {!webrtcLiveActive &&
-        !localIsSpeaker &&
+      {!localIsSpeaker &&
         remotePublisherIds.map((id) => (
           <RemoteWebRtcAudioMute key={`rtc-mute-${id}`} participantId={id} />
         ))}
@@ -385,7 +273,6 @@ function LiveViewerInMeeting({
   canRaiseHand = false,
 }) {
   const [meetingReady, setMeetingReady] = useState(false);
-  const [webrtcLiveActive, setWebrtcLiveActive] = useState(false);
   const postJoinTimerRef = useRef(null);
 
   useEffect(() => {
@@ -410,15 +297,12 @@ function LiveViewerInMeeting({
       <LiveHlsViewerInner
         onPlaybackEnded={onPlaybackEnded}
         onMeetingReady={handleMeetingJoined}
-        suppressPlayback={webrtcLiveActive}
       />
       {meetingReady ? (
         <LiveViewerJoinedLayers
           showChat={showChat}
           displayName={displayName}
           canRaiseHand={canRaiseHand}
-          webrtcLiveActive={webrtcLiveActive}
-          onWebRtcLiveActive={setWebrtcLiveActive}
         />
       ) : null}
     </View>
@@ -601,7 +485,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
             webcamEnabled: false,
             name: user.username || user.$id || 'Viewer',
             mode: 'RECV_ONLY',
-            debugMode: __DEV__,
+            debugMode: false,
             notification: {
               title: 'ASAB Live',
               message: 'Watching live',
@@ -715,30 +599,6 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     backgroundColor: '#000',
-  },
-  hlsSuppressed: {
-    opacity: 0,
-    position: 'absolute',
-    width: 1,
-    height: 1,
-  },
-  webrtcLiveLayer: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000',
-    zIndex: 6,
-  },
-  webrtcLiveVideo: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  webrtcLiveAudioSink: {
-    position: 'absolute',
-    width: 2,
-    height: 2,
-    bottom: 0,
-    right: 0,
-    opacity: 0.01,
   },
   hlsWaiting: {
     flex: 1,

@@ -35,16 +35,16 @@ import LiveMeetingChat from './LiveMeetingChat';
 import LiveHostGuestControls from './LiveHostGuestControls';
 import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 
-/** Tunable delays — keep small; join/media publish flow is stability-sensitive. */
-const IOS_PRE_JOIN_DELAY_MS = 200;
+/** Tunable delays — iOS uses shorter gaps; Android needs extra camera settle time. */
+const IOS_PRE_JOIN_DELAY_MS = 150;
 const ANDROID_PRE_JOIN_DELAY_MS = 500;
 const ANDROID_POST_PREWARM_MS = 350;
 const HLS_START_DELAY_MS = 200;
-const MEDIA_PUBLISH_MIC_MS = 250;
-const MEDIA_PUBLISH_MIC_TOGGLE_MS = 250;
-const MEDIA_PUBLISH_WEBCAM_MS = 350;
-const SCREEN_SHARE_AFTER_MIC_MS = 500;
-const SCREEN_HLS_EXTRA_DELAY_MS = 600;
+const MEDIA_PUBLISH_MIC_MS = Platform.OS === 'ios' ? 150 : 250;
+const MEDIA_PUBLISH_MIC_TOGGLE_MS = Platform.OS === 'ios' ? 150 : 250;
+const MEDIA_PUBLISH_WEBCAM_MS = Platform.OS === 'ios' ? 200 : 350;
+const SCREEN_SHARE_AFTER_MIC_MS = Platform.OS === 'ios' ? 400 : 500;
+const SCREEN_HLS_EXTRA_DELAY_MS = Platform.OS === 'ios' ? 400 : 600;
 
 let InCallManager = null;
 try {
@@ -103,6 +103,26 @@ function HostLocalWebcamProbe({ participantId, onTrackReady }) {
   return null;
 }
 
+/** Tracks local screen-share track for HLS start (needs real RTP, not just SDK flag). */
+function HostScreenShareProbe({ participantId, onTrackReady }) {
+  const { localScreenShareOn, localScreenShareStream } = useMeeting();
+  const { screenShareOn, screenShareStream } = useParticipant(participantId);
+  useEffect(() => {
+    const hasTrack = Boolean(
+      (localScreenShareOn && localScreenShareStream?.track) ||
+        (screenShareOn && screenShareStream?.track)
+    );
+    onTrackReady(hasTrack);
+  }, [
+    localScreenShareOn,
+    localScreenShareStream?.track,
+    screenShareOn,
+    screenShareStream?.track,
+    onTrackReady,
+  ]);
+  return null;
+}
+
 function countRoomParticipants(participants, localParticipant) {
   const localId = localParticipant?.id;
   if (!localId) {
@@ -120,7 +140,12 @@ function isPublisherParticipantMode(mode) {
 }
 
 function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
-  const { localWebcamOn, localWebcamStream } = useMeeting();
+  const {
+    localWebcamOn,
+    localWebcamStream,
+    localScreenShareOn,
+    localScreenShareStream,
+  } = useMeeting();
   const {
     webcamOn: participantWebcamOn,
     webcamStream: participantWebcamStream,
@@ -132,8 +157,12 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
   if (liveMode === 'screen') {
     let screenUrl = null;
     try {
-      if (screenShareOn && screenShareStream?.track) {
+      if (localScreenShareOn && localScreenShareStream?.track) {
+        screenUrl = new MediaStream([localScreenShareStream.track]).toURL();
+      } else if (screenShareOn && screenShareStream?.track) {
         screenUrl = new MediaStream([screenShareStream.track]).toURL();
+      } else if (localScreenShareStream && typeof localScreenShareStream.toURL === 'function') {
+        screenUrl = localScreenShareStream.toURL();
       } else if (screenShareStream && typeof screenShareStream.toURL === 'function') {
         screenUrl = screenShareStream.toURL();
       }
@@ -270,7 +299,6 @@ function BroadcasterMeetingInner({
   const flipInProgressRef = useRef(false);
   const lastFlipAtRef = useRef(0);
   const toggleMicFnRef = useRef(null);
-  const toggleScreenShareFnRef = useRef(null);
   const startScreenShareFnRef = useRef(null);
   const enableScreenShareFnRef = useRef(null);
   const screenSharePendingRef = useRef(false);
@@ -337,13 +365,28 @@ function BroadcasterMeetingInner({
             ReactNativeForegroundService.startAll();
           } catch (_) {}
         }
-        const startScreen =
-          startScreenShareFnRef.current ||
-          actionsRef.current.startScreenShare ||
-          enableScreenShareFnRef.current ||
-          actionsRef.current.enableScreenShare;
-        if (typeof startScreen === 'function') {
-          await Promise.resolve(startScreen());
+        const startFns = [
+          startScreenShareFnRef.current,
+          actionsRef.current.startScreenShare,
+          enableScreenShareFnRef.current,
+          actionsRef.current.enableScreenShare,
+        ].filter((fn) => typeof fn === 'function');
+        for (const fn of startFns) {
+          try {
+            await Promise.resolve(fn());
+            break;
+          } catch (_) {
+            /* try next SDK entry point */
+          }
+        }
+        await delay(800);
+        if (!endedRef.current && screenSharePendingRef.current) {
+          for (const fn of startFns) {
+            try {
+              await Promise.resolve(fn());
+              break;
+            } catch (_) {}
+          }
         }
       } catch (_) {
         screenSharePendingRef.current = false;
@@ -370,12 +413,10 @@ function BroadcasterMeetingInner({
     toggleMic,
     startScreenShare,
     enableScreenShare,
-    toggleScreenShare,
     localWebcamOn,
     localWebcamStream,
     localMicOn,
     localScreenShareOn,
-    presenterId,
     localParticipant,
     participants,
     meetingId: sdkMeetingId,
@@ -642,7 +683,6 @@ function BroadcasterMeetingInner({
   actionsRef.current.changeWebcam = changeWebcam;
   actionsRef.current.startScreenShare = startScreenShare;
   actionsRef.current.enableScreenShare = enableScreenShare;
-  toggleScreenShareFnRef.current = toggleScreenShare;
   startScreenShareFnRef.current = startScreenShare;
   enableScreenShareFnRef.current = enableScreenShare;
   joinFnRef.current = join;
@@ -655,12 +695,20 @@ function BroadcasterMeetingInner({
 
   const localParticipantIdForMedia = localParticipant?.id || '';
   const [participantHasWebcamTrack, setParticipantHasWebcamTrack] = useState(false);
+  const [screenShareTrackReady, setScreenShareTrackReady] = useState(false);
 
   useEffect(() => {
     if (localScreenShareOn) {
       screenSharePendingRef.current = false;
+      const lp = localParticipant || localParticipantRef.current;
+      if (liveMode === 'screen' && lp && typeof lp.pin === 'function') {
+        try {
+          lp.pin();
+          pinAttemptedRef.current = true;
+        } catch (_) {}
+      }
     }
-  }, [localScreenShareOn]);
+  }, [localScreenShareOn, liveMode, localParticipant]);
 
   const participantCount = countRoomParticipants(participants, localParticipant);
 
@@ -698,7 +746,7 @@ function BroadcasterMeetingInner({
       liveMode === 'camera' && Boolean(localMicOn) && !cameraVideoReady;
     const producerReady =
       liveMode === 'screen'
-        ? Boolean(localMicOn && localScreenShareOn)
+        ? Boolean(localMicOn && screenShareTrackReady)
         : cameraVideoReady || cameraAudioOnlyReady;
 
     if (!producerReady) {
@@ -764,6 +812,7 @@ function BroadcasterMeetingInner({
     localWebcamStream,
     localMicOn,
     localScreenShareOn,
+    screenShareTrackReady,
     localParticipant,
     participantHasWebcamTrack,
     sdkMeetingId,
@@ -925,10 +974,18 @@ function BroadcasterMeetingInner({
   return (
     <View style={styles.container}>
       {localParticipantIdForMedia ? (
-        <HostLocalWebcamProbe
-          participantId={localParticipantIdForMedia}
-          onTrackReady={setParticipantHasWebcamTrack}
-        />
+        <>
+          <HostLocalWebcamProbe
+            participantId={localParticipantIdForMedia}
+            onTrackReady={setParticipantHasWebcamTrack}
+          />
+          {liveMode === 'screen' ? (
+            <HostScreenShareProbe
+              participantId={localParticipantIdForMedia}
+              onTrackReady={setScreenShareTrackReady}
+            />
+          ) : null}
+        </>
       ) : null}
       <LocalPreview
         liveMode={liveMode}
@@ -1209,7 +1266,7 @@ export default function LiveStreamBroadcasterImpl({
     micEnabled: false,
     webcamEnabled: false,
     name: hostDisplayName || hostUserId || 'Host',
-    debugMode: __DEV__,
+    debugMode: false,
     notification: {
       title: 'ASAB Live',
       message: 'You are live',
