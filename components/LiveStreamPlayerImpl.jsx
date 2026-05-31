@@ -48,7 +48,7 @@ function pickHlsUrl(hlsUrls) {
   return typeof u === 'string' && u.length > 0 ? u : null;
 }
 
-function pickHlsUrl(hlsUrls) {
+function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
   const [hlsUrl, setHlsUrl] = useState(null);
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
   const [waitSeconds, setWaitSeconds] = useState(0);
