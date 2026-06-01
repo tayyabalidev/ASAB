@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,11 +14,9 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import {
   MeetingProvider,
   useMeeting,
-  useParticipant,
 } from '@videosdk.live/react-native-sdk';
 import LiveMeetingChat from './LiveMeetingChat';
 import { LiveCoHostInviteListener, LiveCoHostGuestMedia } from './LiveCoHostGuest';
-import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 import { useGlobalContext } from '../context/GlobalProvider';
 import {
   subscribeLiveStreamUpdates,
@@ -42,9 +40,17 @@ const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'mis
 function pickHlsUrl(hlsUrls) {
   if (!hlsUrls) return null;
   const u =
-    hlsUrls.downstreamUrl ||
+    hlsUrls.playbackHlsUrl ||
     hlsUrls.livestreamUrl ||
-    hlsUrls.playbackHlsUrl;
+    hlsUrls.downstreamUrl;
+  return typeof u === 'string' && u.length > 0 ? u : null;
+}
+
+function pickHlsUrlFromPayload(payload = {}) {
+  const u =
+    payload.playbackHlsUrl ||
+    payload.livestreamUrl ||
+    payload.downstreamUrl;
   return typeof u === 'string' && u.length > 0 ? u : null;
 }
 
@@ -54,6 +60,7 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
   const [waitSeconds, setWaitSeconds] = useState(0);
   const joinOnceRef = useRef(false);
   const meetingJoinedRef = useRef(false);
+  const playbackStartedRef = useRef(false);
   const actionsRef = useRef({});
   const onMeetingReadyRef = useRef(onMeetingReady);
 
@@ -72,20 +79,18 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
       onMeetingReadyRef.current?.();
     },
     onHlsStarted: (payload = {}) => {
-      const downstreamUrl = payload?.downstreamUrl;
       setHlsStateText('HLS_STARTED');
-      if (downstreamUrl) setHlsUrl(downstreamUrl);
+      const u = pickHlsUrlFromPayload(payload);
+      if (u) setHlsUrl(u);
     },
     onHlsStateChanged: (payload = {}) => {
       const status = payload?.status;
-      const downstreamUrl = payload?.downstreamUrl;
-      const playbackHlsUrl = payload?.playbackHlsUrl;
       if (status) setHlsStateText(status);
       if (status === 'HLS_PLAYABLE') {
-        const u = downstreamUrl || playbackHlsUrl;
+        const u = pickHlsUrlFromPayload(payload);
         if (u) setHlsUrl(u);
       }
-      if (status === 'HLS_STOPPED' || status === 'HLS_STOPPING') {
+      if (status === 'HLS_STOPPED' && playbackStartedRef.current) {
         onPlaybackEnded?.();
       }
     },
@@ -107,13 +112,16 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
 
   useEffect(() => {
     if (!hlsUrl) return;
+    playbackStartedRef.current = true;
     let cancelled = false;
     player
       .replaceAsync({ uri: hlsUrl, contentType: 'hls' })
       .then(() => {
         if (!cancelled) player.play();
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn('[LiveViewer] HLS playback failed', err?.message || err);
+      });
     return () => {
       cancelled = true;
       try {
@@ -196,57 +204,18 @@ function LiveHlsViewerInner({ onPlaybackEnded, onMeetingReady }) {
 }
 
 /**
- * Prevents duplicate host audio: viewers watch via HLS; mute remote WebRTC mic tracks.
+ * Viewer overlays after join — HLS-only video; no WebRTC tiles (avoids Android crashes).
  */
-function RemoteWebRtcAudioMuteInner({ participantId }) {
-  const { micStream } = useParticipant(participantId);
-  useEffect(() => {
-    const track = micStream?.track;
-    if (!track) return undefined;
-    track.enabled = false;
-    return () => {
-      try {
-        track.enabled = true;
-      } catch (_) {}
-    };
-  }, [micStream?.track?.id, participantId]);
-  return null;
-}
-
-function RemoteWebRtcAudioMute({ participantId }) {
-  if (!participantId) return null;
-  return <RemoteWebRtcAudioMuteInner participantId={participantId} />;
-}
-
 function LiveViewerJoinedLayers({ showChat, displayName, canRaiseHand }) {
-  const { participants, localParticipant } = useMeeting();
-  const localId = localParticipant?.id;
+  const { localParticipant } = useMeeting();
   const localMode = String(localParticipant?.mode || '').toUpperCase();
   const localIsSpeaker =
     localMode === 'SEND_AND_RECV' ||
     localMode === 'SEND_RECV' ||
     localMode === 'CONFERENCE';
 
-  const remotePublisherIds = useMemo(() => {
-    const ids = [];
-    if (!(participants instanceof Map) || !localId) return ids;
-    participants.forEach((p, id) => {
-      if (!id || String(id) === String(localId)) return;
-      const m = String(p?.mode || '').trim().toUpperCase();
-      if (!m || m === 'SEND_AND_RECV' || m === 'CONFERENCE' || m === 'SEND_RECV') {
-        ids.push(String(id));
-      }
-    });
-    return ids;
-  }, [participants, localId]);
-
   return (
     <>
-      {!localIsSpeaker &&
-        remotePublisherIds.map((id) => (
-          <RemoteWebRtcAudioMute key={`rtc-mute-${id}`} participantId={id} />
-        ))}
-      <LiveRemoteRtcTiles hideWhenSinglePublisher />
       <LiveCoHostInviteListener />
       {localIsSpeaker ? <LiveCoHostGuestMedia /> : null}
       {showChat ? (
@@ -363,7 +332,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
     setTokenLoading(true);
     (async () => {
       try {
-        const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'live' });
+        const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'viewer' });
         if (cancelled) return;
         if (t) {
           const validation = validateMeetingToken(t, effectiveRoomId, { requireMod: false });

@@ -21,6 +21,8 @@ import {
   MediaStream,
   mediaDevices,
   ReactNativeForegroundService,
+  createCameraVideoTrack,
+  Constants,
 } from '@videosdk.live/react-native-sdk';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import {
@@ -29,7 +31,7 @@ import {
 } from '../lib/videosdkMediaPermissions';
 import { endLiveStream } from '../lib/livestream';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
-import { mapLiveQualityToHls } from '../lib/videosdkLiveQuality';
+import { mapLiveQualityToHls, mapLiveQualityToEncoderConfig } from '../lib/videosdkLiveQuality';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import LiveMeetingChat from './LiveMeetingChat';
 import LiveHostGuestControls from './LiveHostGuestControls';
@@ -57,6 +59,22 @@ const { width, height } = Dimensions.get('window');
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
+
+async function createHostCameraTrack(quality, facingMode = 'user') {
+  const encoderConfig = mapLiveQualityToEncoderConfig(quality);
+  const bitrateMode =
+    Constants?.BitrateMode?.HIGH_QUALITY ??
+    Constants?.BitrateMode?.high_quality ??
+    'high_quality';
+  return createCameraVideoTrack({
+    optimizationMode: 'motion',
+    encoderConfig,
+    facingMode,
+    multiStream: false,
+    bitrateMode,
+    maxLayer: 2,
+  });
+}
 
 /**
  * Warm permissions on iOS. On Android, getUserMedia before join often leaves the camera
@@ -291,6 +309,8 @@ function BroadcasterMeetingInner({
   const joinStartedAtRef = useRef(0);
   const disconnectFatalTimerRef = useRef(null);
   const liveModeRef = useRef(liveMode);
+  const qualityRef = useRef(quality);
+  const useFrontCameraRef = useRef(true);
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
   const enableMicFnRef = useRef(null);
@@ -310,6 +330,14 @@ function BroadcasterMeetingInner({
   useEffect(() => {
     liveModeRef.current = liveMode;
   }, [liveMode]);
+
+  useEffect(() => {
+    qualityRef.current = quality;
+  }, [quality]);
+
+  useEffect(() => {
+    useFrontCameraRef.current = useFrontCamera;
+  }, [useFrontCamera]);
 
   const stopMeeting = useCallback(() => {
     const act = actionsRef.current;
@@ -397,7 +425,13 @@ function BroadcasterMeetingInner({
 
     try {
       await delay(MEDIA_PUBLISH_WEBCAM_MS);
-      await Promise.resolve(enableWebcamFnRef.current?.());
+      const facingMode = useFrontCameraRef.current ? 'user' : 'environment';
+      try {
+        const customTrack = await createHostCameraTrack(qualityRef.current, facingMode);
+        await Promise.resolve(enableWebcamFnRef.current?.(customTrack));
+      } catch (_) {
+        await Promise.resolve(enableWebcamFnRef.current?.());
+      }
     } catch (e) {
     }
   }, [roomDebug]);
@@ -818,6 +852,7 @@ function BroadcasterMeetingInner({
     sdkMeetingId,
     roomDebug,
     streamId,
+    quality,
   ]);
 
   useEffect(() => {
@@ -945,7 +980,13 @@ function BroadcasterMeetingInner({
     lastFlipAtRef.current = now;
     try {
       if (!localWebcamOn && enableWebcamFnRef.current) {
-        await Promise.resolve(enableWebcamFnRef.current());
+        const facingMode = useFrontCamera ? 'user' : 'environment';
+        try {
+          const customTrack = await createHostCameraTrack(qualityRef.current, facingMode);
+          await Promise.resolve(enableWebcamFnRef.current(customTrack));
+        } catch (_) {
+          await Promise.resolve(enableWebcamFnRef.current());
+        }
         await new Promise((r) => setTimeout(r, 400));
       }
       await Promise.resolve(changeWebcamFnRef.current?.());
