@@ -90,10 +90,10 @@ export function LiveCoHostGuestMedia() {
 
     (async () => {
       try {
-        await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 500 : 400));
+        await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 300 : 200));
         if (cancelled) return;
         await Promise.resolve(unmuteMic?.());
-        await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 500 : 400));
+        await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 300 : 200));
         if (cancelled) return;
         await Promise.resolve(enableWebcam?.());
       } catch (_) {

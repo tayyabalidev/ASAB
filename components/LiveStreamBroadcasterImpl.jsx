@@ -37,16 +37,16 @@ import LiveMeetingChat from './LiveMeetingChat';
 import LiveHostGuestControls from './LiveHostGuestControls';
 import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 
-/** Tunable delays — iOS uses shorter gaps; Android needs extra camera settle time. */
-const IOS_PRE_JOIN_DELAY_MS = 150;
-const ANDROID_PRE_JOIN_DELAY_MS = 500;
-const ANDROID_POST_PREWARM_MS = 350;
-const HLS_START_DELAY_MS = 200;
-const MEDIA_PUBLISH_MIC_MS = Platform.OS === 'ios' ? 150 : 250;
-const MEDIA_PUBLISH_MIC_TOGGLE_MS = Platform.OS === 'ios' ? 150 : 250;
-const MEDIA_PUBLISH_WEBCAM_MS = Platform.OS === 'ios' ? 200 : 350;
-const SCREEN_SHARE_AFTER_MIC_MS = Platform.OS === 'ios' ? 400 : 500;
-const SCREEN_HLS_EXTRA_DELAY_MS = Platform.OS === 'ios' ? 400 : 600;
+/** Minimal settle delays — long waits add perceived lag before HLS is available to viewers. */
+const IOS_PRE_JOIN_DELAY_MS = 80;
+const ANDROID_PRE_JOIN_DELAY_MS = 200;
+const ANDROID_POST_PREWARM_MS = 150;
+const HLS_START_DELAY_MS = 80;
+const MEDIA_PUBLISH_MIC_MS = Platform.OS === 'ios' ? 100 : 150;
+const MEDIA_PUBLISH_MIC_TOGGLE_MS = Platform.OS === 'ios' ? 100 : 150;
+const MEDIA_PUBLISH_WEBCAM_MS = Platform.OS === 'ios' ? 120 : 200;
+const SCREEN_SHARE_AFTER_MIC_MS = Platform.OS === 'ios' ? 250 : 350;
+const SCREEN_HLS_EXTRA_DELAY_MS = Platform.OS === 'ios' ? 200 : 300;
 
 let InCallManager = null;
 try {
@@ -62,10 +62,15 @@ const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'mis
 
 async function createHostCameraTrack(quality, facingMode = 'user') {
   const encoderConfig = mapLiveQualityToEncoderConfig(quality);
-  const bitrateMode =
-    Constants?.BitrateMode?.HIGH_QUALITY ??
-    Constants?.BitrateMode?.high_quality ??
-    'high_quality';
+  const q = String(quality || 'auto').toLowerCase();
+  const useHighBitrate = q === '1080p' || q === 'high';
+  const bitrateMode = useHighBitrate
+    ? Constants?.BitrateMode?.HIGH_QUALITY ??
+      Constants?.BitrateMode?.high_quality ??
+      'high_quality'
+    : Constants?.BitrateMode?.BALANCED ??
+      Constants?.BitrateMode?.balanced ??
+      'balanced';
   return createCameraVideoTrack({
     optimizationMode: 'motion',
     encoderConfig,
@@ -359,8 +364,8 @@ function BroadcasterMeetingInner({
       hlsStartedRef.current = false;
       try {
         await endLiveStream(streamId);
-      } catch (e) {
-        console.warn('endLiveStream', e);
+      } catch (_) {
+        /* stream may already be ended server-side */
       }
       if (notifyUi) {
         onStreamEnd?.();
@@ -1182,12 +1187,6 @@ export default function LiveStreamBroadcasterImpl({
         }
         if (cancelled) return;
         if (!applyHostToken(prefilled)) return;
-        if (__DEV__) {
-          console.log('[LiveBroadcast] host token ready', {
-            streamId: streamId || null,
-            roomId: effectiveRoomId,
-          });
-        }
       } catch (e) {
         if (!cancelled) setTokenError(e?.message || 'Token error');
       } finally {

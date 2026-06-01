@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Dimensions, TouchableOpacity, Alert, Text, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  Dimensions,
+  TouchableOpacity,
+  Alert,
+  Text,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { LiveStreamPlayer, LiveReactions } from '../components';
@@ -7,9 +16,8 @@ import { useGlobalContext } from '../context/GlobalProvider';
 import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/livestream';
 import { useTranslation } from 'react-i18next';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
-/** Expo Router may pass a param as string or string[] */
 function firstRouteParam(value) {
   if (value == null) return undefined;
   const v = Array.isArray(value) ? value[0] : value;
@@ -23,7 +31,6 @@ const LiveViewer = () => {
   const [stream, setStream] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showChat, setShowChat] = useState(true);
-  const [isPiP, setIsPiP] = useState(false);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
@@ -36,7 +43,7 @@ const LiveViewer = () => {
     const loadStream = async () => {
       try {
         const streamData = await getLiveStreamById(streamId);
-        
+
         if (!streamData.isLive) {
           Alert.alert(t('liveViewer.streamEndedTitle'), t('liveViewer.streamEndedMessage'));
           router.replace('/live-streams');
@@ -44,7 +51,7 @@ const LiveViewer = () => {
         }
 
         setStream(streamData);
-      } catch (error) {
+      } catch (_) {
         Alert.alert(t('common.error'), t('liveViewer.loadError'));
         router.replace('/live-streams');
       } finally {
@@ -53,10 +60,10 @@ const LiveViewer = () => {
     };
 
     loadStream();
-  }, [streamId]);
+  }, [streamId, t]);
 
   useEffect(() => {
-    if (!streamId || !user?.$id) return;
+    if (!streamId || !user?.$id) return undefined;
     joinLiveStream(streamId, user.$id).catch(() => {});
     return () => {
       leaveLiveStream(streamId, user.$id).catch(() => {});
@@ -65,19 +72,6 @@ const LiveViewer = () => {
 
   const handleClose = () => {
     router.replace('/home');
-  };
-
-  const toggleChat = () => {
-    setShowChat(prev => !prev);
-  };
-
-  const handlePiPToggle = () => {
-    setIsPiP(prev => !prev);
-    Alert.alert(
-      t('liveViewer.pip.title'),
-      isPiP ? t('liveViewer.pip.exit') : t('liveViewer.pip.enter'),
-      [{ text: t('common.ok') }]
-    );
   };
 
   if (loading || !stream) {
@@ -90,18 +84,12 @@ const LiveViewer = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <View style={styles.container}>
-          {/* Video Player - Integrate your new live streaming SDK */}
-          <LiveStreamPlayer
-            stream={stream}
-            onClose={handleClose}
-            showChat={showChat}
-          />
+          <LiveStreamPlayer stream={stream} onClose={handleClose} showChat={showChat} />
 
           {stream.liveMode === 'screen' ? (
             <View
@@ -112,29 +100,19 @@ const LiveViewer = () => {
             </View>
           ) : null}
 
-          {/* Live Reactions Overlay */}
           <LiveReactions streamId={streamId} isHost={false} />
 
-          {/* Chat Toggle Button — in-meeting chat is inside LiveStreamPlayer (VideoSDK PubSub) */}
           <TouchableOpacity
             style={[
               styles.chatToggle,
               { bottom: showChat ? height * 0.44 : Math.max(24, height * 0.06) },
             ]}
-            onPress={toggleChat}
+            onPress={() => setShowChat((prev) => !prev)}
           >
             <View style={styles.chatToggleIcon}>
               <View style={styles.chatBubble1} />
               <View style={styles.chatBubble2} />
             </View>
-          </TouchableOpacity>
-
-          {/* Picture-in-Picture Toggle Button */}
-          <TouchableOpacity 
-            style={styles.pipToggle}
-            onPress={handlePiPToggle}
-          >
-            <Text style={styles.pipIcon}>{isPiP ? '📺' : '📱'}</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -174,14 +152,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.3,
   },
-  chatPanel: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: height * 0.4,
-    backgroundColor: 'transparent',
-  },
   chatToggle: {
     position: 'absolute',
     left: 20,
@@ -216,21 +186,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     right: 0,
   },
-  pipToggle: {
-    position: 'absolute',
-    bottom: height * 0.42,
-    right: 20,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pipIcon: {
-    fontSize: 24,
-  },
 });
 
 export default LiveViewer;
-
