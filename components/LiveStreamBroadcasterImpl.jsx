@@ -242,11 +242,8 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
     );
   }
 
-  // VideoSDK ILS ParticipantView: mirror={isLocal ? true : false} for remote tiles.
-  // Full-screen local preview on Android: RTCView mirror flips L/R on many devices for
-  // both sensors — leave mirror off on Android; iOS front uses mirror for natural selfie.
-  const previewMirror =
-    Platform.OS === 'android' ? false : Boolean(useFrontCamera);
+  // Match expo-camera Go Live preview: front camera is mirrored; back camera is not.
+  const previewMirror = Boolean(useFrontCamera);
 
   return (
     <RTCView

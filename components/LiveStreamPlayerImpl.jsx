@@ -139,6 +139,8 @@ function LiveHlsViewerInner({ liveMode, onPlaybackEnded, onMeetingReady }) {
   actionsRef.current.join = join;
   actionsRef.current.leave = leave;
 
+  // Join once — do not call leave() in this effect's cleanup (Strict Mode / re-renders
+  // were disconnecting viewers before join completed). Leave only on unmount below.
   useEffect(() => {
     if (joinOnceRef.current) return undefined;
     joinOnceRef.current = true;
@@ -149,7 +151,7 @@ function LiveHlsViewerInner({ liveMode, onPlaybackEnded, onMeetingReady }) {
         if (typeof joinFn !== 'function') {
           joinFn = await waitForMeetingJoinFn(() => actionsRef.current.join, {
             isCancelled: () => cancelled,
-            timeoutMs: 6000,
+            timeoutMs: 8000,
             intervalMs: 50,
           });
         }
@@ -163,6 +165,12 @@ function LiveHlsViewerInner({ liveMode, onPlaybackEnded, onMeetingReady }) {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (!meetingJoinedRef.current) return;
       try {
         actionsRef.current.leave?.();
       } catch (_) {}
@@ -308,25 +316,27 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
     setTokenLoading(true);
     (async () => {
       try {
-        const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'viewer' });
+        const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'live' });
         if (cancelled) return;
         if (t) {
           const validation = validateMeetingToken(t, effectiveRoomId, { requireMod: false });
           if (!validation.ok) {
-            setTokenError(validation.error);
+            if (!cancelled) setTokenError(validation.error);
             return;
           }
-          if (validation.participantId) {
-            setMeetingParticipantId(validation.participantId);
+          if (!cancelled) {
+            if (validation.participantId) {
+              setMeetingParticipantId(validation.participantId);
+            }
+            setToken(t);
           }
-          setToken(t);
           return;
         }
-        setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
+        if (!cancelled) setTokenError(VIDEOSDK_TOKEN_SETUP_MESSAGE);
       } catch (e) {
         if (!cancelled) setTokenError(e?.message || 'Token error');
       } finally {
-        if (!cancelled) setTokenLoading(false);
+        setTokenLoading(false);
       }
     })();
     return () => {
@@ -386,6 +396,20 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
           Configure EXPO_PUBLIC_VIDEOSDK_TOKEN_URL and use a development build (not Expo Go).
         </Text>
         <Text style={styles.tokenHint}>{TOKEN_ENDPOINT_HINT}</Text>
+        {onClose && (
+          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+            <Text style={styles.closeButtonText}>Close</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }
+
+  if (!effectiveRoomId) {
+    return (
+      <View style={[styles.container, styles.centerFill, { padding: 24 }]}>
+        <Text style={styles.errorText}>This stream has no VideoSDK room id.</Text>
+        <Text style={styles.tokenHint}>Ask the host to start a new live stream.</Text>
         {onClose && (
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
             <Text style={styles.closeButtonText}>Close</Text>
