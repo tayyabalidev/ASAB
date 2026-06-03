@@ -6,7 +6,7 @@ import { ResizeMode, Video } from "expo-av";
 import Slider from "@react-native-community/slider";
 import { router, useFocusEffect } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { GestureHandlerRootView, PanGestureHandler, State, Gesture } from "react-native-gesture-handler";
+import { GestureHandlerRootView, PanGestureHandler, State } from "react-native-gesture-handler";
 import { LinearGradient } from 'expo-linear-gradient';
 import { WebView } from 'react-native-webview';
 
@@ -19,157 +19,9 @@ import { databases } from "../../lib/appwrite";
 import { appwriteConfig } from "../../lib/appwrite";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
 import { getPlaybackUriForPost } from "../../lib/muxPlayback";
+import { getFilterCSS, getVideoFilterCSS } from "../../lib/filterCss";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-// Get CSS filter string based on filter type and adjustments (same as in create.jsx)
-const getFilterCSS = (filterId, adjustmentsData = null) => {
-  if (!filterId || filterId === 'none') {
-    // Apply adjustments only if no filter
-    if (adjustmentsData) {
-      const parts = [];
-      if (adjustmentsData.brightness !== 0) {
-        parts.push(`brightness(${1 + (adjustmentsData.brightness / 100)})`);
-      }
-      if (adjustmentsData.contrast !== 1) {
-        parts.push(`contrast(${adjustmentsData.contrast})`);
-      }
-      if (adjustmentsData.saturation !== 1) {
-        parts.push(`saturate(${adjustmentsData.saturation})`);
-      }
-      if (adjustmentsData.hue !== 0) {
-        parts.push(`hue-rotate(${adjustmentsData.hue}deg)`);
-      }
-      return parts.length > 0 ? parts.join(' ') : 'none';
-    }
-    return 'none';
-  }
-  
-  let filterCSS = '';
-  
-  // Apply filter effects
-  switch (filterId) {
-    case 'vintage':
-      filterCSS += 'brightness(1.1) contrast(0.9) saturate(0.8) sepia(0.2)';
-      break;
-    case 'blackwhite':
-      filterCSS += 'grayscale(100%)';
-      break;
-    case 'sepia':
-      filterCSS += 'sepia(1) brightness(1.1) contrast(0.9)';
-      break;
-    case 'cool':
-      filterCSS += 'hue-rotate(30deg) saturate(0.9)';
-      break;
-    case 'warm':
-      filterCSS += 'hue-rotate(-30deg) saturate(1.1)';
-      break;
-    case 'contrast':
-      filterCSS += 'contrast(1.3)';
-      break;
-    case 'bright':
-      filterCSS += 'brightness(1.2) contrast(1.1)';
-      break;
-    default:
-      break;
-  }
-  
-  // Apply manual adjustments on top of filter
-  if (adjustmentsData) {
-    const parts = [];
-    if (adjustmentsData.brightness !== 0) {
-      parts.push(`brightness(${1 + (adjustmentsData.brightness / 100)})`);
-    }
-    if (adjustmentsData.contrast !== 1) {
-      parts.push(`contrast(${adjustmentsData.contrast})`);
-    }
-    if (adjustmentsData.saturation !== 1) {
-      parts.push(`saturate(${adjustmentsData.saturation})`);
-    }
-    if (adjustmentsData.hue !== 0) {
-      parts.push(`hue-rotate(${adjustmentsData.hue}deg)`);
-    }
-    if (parts.length > 0) {
-      filterCSS = filterCSS ? `${filterCSS} ${parts.join(' ')}` : parts.join(' ');
-    }
-  }
-  
-  return filterCSS || 'none';
-};
-
-// Generate video filter CSS with adjustments (same as in create.jsx)
-const getVideoFilterCSS = (filterId, adjustmentsData = null) => {
-  const baseFilterCSS = getFilterCSS(filterId, null);
-
-  // Add video adjustments to filter CSS
-  const adjustmentParts = [];
-
-  if (adjustmentsData) {
-    // Brightness, Lux, Highlights, and Shadows combined
-    let brightnessValue = 1;
-    if (adjustmentsData.brightness !== 0) {
-      brightnessValue *= 1 + adjustmentsData.brightness / 200;
-    }
-    if (adjustmentsData.lux !== 0) {
-      brightnessValue *= 1 + adjustmentsData.lux / 300;
-    }
-    // Highlights and Shadows - combine with brightness
-    if (adjustmentsData.highlights !== 0) {
-      brightnessValue *= 1 + (adjustmentsData.highlights / 300);
-    }
-    if (adjustmentsData.shadows !== 0) {
-      brightnessValue *= 1 - (adjustmentsData.shadows / 400);
-    }
-    if (brightnessValue !== 1) {
-      adjustmentParts.push(`brightness(${brightnessValue.toFixed(2)})`);
-    }
-
-    // Contrast and Structure combined
-    let contrastValue = 1.0;
-    if (adjustmentsData.contrast !== 0) {
-      contrastValue = 0.5 + ((adjustmentsData.contrast + 100) / 200) * 1.0;
-    }
-    if (adjustmentsData.structure !== 0) {
-      const structureValue =
-        0.5 + ((adjustmentsData.structure + 100) / 200) * 1.0;
-      contrastValue *= structureValue;
-    }
-    if (contrastValue !== 1.0) {
-      adjustmentParts.push(`contrast(${contrastValue.toFixed(2)})`);
-    }
-
-    // Saturation
-    if (adjustmentsData.saturation !== 0) {
-      const saturation = 1 + adjustmentsData.saturation / 100;
-      adjustmentParts.push(`saturate(${saturation.toFixed(2)})`);
-    }
-
-    // Warmth (hue-rotate)
-    if (adjustmentsData.warmth !== 0) {
-      const hue = (adjustmentsData.warmth / 100) * 30;
-      adjustmentParts.push(`hue-rotate(${hue.toFixed(1)}deg)`);
-    }
-
-    // Fade (opacity + desaturate)
-    if (adjustmentsData.fade !== 0) {
-      const fade = adjustmentsData.fade / 100;
-      adjustmentParts.push(`opacity(${(1 - fade * 0.3).toFixed(2)})`);
-      adjustmentParts.push(`saturate(${(1 - fade * 0.3).toFixed(2)})`);
-    }
-
-  }
-
-  // Combine base filter with adjustments
-  const allParts = [];
-  if (baseFilterCSS && baseFilterCSS !== "none") {
-    allParts.push(baseFilterCSS);
-  }
-  if (adjustmentParts.length > 0) {
-    allParts.push(adjustmentParts.join(" "));
-  }
-
-  return allParts.length > 0 ? allParts.join(" ") : "none";
-};
 
 const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused, theme, isDarkMode }) => {
   const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
@@ -3275,8 +3127,6 @@ const Home = () => {
                     returnKeyType="search"
                     autoCorrect={false}
                     autoCapitalize="none"
-                    onFocus={() => console.log('Search field focused')}
-                    onBlur={() => console.log('Search field blurred')}
                     onSubmitEditing={() => {
                       // Keep focus on the input
                       searchInputRef.current?.focus();

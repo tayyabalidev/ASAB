@@ -13,7 +13,7 @@ import { icons } from "../../../constants";
 import useAppwrite from "../../../lib/useAppwrite";
 import { getUserPosts, getCurrentUser, databases, appwriteConfig, getVideoPosterUri, getIOSCompatibleVideoUrl } from "../../../lib/appwrite";
 import { useGlobalContext } from "../../../context/GlobalProvider";
-import { EmptyState, InfoBox, VideoCard, VideoProgressBar } from "../../../components";
+import { EmptyState, VideoProgressBar } from "../../../components";
 import CallButton from "../../../components/CallButton";
 import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLike, isPostLiked, getLikeCount } from "../../../lib/appwrite";
 import { images } from "../../../constants";

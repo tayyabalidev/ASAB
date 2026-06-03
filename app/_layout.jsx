@@ -35,14 +35,14 @@ function BadgeNotificationHandler() {
 // ✅ OAuth Handler Component
 function OAuthHandler() {
   const router = useRouter();
-  const { setUser, setIsLogged } = useGlobalContext();
+  const { setUser, setIsLogged, isLogged, loading } = useGlobalContext();
   const oauthProcessingRef = useRef(false);
 
   useEffect(() => { 
     const handleDeepLink = async (url) => {
       if (!url) return;
       
-      console.log('🔗 Deep link received:', url);
+      if (__DEV__) console.log('🔗 Deep link received:', url);
       
       // Normalize URL for checking
       const normalizedUrl = url.toLowerCase();
@@ -276,8 +276,9 @@ function OAuthHandler() {
     // ✅ Listen for app state changes (when app comes back from browser)
     // This handles cases where deep link doesn't fire but OAuth completed
     const appStateSubscription = AppState.addEventListener('change', async (nextAppState) => {
-      if (nextAppState === 'active' && !oauthProcessingRef.current) {
-        console.log('📱 App state changed to active - checking for OAuth session...');
+      // Only probe for OAuth when user is not logged in (avoids router.replace('/home') during calls, live, etc.)
+      if (nextAppState === 'active' && !oauthProcessingRef.current && !loading && !isLogged) {
+        if (__DEV__) console.log('📱 App state active — checking OAuth session (signed out)');
         
         // Wait a bit for OAuth session to be established, then retry multiple times
         let retryCount = 0;
@@ -341,7 +342,7 @@ function OAuthHandler() {
       linkingSubscription.remove();
       appStateSubscription.remove();
     };
-  }, [router, setUser, setIsLogged]);
+  }, [router, setUser, setIsLogged, isLogged, loading]);
 
   return null;
 }
@@ -420,17 +421,6 @@ export default function RootLayout() {
     (typeof process !== 'undefined' && process.env && process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY) ||
     null;
 
-  // Debug: Log if key is missing (check on mount)
-  useEffect(() => {
-    
-  }, []);
-
-  // Always render the app, even if fonts fail to load
-  // StripeProvider requires a valid publishable key (starts with pk_test_ or pk_live_)
-  // If key is missing, we'll still render but Stripe won't work
-  const isValidKey = stripePublishableKey && (stripePublishableKey.startsWith('pk_test_') || stripePublishableKey.startsWith('pk_live_'));
-  
- 
   return (
     <StripeProvider publishableKey={stripePublishableKey || 'pk_test_placeholder_key_that_will_fail_but_allow_app_to_load'}>
       <GlobalProvider>

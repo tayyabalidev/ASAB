@@ -1,5 +1,4 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from "expo-router";
@@ -15,8 +14,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Contacts from 'expo-contacts';
 import * as Location from 'expo-location';
 import { Video } from 'expo-av';
-// ZegoCloud calling functionality has been removed
-import CallInterface from '../../components/CallInterface';
 import CallButton from '../../components/CallButton';
 import { startOutgoingCall } from '../../lib/startOutgoingCall';
 import { useTranslation } from "react-i18next";
@@ -24,7 +21,6 @@ import { useGlobalContext } from "../../context/GlobalProvider";
 import { images } from "../../constants";
 
 const Chat = () => {
-  const navigation = useNavigation();
   const { userId } = useLocalSearchParams();
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
@@ -59,14 +55,6 @@ const Chat = () => {
   const [playingAudioId, setPlayingAudioId] = useState(null);
   const [soundObj, setSoundObj] = useState(null);
   const [audioPlaybackStatus, setAudioPlaybackStatus] = useState({});
-  const [showCallInterface, setShowCallInterface] = useState(false);
-  const [callType, setCallType] = useState(''); // 'audio' or 'video'
-  const [callStatus, setCallStatus] = useState('calling'); // 'calling', 'connected', 'ended'
-  const [callDuration, setCallDuration] = useState(0); // Call duration in seconds
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-  const [incomingCall, setIncomingCall] = useState(null);
-  const [zegoInitialized, setZegoInitialized] = useState(false);
   const { t } = useTranslation();
   const { isRTL, theme, isDarkMode } = useGlobalContext();
 
@@ -1210,82 +1198,6 @@ const Chat = () => {
     }
   };
 
-  const handleEndCall = async () => {
-    // try {
-    //   await callManager.endCall();
-    // } catch (error) {
-    // }
-    
-    // setCallStatus('ended');
-    // // Clear call timer
-    // if (window.callTimer) {
-    //   clearInterval(window.callTimer);
-    //   window.callTimer = null;
-    // }
-    // setCallDuration(0);
-    // setIsMuted(false);
-    // setIsSpeakerOn(false);
-    // setIncomingCall(null);
-    
-    // setTimeout(() => {
-    //   setShowCallInterface(false);
-    //   setCallStatus('calling');
-    // }, 1000);
-  };
-
-  const handleAnswerCall = async () => {
-    // if (!incomingCall) return;
-    
-    // try {
-    //   const success = await callManager.acceptCall(incomingCall.roomID, incomingCall.callType);
-    //   if (success) {
-    //     setCallStatus('connected');
-    //     setCallDuration(0);
-    //     // Start call duration timer
-    //     const timer = setInterval(() => {
-    //       setCallDuration(prev => prev + 1);
-    //     }, 1000);
-        
-    //     // Store timer reference to clear it later
-    //     window.callTimer = timer;
-    //   } else {
-    //     Alert.alert('Error', 'Failed to accept call');
-    //     setShowCallInterface(false);
-    //   }
-    // } catch (error) {
-    //   Alert.alert('Error', 'Failed to accept call: ' + error.message);
-    //   setShowCallInterface(false);
-    // }
-  };
-
-  const handleRejectCall = async () => {
-    // try {
-    //   await callManager.rejectCall();
-    // } catch (error) {  
-    // }
-    
-    // setCallStatus('ended');
-    // setIncomingCall(null);
-    
-    // setTimeout(() => {
-    //   setShowCallInterface(false);
-    //   setCallStatus('calling');
-    // }, 1000);
-  };
-
-  const handleMuteToggle = async () => {
-    // try {
-    //   const muted = await callManager.toggleMute();
-    //   setIsMuted(muted);
-    // } catch (error) {
-    // }
-  };
-
-  const handleSpeakerToggle = () => {
-    setIsSpeakerOn(!isSpeakerOn);
-    // Note: Speaker control might need additional implementation
-  };
-
   // Delete message function
   const deleteMessage = async (messageId) => {
     try {
@@ -1386,16 +1298,6 @@ const Chat = () => {
     }
   };
 
-  // Debug function to check ZEGO status
-  const checkZegoStatus = () => {
-    // const status = getZegoStatus();
-    // Alert.alert(
-    //   'ZEGO Status',
-    //   `ZegoExpressEngine: ${status.zegoExpressEngine}\nZIM: ${status.zim}\nUser: ${status.currentUser ? 'Set' : 'Not Set'}\nLogged In: ${status.isLoggedIn}\nFallback Mode: ${status.useFallback ? 'Yes' : 'No'}`,
-    //   [{ text: 'OK' }]
-    // );
-  };
-
   const themedColor = (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue);
 
   return (
@@ -1415,21 +1317,6 @@ const Chat = () => {
                   onChangeText={setSearch}
                 />
               </View>
-              <TouchableOpacity 
-                onPress={checkZegoStatus}
-                style={{ 
-                  marginLeft: 8, 
-                  backgroundColor: theme.accent, 
-                  borderRadius: 18, 
-                  padding: 8,
-                  width: 36,
-                  height: 36,
-                  justifyContent: 'center',
-                  alignItems: 'center'
-                }}
-              >
-                <MaterialCommunityIcons name="bug" size={18} color="#fff" />
-              </TouchableOpacity>
             </View>
             </LinearGradient>
 
@@ -2516,25 +2403,6 @@ const Chat = () => {
           </View>
         </Pressable>
       </RNModal>
-      {/* Call Interface Component */}
-      <CallInterface
-        visible={showCallInterface}
-        callType={callType}
-        selectedUser={selectedUser}
-        currentUser={currentUser}
-        onClose={() => setShowCallInterface(false)}
-        onCallEnd={handleEndCall}
-        onCallAccept={handleAnswerCall}
-        onCallReject={handleRejectCall}
-        callStatus={callStatus}
-        callDuration={callDuration}
-        isMuted={isMuted}
-        isSpeakerOn={isSpeakerOn}
-        onMuteToggle={handleMuteToggle}
-        onSpeakerToggle={handleSpeakerToggle}
-        onEndCall={handleEndCall}
-        onAnswerCall={handleAnswerCall}
-      />
     </>
   );
 };

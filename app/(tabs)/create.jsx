@@ -42,6 +42,7 @@ import {
   processVideoWithAppwrite,
 } from "../../lib/videoProcessor";
 import { exportEditedMedia } from "../../lib/mediaExporter";
+import { getFilterCSS, getVideoFilterCSS } from "../../lib/filterCss";
 import {
   CustomButton,
   FormField,
@@ -134,6 +135,10 @@ const Create = () => {
   const [showVideoFilterModal, setShowVideoFilterModal] = useState(false);
   const [showMusicModal, setShowMusicModal] = useState(false);
   const [videoFilterCSS, setVideoFilterCSS] = useState("none");
+  const resolveVideoFilterCSS = useCallback(
+    () => getVideoFilterCSS(form.filter, videoAdjustments),
+    [form.filter, videoAdjustments]
+  );
   const [videoThumbnailBase64, setVideoThumbnailBase64] = useState(null); // Base64 image for filter thumbnails
   const videoThumbnailWebViewRef = useRef(null); // Ref for WebView that extracts video frame
   const [processedVideoUri, setProcessedVideoUri] = useState(null); // URI of server-processed video
@@ -399,10 +404,10 @@ const Create = () => {
   // Update video filter CSS when adjustments change
   useEffect(() => {
     if (form.video) {
-      const newFilterCSS = getVideoFilterCSS();
+      const newFilterCSS = resolveVideoFilterCSS();
       setVideoFilterCSS(newFilterCSS);
     }
-  }, [videoAdjustments, form.filter, form.video, getVideoFilterCSS]);
+  }, [videoAdjustments, form.filter, form.video, resolveVideoFilterCSS]);
 
   // Extract video frame for filter thumbnails (like photos do with base64)
   useEffect(() => {
@@ -780,70 +785,6 @@ const Create = () => {
     }
   };
 
-  // Generate video filter CSS with adjustments
-  const getVideoFilterCSS = useCallback(() => {
-    const baseFilterCSS = getFilterCSS(form.filter, null);
-
-    // Add video adjustments to filter CSS
-    const adjustmentParts = [];
-
-    // Brightness and Lux combined
-    let brightnessValue = 1;
-    if (videoAdjustments.brightness !== 0) {
-      brightnessValue *= 1 + videoAdjustments.brightness / 200;
-    }
-    if (videoAdjustments.lux !== 0) {
-      brightnessValue *= 1 + videoAdjustments.lux / 300;
-    }
-    if (brightnessValue !== 1) {
-      adjustmentParts.push(`brightness(${brightnessValue.toFixed(2)})`);
-    }
-
-    // Contrast and Structure combined
-    let contrastValue = 1.0;
-    if (videoAdjustments.contrast !== 0) {
-      contrastValue = 0.5 + ((videoAdjustments.contrast + 100) / 200) * 1.0;
-    }
-    if (videoAdjustments.structure !== 0) {
-      const structureValue =
-        0.5 + ((videoAdjustments.structure + 100) / 200) * 1.0;
-      contrastValue *= structureValue;
-    }
-    if (contrastValue !== 1.0) {
-      adjustmentParts.push(`contrast(${contrastValue.toFixed(2)})`);
-    }
-
-    // Saturation
-    if (videoAdjustments.saturation !== 0) {
-      const saturation = 1 + videoAdjustments.saturation / 100;
-      adjustmentParts.push(`saturate(${saturation.toFixed(2)})`);
-    }
-
-    // Warmth (hue-rotate)
-    if (videoAdjustments.warmth !== 0) {
-      const hue = (videoAdjustments.warmth / 100) * 30;
-      adjustmentParts.push(`hue-rotate(${hue.toFixed(1)}deg)`);
-    }
-
-    // Fade (opacity + desaturate)
-    if (videoAdjustments.fade !== 0) {
-      const fade = videoAdjustments.fade / 100;
-      adjustmentParts.push(`opacity(${(1 - fade * 0.3).toFixed(2)})`);
-      adjustmentParts.push(`saturate(${(1 - fade * 0.3).toFixed(2)})`);
-    }
-
-    // Combine base filter with adjustments
-    const allParts = [];
-    if (baseFilterCSS && baseFilterCSS !== "none") {
-      allParts.push(baseFilterCSS);
-    }
-    if (adjustmentParts.length > 0) {
-      allParts.push(adjustmentParts.join(" "));
-    }
-
-    return allParts.length > 0 ? allParts.join(" ") : "none";
-  }, [form.filter, videoAdjustments, getFilterCSS]);
-
   // Apply video trim and/or speed changes - process on server for preview
   const applyVideoTrimAndSpeed = async () => {
     // Determine if trim is needed
@@ -1004,132 +945,6 @@ const Create = () => {
     
     // Don't close modal - let user see the preview and click Done
   };
-
-  // Get CSS filter string based on filter type and adjustments
-  const getFilterCSS = useCallback((filterId, adjustmentsData) => {
-    let filterCSS = "";
-
-    // Apply filter effects
-    switch (filterId) {
-      // Instagram-style filters
-      case "wavy":
-        filterCSS +=
-          "brightness(1.05) contrast(0.95) saturate(0.85) hue-rotate(5deg)";
-        break;
-      case "paris":
-        filterCSS +=
-          "brightness(1.08) contrast(1.1) saturate(1.15) hue-rotate(-10deg)";
-        break;
-      case "losangeles":
-        filterCSS +=
-          "brightness(1.15) contrast(1.05) saturate(1.2) hue-rotate(15deg)";
-        break;
-      case "oslo":
-        filterCSS +=
-          "brightness(0.95) contrast(1.1) saturate(0.9) hue-rotate(10deg)";
-        break;
-      case "tokyo":
-        filterCSS +=
-          "brightness(1.1) contrast(1.15) saturate(1.1) hue-rotate(-5deg)";
-        break;
-      case "london":
-        filterCSS +=
-          "brightness(0.9) contrast(1.2) saturate(0.95) hue-rotate(5deg)";
-        break;
-      case "moscow":
-        filterCSS +=
-          "brightness(0.92) contrast(1.25) saturate(0.88) hue-rotate(-8deg)";
-        break;
-      case "berlin":
-        filterCSS +=
-          "brightness(0.98) contrast(1.15) saturate(1.05) hue-rotate(12deg)";
-        break;
-      case "rome":
-        filterCSS +=
-          "brightness(1.12) contrast(1.08) saturate(1.18) hue-rotate(-12deg)";
-        break;
-      case "madrid":
-        filterCSS +=
-          "brightness(1.05) contrast(1.2) saturate(1.12) hue-rotate(8deg)";
-        break;
-      case "amsterdam":
-        filterCSS +=
-          "brightness(1.08) contrast(1.05) saturate(1.1) hue-rotate(-15deg)";
-        break;
-      // Classic filters
-      case "vintage":
-        filterCSS += "brightness(1.1) contrast(0.9) saturate(0.8) sepia(0.2)";
-        break;
-      case "blackwhite":
-        filterCSS += "grayscale(100%)";
-        break;
-      case "sepia":
-        filterCSS += "sepia(1) brightness(1.1) contrast(0.9)";
-        break;
-      case "cool":
-        filterCSS += "hue-rotate(30deg) saturate(0.9)";
-        break;
-      case "warm":
-        filterCSS += "hue-rotate(-30deg) saturate(1.1)";
-        break;
-      case "contrast":
-        filterCSS += "contrast(1.3)";
-        break;
-      case "bright":
-        filterCSS += "brightness(1.2) contrast(1.1)";
-        break;
-      case "dramatic":
-        filterCSS += "contrast(1.4) saturate(1.2) brightness(0.95)";
-        break;
-      case "portrait":
-        filterCSS += "contrast(1.1) saturate(1.05) brightness(1.05)";
-        break;
-      case "cinema":
-        filterCSS += "contrast(1.2) saturate(0.85) brightness(0.9)";
-        break;
-      case "noir":
-        filterCSS += "grayscale(100%) contrast(1.3) brightness(0.9)";
-        break;
-      case "vivid":
-        filterCSS += "saturate(1.3) contrast(1.2) brightness(1.05)";
-        break;
-      case "fade":
-        filterCSS += "brightness(1.1) contrast(0.85) saturate(0.7)";
-        break;
-      case "chrome":
-        filterCSS += "contrast(1.2) saturate(1.1) brightness(1.05)";
-        break;
-      case "process":
-        filterCSS += "contrast(1.15) saturate(1.1) brightness(1.02)";
-        break;
-      default:
-        break;
-    }
-
-    // Apply manual adjustments
-    if (adjustmentsData) {
-      const parts = [];
-      if (adjustmentsData.brightness !== 0) {
-        parts.push(`brightness(${1 + adjustmentsData.brightness / 100})`);
-      }
-      if (adjustmentsData.contrast !== 1) {
-        parts.push(`contrast(${adjustmentsData.contrast})`);
-      }
-      if (adjustmentsData.saturation !== 1) {
-        parts.push(`saturate(${adjustmentsData.saturation})`);
-      }
-      if (adjustmentsData.hue !== 0) {
-        parts.push(`hue-rotate(${adjustmentsData.hue}deg)`);
-      }
-      if (parts.length > 0) {
-        filterCSS = filterCSS
-          ? `${filterCSS} ${parts.join(" ")}`
-          : parts.join(" ");
-      }
-    }
-
-    return filterCSS || "none";
-  }, []);
 
   // Convert image URI to base64 for WebView
   const [imageBase64, setImageBase64] = useState(null);
@@ -1672,7 +1487,6 @@ const Create = () => {
     textOverlays,
     imageOverlays,
     adjustments,
-    getFilterCSS,
   ]);
 
   const submit = async () => {

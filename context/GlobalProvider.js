@@ -158,7 +158,7 @@ const GlobalProvider = ({ children }) => {
       });
 
     return () => { isMounted = false; };
-  }, [changeLanguage]);
+  }, []);
 
   useEffect(() => {
     const loadLanguagePreference = async () => {
