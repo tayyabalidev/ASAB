@@ -525,7 +525,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       // Revert optimistic update on error
       setLiked(!liked);
       setLikeCount(prev => liked ? prev + 1 : Math.max(0, prev - 1));
-      console.error('Like error:', error);
       Alert.alert(t("common.error"), error.message || "Failed to like post");
     }
   };

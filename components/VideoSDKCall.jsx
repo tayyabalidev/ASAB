@@ -50,6 +50,8 @@ const UI = {
 /** How long to wait for the other person after we joined the room (no auto-hangup before this). */
 const WAIT_FOR_PEER_MS = 120000;
 
+const MIC_PUBLISH_DELAY_MS = 120;
+
 function participantInitial(name) {
   const n = String(name || '').trim();
   return (n.charAt(0) || '?').toUpperCase();
@@ -135,20 +137,38 @@ function countRemoteParticipants(participants, localId) {
 }
 
 // Inner component that uses VideoSDK hooks
+async function publishLocalMic(unmuteMic) {
+  await Promise.resolve(unmuteMic?.());
+  try {
+    const speechTrack = await createMicrophoneAudioTrack({
+      encoderConfig: 'speech_standard',
+      noiseConfig: {
+        noiseSuppression: true,
+        echoCancellation: true,
+        autoGainControl: true,
+      },
+    });
+    await Promise.resolve(unmuteMic?.(speechTrack));
+  } catch (_) {
+    /* default mic track is already live */
+  }
+}
+
 const VideoSDKCallInner = ({
   roomId,
   currentUserId,
   callType = 'video',
   callId = null,
-  phase = 'active',
+  suppressAlerts = false,
   onCallEnd,
   onError,
+  onMeetingReady,
+  onRemoteConnected,
   peerDisplayName = 'Participant',
   localDisplayName = 'You',
   localAvatarUri = null,
   peerAvatarUri = null,
 }) => {
-  const isPrecall = phase === 'precall';
   const insets = useSafeAreaInsets();
   const [callDuration, setCallDuration] = useState(0);
   const [peerPresent, setPeerPresent] = useState(false);
@@ -166,17 +186,21 @@ const VideoSDKCallInner = ({
   const joinFnRef = useRef(null);
   const leaveFnRef = useRef(null);
   const localParticipantIdRef = useRef(null);
-  const phaseRef = useRef(phase);
+  const suppressAlertsRef = useRef(suppressAlerts);
   const joinRequestedRef = useRef(false);
+  const micPublishedRef = useRef(false);
+  const unmuteMicRef = useRef(null);
+  const enableWebcamRef = useRef(null);
 
   useEffect(() => {
-    phaseRef.current = phase;
-  }, [phase]);
+    suppressAlertsRef.current = suppressAlerts;
+  }, [suppressAlerts]);
 
   useEffect(() => {
     callIdRef.current = callId;
     connectedReportedRef.current = false;
     joinRequestedRef.current = false;
+    micPublishedRef.current = false;
     meetingJoinedRef.current = false;
     setMeetingJoined(false);
     setPeerPresent(false);
@@ -205,13 +229,6 @@ const VideoSDKCallInner = ({
       const count = parts instanceof Map ? parts.size : 0;
       videosdkTrace('S3_JOIN', 'MEETING_JOINED', {
         roomId,
-        phase: phaseRef.current,
-        callId: callIdRef.current,
-        participantCount: count,
-      });
-      console.log('[CALL_MEETING_JOINED]', {
-        roomId,
-        phase: phaseRef.current,
         callId: callIdRef.current,
         participantCount: count,
       });
@@ -221,27 +238,16 @@ const VideoSDKCallInner = ({
       }
       meetingJoinedRef.current = true;
       setMeetingJoined(true);
-      if (!isPrecall) {
-        startCallAudioSession(callType);
-      }
+      onMeetingReady?.();
       setTimeout(async () => {
+        if (micPublishedRef.current) return;
+        micPublishedRef.current = true;
+        startCallAudioSession(callType);
         try {
-          await Promise.resolve(unmuteMic?.());
-          videosdkTrace('S3_JOIN', 'UNMUTE_MIC_AFTER_JOIN', { roomId });
-          try {
-            const speechTrack = await createMicrophoneAudioTrack({
-              encoderConfig: 'speech_standard',
-              noiseConfig: {
-                noiseSuppression: true,
-                echoCancellation: true,
-                autoGainControl: true,
-              },
-            });
-            await Promise.resolve(unmuteMic?.(speechTrack));
-          } catch (_) {
-            /* default mic track is already live */
-          }
+          await publishLocalMic(unmuteMicRef.current);
+          videosdkTrace('S3_JOIN', 'MIC_PUBLISHED', { roomId });
         } catch (micErr) {
+          micPublishedRef.current = false;
           videosdkTrace('S3_JOIN', 'UNMUTE_MIC_ERROR', {
             message: micErr?.message || String(micErr),
           });
@@ -249,22 +255,16 @@ const VideoSDKCallInner = ({
         if (callType === 'video') {
           setTimeout(() => {
             try {
-              enableWebcam?.();
-              videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN', { roomId });
-            } catch (e) {
-              videosdkTrace('S3_JOIN', 'ENABLE_WEBCAM_AFTER_JOIN_ERROR', {
-                message: e?.message || String(e),
-              });
-            }
-          }, 500);
+              enableWebcamRef.current?.();
+            } catch (_) {}
+          }, 280);
         }
-      }, 400);
+      }, MIC_PUBLISH_DELAY_MS);
     },
     onMeetingLeft: () => {
-      console.log('👋 Left VideoSDK meeting');
       meetingJoinedRef.current = false;
       setMeetingJoined(false);
-      if (endingRef.current || phaseRef.current !== 'active') return;
+      if (endingRef.current) return;
       // Ignore transient signaling drops; only end if peer is still gone after a short grace period.
       setTimeout(() => {
         if (endingRef.current || meetingJoinedRef.current) return;
@@ -277,8 +277,7 @@ const VideoSDKCallInner = ({
       }, 2500);
     },
     onError: (error) => {
-      console.error('❌ VideoSDK error:', error);
-      if (!isPrecall) {
+      if (!suppressAlertsRef.current) {
         Alert.alert('Call Error', error?.message || 'An error occurred during the call');
       }
       if (onError) onError(error);
@@ -295,10 +294,10 @@ const VideoSDKCallInner = ({
         id: participant?.id || null,
         count,
       });
-      console.log('👤 Participant joined:', participant.id);
+      const remoteCount = countRemoteParticipants(parts, localPid);
+      if (remoteCount > 0) onRemoteConnected?.();
     },
     onParticipantLeft: (participant) => {
-      console.log('👋 Participant left:', participant.id);
       const leftId = participant?.id != null ? String(participant.id) : null;
       setTimeout(() => {
         if (endingRef.current || !connectedReportedRef.current) return;
@@ -316,6 +315,8 @@ const VideoSDKCallInner = ({
   participantsRef.current = participants;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
+  unmuteMicRef.current = unmuteMic;
+  enableWebcamRef.current = enableWebcam;
 
   // VideoSDK participant ids are not Appwrite user ids — exclude local by SDK localParticipant
   const localId = localParticipant?.id;
@@ -335,7 +336,6 @@ const VideoSDKCallInner = ({
       localId: localId || null,
       count: participantCount,
       ids,
-      phase: phaseRef.current,
     });
   }, [meetingJoined, localId, participantCount, participants, roomId]);
 
@@ -373,13 +373,10 @@ const VideoSDKCallInner = ({
       remoteCount: remoteParticipants.length,
       totalCount,
     });
-    console.log('[CALL_REMOTE_CONNECTED]', {
-      callId: callIdRef.current,
-      roomId,
-      remoteCount: remoteParticipants.length,
-    });
+  
     updateCallStatus(callIdRef.current, CallState.CONNECTED).catch(console.error);
-  }, [remoteConnected]);
+    onRemoteConnected?.();
+  }, [remoteConnected, onRemoteConnected]);
 
   useEffect(() => {
     if (!remoteConnected) return;
@@ -437,26 +434,21 @@ const VideoSDKCallInner = ({
         videosdkTrace('S3_JOIN', 'START', {
           roomId,
           callType,
-          phase: phaseRef.current,
           callId: callIdRef.current,
           userId: currentUserId || null,
         });
-        console.log('[CALL_JOIN_START]', {
-          roomId,
-          callType,
-          phase: phaseRef.current,
-          callId: callIdRef.current,
-          userId: currentUserId || null,
-        });
+
         const allowed = await ensureCallMediaPermissions(callType);
         if (cancelled) return;
         if (!allowed) {
-          Alert.alert(
-            'Permissions Required',
-            callType === 'video'
-              ? 'Microphone and camera access are required for video calls. You can enable them in Settings.'
-              : 'Microphone access is required for audio calls. You can enable it in Settings.'
-          );
+          if (!suppressAlertsRef.current) {
+            Alert.alert(
+              'Permissions Required',
+              callType === 'video'
+                ? 'Microphone and camera access are required for video calls. You can enable them in Settings.'
+                : 'Microphone access is required for audio calls. You can enable it in Settings.'
+            );
+          }
           if (onError) onError('PERMISSION_DENIED');
           return;
         }
@@ -476,12 +468,8 @@ const VideoSDKCallInner = ({
         joinTimeoutRef.current = setTimeout(() => {
           if (!cancelled && !meetingJoinedRef.current && !endingRef.current) {
             const timeoutError = new Error('Joining room timed out. Check token, roomId, or network.');
-            console.warn('[CALL_JOIN_TIMEOUT]', {
-              roomId,
-              phase: phaseRef.current,
-              callId: callIdRef.current,
-            });
-            if (phaseRef.current !== 'precall' && onError) onError(timeoutError);
+          
+            if (!suppressAlertsRef.current && onError) onError(timeoutError);
           }
         }, 45000);
 
@@ -489,12 +477,6 @@ const VideoSDKCallInner = ({
         videosdkTrace('S3_JOIN', 'REQUESTED', {
           roomId,
           callId: callIdRef.current,
-          phase: phaseRef.current,
-        });
-        console.log('[CALL_JOIN_REQUESTED]', {
-          roomId,
-          callId: callIdRef.current,
-          phase: phaseRef.current,
         });
       } catch (error) {
         joinRequestedRef.current = false;
@@ -503,8 +485,7 @@ const VideoSDKCallInner = ({
           roomId,
           message: error?.message || String(error),
         });
-        console.error('[CALL_JOIN_FAILED]', error);
-        if (phaseRef.current !== 'precall') {
+        if (!suppressAlertsRef.current) {
           Alert.alert('Error', 'Failed to join call. Please try again.');
         }
         if (onError) onError(error);
@@ -523,11 +504,7 @@ const VideoSDKCallInner = ({
 
   const handleCallEnd = async () => {
     if (endingRef.current) return;
-    console.log('[CALL_END_START]', {
-      roomId,
-      callId: callIdRef.current,
-      userId: currentUserId || null,
-    });
+   
     endingRef.current = true;
     connectedReportedRef.current = false;
     setMeetingJoined(false);
@@ -538,19 +515,29 @@ const VideoSDKCallInner = ({
     try {
       await leave();
     } catch (e) {
-      console.warn('Error leaving meeting:', e);
     }
     stopCallAudioSession();
-    console.log('[CALL_END_DONE]', {
-      roomId,
-      callId: callIdRef.current,
-    });
+   
     try {
       if (onCallEnd) onCallEnd();
     } catch (e) {
-      console.warn('Error in onCallEnd:', e);
     }
   };
+
+  useEffect(() => {
+    if (!suppressAlerts || !meetingJoined || micPublishedRef.current) return undefined;
+    const timer = setTimeout(async () => {
+      if (micPublishedRef.current) return;
+      micPublishedRef.current = true;
+      startCallAudioSession(callType);
+      try {
+        await publishLocalMic(unmuteMicRef.current);
+      } catch (_) {
+        micPublishedRef.current = false;
+      }
+    }, MIC_PUBLISH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [suppressAlerts, meetingJoined, callType]);
 
   useEffect(() => {
     return () => {
@@ -572,38 +559,22 @@ const VideoSDKCallInner = ({
         try {
           leaveFnRef.current?.();
         } catch (_) {}
-        // Do not call onCallEnd here — React remount/Strict Mode and precall→active
-        // phase changes must not hang up an active call or navigate home.
       }
     };
-  }, [onCallEnd]);
+  }, []);
 
   const toggleMute = async () => {
     try {
       if (localMicOn) {
         await Promise.resolve(muteMic?.());
+        micPublishedRef.current = false;
       } else {
         try {
-          await Promise.resolve(unmuteMic?.());
-          try {
-            const speechTrack = await createMicrophoneAudioTrack({
-              encoderConfig: 'speech_standard',
-              noiseConfig: {
-                noiseSuppression: true,
-                echoCancellation: true,
-                autoGainControl: true,
-              },
-            });
-            await Promise.resolve(unmuteMic?.(speechTrack));
-          } catch (_) {
-            /* default mic already active */
-          }
-        } catch (unmuteErr) {
-          console.error('Error unmuting mic:', unmuteErr);
-        }
+          await publishLocalMic(unmuteMic);
+          micPublishedRef.current = true;
+        } catch (_) {}
       }
     } catch (error) {
-      console.error('Error toggling mute:', error);
     }
   };
 
@@ -613,7 +584,6 @@ const VideoSDKCallInner = ({
     try {
       await toggleWebcam();
     } catch (error) {
-      console.error('Error toggling video:', error);
     }
   };
 
@@ -652,16 +622,8 @@ const VideoSDKCallInner = ({
     return participants.has(localId) ? Math.max(1, size) : size + 1;
   })();
 
-  if (isPrecall) {
-    return (
-      <View style={styles.precallHost} pointerEvents="none">
-        {__DEV__ ? (
-          <Text style={styles.precallDevBadge}>
-            {meetingJoined ? `In room · ${roomParticipantCount}` : 'Joining room…'}
-          </Text>
-        ) : null}
-      </View>
-    );
+  if (suppressAlerts) {
+    return <View style={styles.precallHost} pointerEvents="none" />;
   }
 
   return (
@@ -839,7 +801,7 @@ const VideoSDKCall = ({
   currentUserId,
   callType = 'video',
   callId = null,
-  phase = 'active',
+  suppressAlerts = false,
   initialToken = null,
   peerDisplayName,
   localDisplayName,
@@ -847,13 +809,14 @@ const VideoSDKCall = ({
   peerAvatarUri,
   onCallEnd,
   onError,
+  onMeetingReady,
+  onRemoteConnected,
 }) => {
   const [token, setToken] = useState(null);
   const [meetingParticipantId, setMeetingParticipantId] = useState(undefined);
   const [loading, setLoading] = useState(true);
   const [tokenError, setTokenError] = useState(null);
   const normalizedRoomId = typeof roomId === 'string' ? roomId.trim() : '';
-  const isPrecall = phase === 'precall';
 
   useEffect(() => {
     let cancelled = false;
@@ -889,24 +852,14 @@ const VideoSDKCall = ({
 
         const prefilled =
           typeof initialToken === 'string' && initialToken.trim() ? initialToken.trim() : '';
-        if (prefilled) {
-          if (cancelled) return;
-          if (applyValidatedToken(prefilled)) {
-            console.log('[CALL_TOKEN] using stashed caller token');
-            return;
-          }
-          if (cancelled) return;
-          setLoading(false);
+        if (prefilled && applyValidatedToken(prefilled)) {
           return;
         }
-
-        const meetingToken = await getVideoSDKToken(normalizedRoomId, currentUserId);
-
         if (cancelled) return;
 
-        if (meetingToken && applyValidatedToken(meetingToken)) {
-          return;
-        }
+        const meetingToken = await getVideoSDKToken(normalizedRoomId, currentUserId);
+        if (cancelled) return;
+        if (meetingToken && applyValidatedToken(meetingToken)) return;
 
         if (!VIDEOSDK_CONFIG.tokenServerUrl) {
           if (__DEV__) {
@@ -926,16 +879,11 @@ const VideoSDKCall = ({
       } catch (error) {
         if (cancelled) return;
         const msg = error?.message || 'Failed to get call token';
-        console.error('Error fetching token:', error);
         setTokenError(msg);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
-
-    if (!VIDEOSDK_CONFIG.tokenServerUrl && !initialToken) {
-      console.warn('[VideoSDK] tokenServerUrl missing at runtime');
-    }
 
     fetchToken();
     return () => {
@@ -944,7 +892,7 @@ const VideoSDKCall = ({
   }, [normalizedRoomId, currentUserId, initialToken]);
 
   if (loading) {
-    if (isPrecall) {
+    if (suppressAlerts) {
       return <View style={styles.precallHost} pointerEvents="none" />;
     }
     return (
@@ -957,8 +905,7 @@ const VideoSDKCall = ({
   }
 
   if (tokenError) {
-    if (isPrecall) {
-      console.warn('[CALL_PRECALL_TOKEN_ERROR]', tokenError);
+    if (suppressAlerts) {
       if (onError) onError(tokenError);
       return <View style={styles.precallHost} pointerEvents="none" />;
     }
@@ -1004,7 +951,6 @@ const VideoSDKCall = ({
     meetingId: normalizedRoomId,
     mode: 'SEND_AND_RECV',
     hasToken: Boolean(authToken),
-    phase,
   });
 
   return (
@@ -1030,13 +976,15 @@ const VideoSDKCall = ({
         currentUserId={currentUserId}
         callType={callType}
         callId={callId}
-        phase={phase}
+        suppressAlerts={suppressAlerts}
         peerDisplayName={peerDisplayName}
         localDisplayName={localDisplayName || 'You'}
         localAvatarUri={localAvatarUri}
         peerAvatarUri={peerAvatarUri}
         onCallEnd={onCallEnd}
         onError={onError}
+        onMeetingReady={onMeetingReady}
+        onRemoteConnected={onRemoteConnected}
       />
     </MeetingProvider>
   );

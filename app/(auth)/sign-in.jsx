@@ -132,11 +132,9 @@ const SignIn = () => {
     const failureUrl = `${appwriteConfig.platform}://auth/google-failure`;
     
     try {
-      console.log('Starting Google OAuth with URLs:', { successUrl, failureUrl });
       // This opens a browser/webview for Google OAuth
       await signInWithGoogle(successUrl, failureUrl);
       
-      console.log('Google OAuth browser opened, starting polling...');
       // Show instructions
       Alert.alert(
         t("auth.googleLoginTitle"),
@@ -149,7 +147,6 @@ const SignIn = () => {
         startGoogleSessionPolling();
       }, 2000);
     } catch (error) {
-      console.error('Google OAuth error:', error);
       setIsGoogleLoading(false);
       Alert.alert(
         t("common.error"), 
@@ -232,7 +229,6 @@ const SignIn = () => {
           clearInterval(pollInterval);
           missingScopesCount = 0; // Reset counter
           
-          console.log('Google OAuth session authenticated, creating user...');
           
           // Get or create user
           try {
@@ -245,7 +241,6 @@ const SignIn = () => {
               return;
             }
           } catch (error) {
-            console.error('Error creating Google user:', error);
             setIsGoogleLoading(false);
             Alert.alert(t("common.error"), error.message || t("auth.createUserFailed"));
             return;
@@ -261,7 +256,6 @@ const SignIn = () => {
           
           // Log every 10 seconds
           if (pollCount % 10 === 0) {
-            console.log(`Google OAuth polling attempt ${pollCount}/${maxPolls}: Session establishing... (missing scopes - this is normal)`);
           }
           
           // If we've been getting "missing scopes" for too long, it might be a real issue
@@ -280,8 +274,7 @@ const SignIn = () => {
         }
         
         // Log other errors every 10 seconds
-        if (pollCount % 10 === 0) {
-          console.log(`Google OAuth polling attempt ${pollCount}/${maxPolls}:`, errorMessage);
+        if (pollCount % 10 === 0) { // Log every 10 seconds
         }
         
         // Reset missing scopes counter if we get a different error

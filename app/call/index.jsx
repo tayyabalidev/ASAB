@@ -32,8 +32,8 @@ import {
 } from '../../lib/calls';
 import { CallState } from '../../lib/callHelper';
 import { stashCallSession, peekCallSession, clearCallSession } from '../../lib/pendingCallSession';
+import { getVideoSDKToken } from '../../lib/videosdkHelper';
 import { videosdkTrace } from '../../lib/videosdkTrace';
-import { databases, appwriteConfig } from '../../lib/appwrite';
 import VideoSDKCallWrapper from '../../components/VideoSDKCallWrapper';
 
 const COLORS = {
@@ -92,6 +92,38 @@ const CallScreen = () => {
   const callDataRef = useRef(null);
   const callStateRef = useRef('idle');
   const endedRef = useRef(false);
+  const userIdRef = useRef(user?.$id);
+
+  useEffect(() => {
+    userIdRef.current = user?.$id;
+  }, [user?.$id]);
+
+  const attachCallSubscription = (callId) => {
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    unsubscribeRef.current = subscribeCallUpdates(callId, ({ payload }) => {
+      if (!payload?.$id) return;
+      setCallData((prev) => (prev ? { ...prev, ...payload } : payload));
+
+      if (payload.status === CallState.REJECTED) {
+        if (payload.callerId === userIdRef.current) {
+          Alert.alert('Call declined', 'The other person declined the call.');
+        }
+        handleCallEnd();
+      } else if (payload.status === CallState.ENDED) {
+        handleCallEnd();
+      } else if (
+        payload.status === CallState.CONNECTING ||
+        payload.status === CallState.CONNECTED
+      ) {
+        setCallState((prev) =>
+          prev === 'ended' ? prev : prev === 'connected' ? 'connected' : 'connecting'
+        );
+      }
+    });
+  };
 
   useEffect(() => {
     const paramsChanged = JSON.stringify(paramsRef.current) !== JSON.stringify(params);
@@ -189,14 +221,7 @@ const CallScreen = () => {
               return;
             }
 
-            if (unsubscribeRef.current) unsubscribeRef.current();
-            unsubscribeRef.current = subscribeCallUpdates(call.$id, ({ payload }) => {
-              if (payload.status === CallState.ENDED || payload.status === CallState.REJECTED) {
-                handleCallEnd();
-              } else if (payload.status === CallState.CONNECTING || payload.status === CallState.CONNECTED) {
-                setCallState('connecting');
-              }
-            });
+            attachCallSubscription(call.$id);
           } else {
             if (call.status === CallState.REJECTED || call.status === CallState.ENDED) {
               handleCallEnd();
@@ -207,18 +232,7 @@ const CallScreen = () => {
               setCallState('calling');
             }
 
-            if (unsubscribeRef.current) unsubscribeRef.current();
-            unsubscribeRef.current = subscribeCallUpdates(call.$id, ({ payload }) => {
-              if (payload.status === CallState.REJECTED) {
-                Alert.alert('Call declined', 'The other person declined the call.');
-                handleCallEnd();
-              } else if (payload.status === CallState.ENDED) {
-                handleCallEnd();
-              } else if (payload.status === CallState.CONNECTING || payload.status === CallState.CONNECTED) {
-                setCallState('connecting');
-                setCallData(payload);
-              }
-            });
+            attachCallSubscription(call.$id);
           }
         } else {
           setError('Call not found');
@@ -233,7 +247,6 @@ const CallScreen = () => {
         setError('Invalid call parameters');
       }
     } catch (err) {
-      console.error('Error initializing call:', err);
       setError(err.message || 'Failed to initialize call');
     }
   };
@@ -258,20 +271,8 @@ const CallScreen = () => {
         hasStashedToken: Boolean(roomId && call.videosdkCallerToken),
       });
 
-      if (unsubscribeRef.current) unsubscribeRef.current();
-      unsubscribeRef.current = subscribeCallUpdates(call.$id, ({ payload }) => {
-        if (payload.status === CallState.REJECTED) {
-          Alert.alert('Call declined', 'The other person declined the call.');
-          handleCallEnd();
-        } else if (payload.status === CallState.ENDED) {
-          handleCallEnd();
-        } else if (payload.status === CallState.CONNECTING || payload.status === CallState.CONNECTED) {
-          setCallState('connecting');
-          setCallData(payload);
-        }
-      });
+      attachCallSubscription(call.$id);
     } catch (err) {
-      console.error('Error initiating call:', err);
       setError(err.message || 'Failed to start call');
       setCallState('idle');
     }
@@ -280,13 +281,25 @@ const CallScreen = () => {
   const handleAcceptCall = async () => {
     try {
       if (!callData) return;
+      const room = callRoomId(callData);
       setCallState('connecting');
+
+      const tokenPromise =
+        room && user?.$id
+          ? getVideoSDKToken(room, user.$id).catch(() => null)
+          : Promise.resolve(null);
+
       await acceptCall(callData.$id, user.$id);
+
+      const token = await tokenPromise;
+      if (token && callData.$id) {
+        stashCallSession({ callId: callData.$id, roomId: room, token });
+      }
+
       const updatedCall = await getCallById(callData.$id);
       setCallData(updatedCall);
       setCallState('connecting');
     } catch (err) {
-      console.error('Error accepting call:', err);
       setError('Could not accept the call');
       handleCallEnd();
     }
@@ -302,7 +315,6 @@ const CallScreen = () => {
       await rejectCall(callData.$id, user.$id);
       handleCallEnd();
     } catch (err) {
-      console.error('Error rejecting call:', err);
       handleCallEnd();
     }
   };
@@ -316,7 +328,6 @@ const CallScreen = () => {
         try {
           await endCall(callData.$id, user.$id);
         } catch (e) {
-          console.warn('Error ending call document:', e);
           await forceEndCallDocument(callData.$id, user.$id).catch(() => {});
         }
       }
@@ -324,7 +335,6 @@ const CallScreen = () => {
         try {
           unsubscribeRef.current();
         } catch (e) {
-          console.warn('Error unsubscribing:', e);
         }
         unsubscribeRef.current = null;
       }
@@ -364,17 +374,17 @@ const CallScreen = () => {
   const isVideo = callType === 'video';
 
   const roomId = callRoomId(callData);
+  const isRinging = callState === 'calling' || callState === 'ringing';
   const showActiveCallUi = callState === 'connecting' || callState === 'connected';
-  const showOutgoingPrecall = !isIncoming && callState === 'calling' && Boolean(roomId);
-  const showIncomingPrecall = isIncoming && callState === 'ringing' && Boolean(roomId);
   const showVideoSdk = Boolean(
-    roomId &&
-      callData?.$id &&
-      user?.$id &&
-      (showOutgoingPrecall || showIncomingPrecall || showActiveCallUi)
+    roomId && callData?.$id && user?.$id && (isRinging || showActiveCallUi)
   );
-  const sdkPhase = showOutgoingPrecall || showIncomingPrecall ? 'precall' : 'active';
+  const suppressCallAlerts = isRinging;
   const stashedCallToken = callData?.$id ? peekCallSession(callData.$id)?.token : null;
+
+  const handleMeetingReady = () => {
+    setCallState((prev) => (prev === 'ended' ? prev : 'connected'));
+  };
 
   const renderVideoSdkLayer = () => {
     if (!showVideoSdk) return null;
@@ -382,12 +392,12 @@ const CallScreen = () => {
       callData.receiverId === user.$id ? callData.callerId : callData.receiverId;
     return (
       <View
-        style={[styles.sdkLayer, sdkPhase === 'precall' && styles.sdkLayerPrecall]}
-        pointerEvents={sdkPhase === 'precall' ? 'none' : 'box-none'}
+        style={[styles.sdkLayer, suppressCallAlerts && styles.sdkLayerPrecall]}
+        pointerEvents={suppressCallAlerts ? 'none' : 'box-none'}
       >
         <VideoSDKCallWrapper
           key={`call-sdk-${callData.$id}-${roomId}`}
-          phase={sdkPhase}
+          suppressAlerts={suppressCallAlerts}
           initialToken={stashedCallToken}
           roomId={roomId}
           callerId={callData.callerId}
@@ -399,6 +409,8 @@ const CallScreen = () => {
           localDisplayName={user?.username || user?.name || 'You'}
           localAvatarUri={user?.avatar || null}
           peerAvatarUri={peerAvatarUri}
+          onMeetingReady={handleMeetingReady}
+          onRemoteConnected={handleMeetingReady}
           onCallEnd={handleCallEnd}
           onError={handleCallError}
         />
@@ -575,16 +587,7 @@ const CallScreen = () => {
       );
     }
 
-    return renderShell(
-      renderCallRoot(
-        sdkPhase === 'active' ? null : (
-          <View style={styles.centerBlock}>
-            <ActivityIndicator size="large" color={accent} />
-            <Text style={styles.connectingHint}>Joining call…</Text>
-          </View>
-        )
-      )
-    );
+    return renderShell(renderCallRoot(null));
   }
 
   if (!user || !user.$id) {

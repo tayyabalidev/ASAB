@@ -41,21 +41,16 @@ function OAuthHandler() {
   useEffect(() => { 
     const handleDeepLink = async (url) => {
       if (!url) return;
-      
-      if (__DEV__) console.log('🔗 Deep link received:', url);
-      
       // Normalize URL for checking
       const normalizedUrl = url.toLowerCase();
       
       // Check if this is our app's deep link
       if (!normalizedUrl.includes('com.bilal.asab://') && !normalizedUrl.includes('asab://')) {
-        console.log('🔗 Deep link ignored - not our app scheme');
         return;
       }
 
       // Prevent multiple simultaneous OAuth processing
       if (oauthProcessingRef.current) {
-        console.log('🔗 Deep link ignored - OAuth already processing');
         return;
       }
 
@@ -94,7 +89,6 @@ function OAuthHandler() {
             throw new Error('Failed to create user account. Please try again.');
           }
         } catch (error) {
-          console.error('Facebook OAuth error:', error);
           Alert.alert(
             "Sign In Error", 
             error.message || "Failed to sign in with Facebook. Please try again.",
@@ -118,7 +112,6 @@ function OAuthHandler() {
       
       // Handle Google OAuth success
       if (normalizedUrl.includes('google-success') || (normalizedUrl.includes('google') && normalizedUrl.includes('success'))) {
-        console.log('Google OAuth success deep link received:', url);
         oauthProcessingRef.current = true;
         
         try {
@@ -134,21 +127,17 @@ function OAuthHandler() {
               const testAccount = await account.get();
               // If we get here without error, the session is authenticated
               if (testAccount && testAccount.$id) {
-                console.log('Google OAuth session established:', testAccount.$id);
                 accountReady = true;
               } else {
-                console.log(`Google OAuth session check attempt ${retries + 1}/${maxRetries}: Account not ready yet`);
                 retries++;
               }
             } catch (e) {
               const errorMsg = e.message || '';
               // "Missing scopes" is normal during session establishment - continue retrying
               if (errorMsg.includes('missing scopes') || errorMsg.includes('scope')) {
-                console.log(`Google OAuth session check attempt ${retries + 1}/${maxRetries}: Session establishing... (missing scopes - normal)`);
                 retries++;
                 // Don't throw error, continue retrying
               } else {
-                console.log(`Google OAuth session check attempt ${retries + 1}/${maxRetries}:`, errorMsg);
                 retries++;
               }
             }
@@ -159,10 +148,8 @@ function OAuthHandler() {
           }
           
           // getOrCreateGoogleUser() has built-in retry logic
-          console.log('Creating/retrieving Google user...');
           const user = await getOrCreateGoogleUser();
           if (user) {
-            console.log('Google user created/retrieved successfully:', user.$id);
             setUser(user);
             setIsLogged(true);
             router.replace('/(tabs)/home');
@@ -170,7 +157,6 @@ function OAuthHandler() {
             throw new Error('Failed to create user account. Please try again.');
           }
         } catch (error) {
-          console.error('Google OAuth error:', error);
           Alert.alert(
             "Sign In Error", 
             error.message || "Failed to sign in with Google. Please verify the callback URI is configured in Google Cloud Console.",
@@ -220,7 +206,6 @@ function OAuthHandler() {
               existingUser = users.documents[0];
             }
           } catch (error) {
-            console.error('Error checking existing user:', error);
           }
 
           if (existingUser) {
@@ -249,7 +234,6 @@ function OAuthHandler() {
             router.replace('/(tabs)/home');
           }
         } catch (error) {
-          console.error('OAuth fallback error:', error);
           router.replace('/(auth)/sign-in');
         } finally {
           oauthProcessingRef.current = false;
@@ -260,16 +244,13 @@ function OAuthHandler() {
     // ✅ Handle when app is opened from deep link
     Linking.getInitialURL().then((url) => {
       if (url) {
-        console.log('🔗 Initial deep link URL:', url);
         handleDeepLink(url);
       } else {
-        console.log('🔗 No initial deep link URL');
       }
     });
 
     // ✅ Listen while app is open
     const linkingSubscription = Linking.addEventListener('url', (event) => {
-      console.log('🔗 Deep link event received:', event.url);
       handleDeepLink(event.url);
     });
 
@@ -278,7 +259,6 @@ function OAuthHandler() {
     const appStateSubscription = AppState.addEventListener('change', async (nextAppState) => {
       // Only probe for OAuth when user is not logged in (avoids router.replace('/home') during calls, live, etc.)
       if (nextAppState === 'active' && !oauthProcessingRef.current && !loading && !isLogged) {
-        if (__DEV__) console.log('📱 App state active — checking OAuth session (signed out)');
         
         // Wait a bit for OAuth session to be established, then retry multiple times
         let retryCount = 0;
@@ -290,21 +270,18 @@ function OAuthHandler() {
             const currentAccount = await account.get().catch((e) => {
               // If it's a "missing scopes" error, session is still establishing
               if (e.message && e.message.includes('missing scopes')) {
-                console.log(`📱 App state check attempt ${retryCount + 1}/${maxRetries}: Session still establishing (missing scopes - normal)`);
                 return null; // Continue retrying
               }
               return null;
             });
             
             if (currentAccount && currentAccount.$id) {
-              console.log('📱 App state check: Valid session found, creating user...');
               oauthProcessingRef.current = true;
               
               try {
                 // Try to get or create user (works for both Facebook and Google)
                 const user = await getOrCreateFacebookUser().catch(() => getOrCreateGoogleUser());
                 if (user) {
-                  console.log('📱 App state check: User created/retrieved successfully');
                   setUser(user);
                   setIsLogged(true);
                   router.replace('/(tabs)/home');
@@ -312,7 +289,6 @@ function OAuthHandler() {
                   return; // Success, stop retrying
                 }
               } catch (error) {
-                console.error('📱 App state check: Error creating user:', error);
                 oauthProcessingRef.current = false;
               }
             } else {
@@ -321,11 +297,9 @@ function OAuthHandler() {
               if (retryCount < maxRetries) {
                 setTimeout(checkSession, 1500); // Retry after 1.5 seconds
               } else {
-                console.log('📱 App state check: Max retries reached, no session found');
               }
             }
           } catch (error) {
-            console.log(`📱 App state check attempt ${retryCount + 1}/${maxRetries}: Error:`, error.message);
             retryCount++;
             if (retryCount < maxRetries) {
               setTimeout(checkSession, 1500);
@@ -351,10 +325,8 @@ function OAuthHandler() {
 function useGlobalErrorHandling() {
   useEffect(() => {
     const globalErrorHandler = (error, isFatal) => {
-      console.error('[Global Error]', isFatal ? 'Fatal' : 'Non-fatal', error?.message || error);
     };
     const rejectionHandler = (reason, promise) => {
-      console.warn('[Unhandled Rejection]', reason);
     };
 
     const prev = global.ErrorUtils?.getGlobalHandler?.();
@@ -364,25 +336,9 @@ function useGlobalErrorHandling() {
         try {
           if (prev) prev(error, isFatal);
         } catch (e) {
-          console.error('Error in previous handler:', e);
+          console.error(e);   
         }
       });
-    }
-    if (typeof global.addEventListener === 'function') {
-      try {
-        global.addEventListener('unhandledrejection', rejectionHandler);
-      } catch (_) {}
-    }
-
-    return () => {
-      if (global.ErrorUtils?.setGlobalHandler && prev) {
-        global.ErrorUtils.setGlobalHandler(prev);
-      }
-      if (typeof global.removeEventListener === 'function') {
-        try {
-          global.removeEventListener('unhandledrejection', rejectionHandler);
-        } catch (_) {}
-      }
     };
   }, []);
 }
