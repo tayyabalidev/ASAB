@@ -525,21 +525,6 @@ const VideoSDKCallInner = ({
   };
 
   useEffect(() => {
-    if (!suppressAlerts || !meetingJoined || micPublishedRef.current) return undefined;
-    const timer = setTimeout(async () => {
-      if (micPublishedRef.current) return;
-      micPublishedRef.current = true;
-      startCallAudioSession(callType);
-      try {
-        await publishLocalMic(unmuteMicRef.current);
-      } catch (_) {
-        micPublishedRef.current = false;
-      }
-    }, MIC_PUBLISH_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [suppressAlerts, meetingJoined, callType]);
-
-  useEffect(() => {
     return () => {
       if (joinTimeoutRef.current) {
         clearTimeout(joinTimeoutRef.current);
@@ -614,13 +599,6 @@ const VideoSDKCallInner = ({
       : `Waiting for ${peerDisplayName || 'participant'}…`;
 
   const controlsBottom = Math.max(insets.bottom, 20) + 16;
-
-  const roomParticipantCount = (() => {
-    if (!meetingJoined) return 0;
-    if (!localId) return 1;
-    const size = participants instanceof Map ? participants.size : 0;
-    return participants.has(localId) ? Math.max(1, size) : size + 1;
-  })();
 
   if (suppressAlerts) {
     return <View style={styles.precallHost} pointerEvents="none" />;
@@ -796,8 +774,6 @@ const LocalParticipantView = () => {
 // Main VideoSDK Call Component
 const VideoSDKCall = ({
   roomId,
-  callerId,
-  receiverId,
   currentUserId,
   callType = 'video',
   callId = null,
@@ -1229,14 +1205,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     opacity: 0,
     overflow: 'hidden',
-  },
-  precallDevBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    fontSize: 10,
-    color: '#22c55e',
-    opacity: 0.9,
   },
 });
 

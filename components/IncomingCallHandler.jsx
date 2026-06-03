@@ -4,7 +4,6 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
 import { router } from 'expo-router';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { subscribeIncomingCalls } from '../lib/calls';
@@ -13,7 +12,6 @@ import { videosdkTrace } from '../lib/videosdkTrace';
 const IncomingCallHandler = () => {
   const { user } = useGlobalContext();
   const unsubscribeRef = useRef(null);
-  const appStateRef = useRef(AppState.currentState);
   const routedCallIdsRef = useRef(new Set());
 
   useEffect(() => {
@@ -35,7 +33,7 @@ const IncomingCallHandler = () => {
         callerId: incomingCall.callerId || null,
       });
 
-      router.push({
+      router.replace({
         pathname: '/call',
         params: { callId },
       });
@@ -43,22 +41,11 @@ const IncomingCallHandler = () => {
 
     unsubscribeRef.current = subscribeIncomingCalls(user.$id, openIncomingCall);
 
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (
-        appStateRef.current.match(/inactive|background/) &&
-        nextAppState === 'active'
-      ) {
-        routedCallIdsRef.current.clear();
-      }
-      appStateRef.current = nextAppState;
-    });
-
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
-      subscription.remove();
       routedCallIdsRef.current.clear();
     };
   }, [user?.$id]);

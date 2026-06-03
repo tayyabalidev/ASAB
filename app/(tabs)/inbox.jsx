@@ -6,6 +6,8 @@ import { Query } from 'react-native-appwrite';
 
 import { icons } from "../../constants";
 import { databases, appwriteConfig, getNotifications, toggleFollowUser, markNotificationAsRead } from "../../lib/appwrite";
+import { getCallById } from "../../lib/calls";
+import { CallState } from "../../lib/callHelper";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { images } from "../../constants/images";
 import { useTranslation } from "react-i18next";
@@ -41,6 +43,8 @@ const getNotificationMessage = (item) => {
       return 'sent you a message';
     case 'live':
       return 'is going live';
+    case 'call':
+      return 'is calling you';
     default:
       return 'interacted with you';
   }
@@ -195,6 +199,26 @@ const Inbox = () => {
           params: { streamId: notification.postId }
         });
       }
+    } else if (notification.type === 'call') {
+      const callId = notification.postId;
+      if (!callId) {
+        Alert.alert('Call unavailable', 'This notification is missing call details.');
+        return;
+      }
+      try {
+        const call = await getCallById(callId);
+        if (
+          call.status === CallState.CALLING ||
+          call.status === CallState.CONNECTING ||
+          call.status === CallState.CONNECTED
+        ) {
+          router.push({ pathname: '/call', params: { callId } });
+        } else {
+          Alert.alert('Call ended', 'This call is no longer active.');
+        }
+      } catch (_) {
+        Alert.alert('Call unavailable', 'Could not open this call.');
+      }
     }
   };
 
@@ -280,11 +304,16 @@ const Inbox = () => {
     () => filteredNotifications.filter((n) => n.type === 'live'),
     [filteredNotifications]
   );
+  const callNotifications = useMemo(
+    () => filteredNotifications.filter((n) => n.type === 'call'),
+    [filteredNotifications]
+  );
 
   const followUnreadCount = followNotifications.filter((n) => !n.isRead).length;
   const activityUnreadCount = activityNotifications.filter((n) => !n.isRead).length;
   const messageUnreadCount = messageNotifications.filter((n) => !n.isRead).length;
   const liveUnreadCount = liveNotifications.filter((n) => !n.isRead).length;
+  const callUnreadCount = callNotifications.filter((n) => !n.isRead).length;
 
   const toggleSearch = () => {
     setSearchActive((prev) => {
@@ -611,6 +640,8 @@ const Inbox = () => {
           ...activityNotifications,
           { type: 'header', title: 'Messages', count: messageUnreadCount },
           ...messageNotifications,
+          { type: 'header', title: 'Calls', count: callUnreadCount },
+          ...callNotifications,
           { type: 'header', title: 'Live Streams', count: liveUnreadCount },
           ...liveNotifications,
           { type: 'header', title: 'Recent Messages', count: filteredRecentMessages.length },
@@ -620,7 +651,14 @@ const Inbox = () => {
         renderItem={({ item }) => {
           if (item.type === 'header') {
             return renderSectionHeader({ title: item.title, count: item.count });
-          } else if (item.type === 'follow' || item.type === 'like' || item.type === 'comment' || item.type === 'message' || item.type === 'live') {
+          } else if (
+            item.type === 'follow' ||
+            item.type === 'like' ||
+            item.type === 'comment' ||
+            item.type === 'message' ||
+            item.type === 'call' ||
+            item.type === 'live'
+          ) {
             return renderNotificationItem({ item });
           } else {
             return renderMessageItem({ item });

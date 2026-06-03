@@ -81,7 +81,6 @@ const CallScreen = () => {
   const [callType, setCallType] = useState('video');
   const [isIncoming, setIsIncoming] = useState(false);
   const [error, setError] = useState(null);
-  const [peerAvatarUri, setPeerAvatarUri] = useState(null);
 
   const pulse = useRef(new Animated.Value(1)).current;
   const ringOpacity = useRef(new Animated.Value(0.35)).current;
@@ -90,9 +89,9 @@ const CallScreen = () => {
   const isInitializedRef = useRef(false);
   const paramsRef = useRef(params);
   const callDataRef = useRef(null);
-  const callStateRef = useRef('idle');
   const endedRef = useRef(false);
   const userIdRef = useRef(user?.$id);
+  const endCallFromSubscriptionRef = useRef(() => {});
 
   useEffect(() => {
     userIdRef.current = user?.$id;
@@ -111,9 +110,9 @@ const CallScreen = () => {
         if (payload.callerId === userIdRef.current) {
           Alert.alert('Call declined', 'The other person declined the call.');
         }
-        handleCallEnd();
+        endCallFromSubscriptionRef.current();
       } else if (payload.status === CallState.ENDED) {
-        handleCallEnd();
+        endCallFromSubscriptionRef.current();
       } else if (
         payload.status === CallState.CONNECTING ||
         payload.status === CallState.CONNECTED
@@ -174,10 +173,6 @@ const CallScreen = () => {
   useEffect(() => {
     callDataRef.current = callData;
   }, [callData]);
-
-  useEffect(() => {
-    callStateRef.current = callState;
-  }, [callState]);
 
   useEffect(() => {
     if (!user || !user.$id) {
@@ -322,13 +317,15 @@ const CallScreen = () => {
   const handleCallEnd = async () => {
     if (endedRef.current) return;
     endedRef.current = true;
+    const activeCall = callDataRef.current;
+    const activeUserId = userIdRef.current;
     try {
-      if (callData?.$id) {
-        clearCallSession(callData.$id);
+      if (activeCall?.$id && activeUserId) {
+        clearCallSession(activeCall.$id);
         try {
-          await endCall(callData.$id, user.$id);
+          await endCall(activeCall.$id, activeUserId);
         } catch (e) {
-          await forceEndCallDocument(callData.$id, user.$id).catch(() => {});
+          await forceEndCallDocument(activeCall.$id, activeUserId).catch(() => {});
         }
       }
       if (unsubscribeRef.current) {
@@ -353,6 +350,8 @@ const CallScreen = () => {
       } catch (_) {}
     }
   };
+
+  endCallFromSubscriptionRef.current = handleCallEnd;
 
   const handleCallError = (err) => {
     try {
@@ -388,8 +387,6 @@ const CallScreen = () => {
 
   const renderVideoSdkLayer = () => {
     if (!showVideoSdk) return null;
-    const peerId =
-      callData.receiverId === user.$id ? callData.callerId : callData.receiverId;
     return (
       <View
         style={[styles.sdkLayer, suppressCallAlerts && styles.sdkLayerPrecall]}
@@ -400,15 +397,12 @@ const CallScreen = () => {
           suppressAlerts={suppressCallAlerts}
           initialToken={stashedCallToken}
           roomId={roomId}
-          callerId={callData.callerId}
-          receiverId={peerId}
           currentUserId={user.$id}
           callType={callType}
           callId={callData.$id}
           peerDisplayName={peerDisplayName(callData, isIncoming)}
           localDisplayName={user?.username || user?.name || 'You'}
           localAvatarUri={user?.avatar || null}
-          peerAvatarUri={peerAvatarUri}
           onMeetingReady={handleMeetingReady}
           onRemoteConnected={handleMeetingReady}
           onCallEnd={handleCallEnd}
