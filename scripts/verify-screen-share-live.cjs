@@ -25,9 +25,15 @@ const checks = [
   {
     name: 'app.config injects iOS screen share plugin',
     pass: () => {
+      process.env.EXPO_APPLE_TEAM_ID = process.env.EXPO_APPLE_TEAM_ID || '95294KGVY6';
       const cfg = require(path.join(root, 'app.config.js'))();
-      return (cfg.expo.plugins || []).some(
+      const plugin = (cfg.expo.plugins || []).find(
         (p) => Array.isArray(p) && p[0] === '@videosdk.live/expo-ios-screen-share'
+      );
+      return (
+        Boolean(plugin) &&
+        plugin[1].appleTeamId === '95294KGVY6' &&
+        plugin[1].bundleId === 'com.bilal.asab'
       );
     },
   },

@@ -85,6 +85,13 @@ module.exports = () => {
 
   const appleTeamId =
     trimEnv("EXPO_APPLE_TEAM_ID") || trimEnv("APPLE_TEAM_ID") || "";
+  const iosBundleId = appJson.expo?.ios?.bundleIdentifier || "com.bilal.asab";
+
+  if (!appleTeamId) {
+    console.warn(
+      "[app.config] EXPO_APPLE_TEAM_ID is not set — iOS screen-share builds require it on EAS."
+    );
+  }
 
   const basePlugins = (appJson.expo.plugins || []).filter(
     (entry) =>
@@ -96,13 +103,18 @@ module.exports = () => {
 
   const plugins = [
     ...basePlugins,
-    [
-      "@videosdk.live/expo-ios-screen-share",
-      {
-        appleTeamId: appleTeamId || "UNCONFIGURED",
-        extensionName: "ASABBroadcast",
-      },
-    ],
+    ...(appleTeamId
+      ? [
+          [
+            "@videosdk.live/expo-ios-screen-share",
+            {
+              appleTeamId,
+              extensionName: "ASABBroadcast",
+              bundleId: iosBundleId,
+            },
+          ],
+        ]
+      : []),
   ];
 
   return {

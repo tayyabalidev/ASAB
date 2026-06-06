@@ -10,6 +10,9 @@
       "developmentClient": true,
       "distribution": "internal",
       "environment": "development",
+      "env": {
+        "EXPO_APPLE_TEAM_ID": "95294KGVY6"
+      },
       "android": {
         "buildType": "apk"
       }
@@ -19,7 +22,8 @@
       "distribution": "internal",
       "environment": "preview",
       "env": {
-        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "0"
+        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "0",
+        "EXPO_APPLE_TEAM_ID": "95294KGVY6"
       },
       "ios": {
         "simulator": false
@@ -33,7 +37,8 @@
       "distribution": "store",
       "environment": "production",
       "env": {
-        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "0"
+        "EXPO_PUBLIC_VIDEOSDK_DEBUG_LOGS": "0",
+        "EXPO_APPLE_TEAM_ID": "95294KGVY6"
       },
       "ios": {
         "buildConfiguration": "Release"
