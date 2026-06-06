@@ -5,9 +5,57 @@
  */
 const appJson = require("./app.json");
 
+const SPLASH_IMAGE = "./assets/images/splash1.png";
+const APP_ICON = "./assets/images/asabicon.png";
+
 function trimEnv(key) {
   const v = process.env[key];
   return typeof v === "string" ? v.trim().replace(/\/$/, "") : "";
+}
+
+function withStartupAssets(expo) {
+  const plugins = (expo.plugins || []).map((entry) => {
+    if (Array.isArray(entry) && entry[0] === "expo-notifications") {
+      return [entry[0], { ...entry[1], icon: APP_ICON }];
+    }
+    if (Array.isArray(entry) && entry[0] === "expo-splash-screen") {
+      return [
+        entry[0],
+        {
+          ...entry[1],
+          image: SPLASH_IMAGE,
+          resizeMode: "cover",
+          backgroundColor: "#000000",
+        },
+      ];
+    }
+    return entry;
+  });
+
+  return {
+    ...expo,
+    icon: APP_ICON,
+    splash: {
+      ...(expo.splash || {}),
+      image: SPLASH_IMAGE,
+      resizeMode: "cover",
+      backgroundColor: "#000000",
+    },
+    ios: {
+      ...(expo.ios || {}),
+      icon: APP_ICON,
+    },
+    android: {
+      ...(expo.android || {}),
+      icon: APP_ICON,
+      adaptiveIcon: {
+        ...(expo.android?.adaptiveIcon || {}),
+        foregroundImage: APP_ICON,
+        monochromeImage: APP_ICON,
+      },
+    },
+    plugins,
+  };
 }
 
 module.exports = () => {
@@ -59,7 +107,7 @@ module.exports = () => {
 
   return {
     ...appJson,
-    expo: {
+    expo: withStartupAssets({
       ...appJson.expo,
       plugins,
       extra: {
@@ -75,6 +123,6 @@ module.exports = () => {
         videosdkDebugLogs,
         ...(appleTeamId ? { appleTeamId } : {}),
       },
-    },
+    }),
   };
 };

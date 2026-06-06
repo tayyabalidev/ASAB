@@ -361,10 +361,7 @@ export default function RootLayout() {
     }
   }, [error]);
 
-  useEffect(() => {
-    // Hide splash screen even if fonts fail to load
-    SplashScreen.hideAsync();
-  }, [loaded]);
+  // Native splash stays visible until Splash1 mounts or logged-in home redirect.
 
   // Get Stripe publishable key from environment
   // Expo automatically makes EXPO_PUBLIC_* variables available at build time

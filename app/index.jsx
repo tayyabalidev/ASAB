@@ -1,5 +1,5 @@
 import { StatusBar } from "expo-status-bar";
-import { Redirect, router } from "expo-router";
+import { Redirect, router, SplashScreen as ExpoSplashScreen } from "expo-router";
 import { View, Text, Image, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -15,15 +15,20 @@ const Welcome = () => {
 
   useEffect(() => {
     if (!loading && isLogged) {
+      ExpoSplashScreen.hideAsync();
       setShowSplash(false);
     }
   }, [loading, isLogged]);
 
-  // Show splash only for users who still need onboarding
+  // Show Splash1 immediately for guests — even while auth is still loading.
   if (showSplash && !isLogged) {
-    return <SplashScreen onComplete={() => {
-      setShowSplash(false);
-    }} />;
+    return (
+      <SplashScreen
+        onComplete={() => {
+          setShowSplash(false);
+        }}
+      />
+    );
   }
 
   // After splash screen, check if user is logged in
@@ -54,7 +59,7 @@ const Welcome = () => {
         >
           <View className="w-full flex justify-center items-center h-full px-4">
           <Image
-            source={images.blogo}
+            source={images.wlogo}
             className="max-w-[380px] w-full h-[458px]"
             resizeMode="center"
           />

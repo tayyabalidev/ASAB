@@ -11,7 +11,7 @@
     "prebuild:ios": "expo prebuild --platform ios",
     "prebuild:android": "expo prebuild --platform android",
     "postinstall": "patch-package && node scripts/remove-nested-react.cjs",
-    "eas-build-post-install": "node scripts/ensure-android-colors.cjs",
+    "eas-build-post-install": "node scripts/ensure-android-colors.cjs && node scripts/ensure-android-splash.cjs && node scripts/ensure-android-icon.cjs",
     "verify:videosdk-live": "node scripts/verify-videosdk-live.cjs",
     "verify:screen-share-live": "node scripts/verify-screen-share-live.cjs"
   },
@@ -47,6 +47,7 @@
     "expo-location": "~19.0.8",
     "expo-notifications": "^0.32.16",
     "expo-router": "~6.0.23",
+    "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-video": "~3.0.16",
     "expo-web-browser": "~15.0.10",

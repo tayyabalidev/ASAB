@@ -8,7 +8,7 @@ import empty from "../assets/images/empty.png";
 import wlogo from "../assets/images/wlogo.png";
 import ttt from "../assets/images/ttt.png";
 import ASAB4 from "../assets/images/ASAB4.png";
-import blogo from "../assets/images/blogo.png";
+import asabicon from "../assets/images/asabicon.png";
 import amedia from "../assets/images/amedia.png";
 import Asearch from "../assets/images/Asearch.png";
 import splash1 from "../assets/images/splash1.png";
@@ -26,10 +26,10 @@ export default {
   cards,
   path,
   logo,
-  blogo,
   ttt,
   wlogo,
   ASAB4,
+  asabicon,
   logoSmall,
   empty,
   amedia,

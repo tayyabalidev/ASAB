@@ -1,13 +1,21 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Image, StyleSheet, Dimensions, Text } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
+import { SplashScreen as ExpoSplashScreen } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 
-const { width, height } = Dimensions.get('window');
+const { width, height } = Dimensions.get('screen');
 
 const SplashScreen = ({ onComplete }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  
+  const [splashReady, setSplashReady] = useState(false);
+
+  useEffect(() => {
+    if (splashReady) {
+      ExpoSplashScreen.hideAsync();
+    }
+  }, [splashReady]);
+
   const splashImages = [
     require('../assets/images/splash1.png'),
     require('../assets/images/splash3.png'),
@@ -45,50 +53,46 @@ const SplashScreen = ({ onComplete }) => {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <LinearGradient
-        colors={['#321E0A', '#1a1a2e', '#000000']}
-        locations={[0, 0.5, 1]}
-        style={styles.container}
-      >
-        <PanGestureHandler onHandlerStateChange={handleSwipe}>
-          <View style={styles.imageContainer}>
-            <Image
-              key={currentImageIndex}
-              source={splashImages[currentImageIndex]}
-              style={styles.splashImage}
-              resizeMode="cover"
-            />
-            
-            {/* Quote Text */}
-            <View style={styles.quoteContainer}>
-              <Text style={styles.quoteText}>
-                {splashQuotes[currentImageIndex]}
-              </Text>
-            </View>
-
-            {/* Progress indicator */}
-            <View style={styles.progressContainer}>
-              {splashImages.map((_, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.progressDot,
-                    index === currentImageIndex ? styles.activeDot : styles.inactiveDot
-                  ]}
-                />
-              ))}
-            </View>
-            
-            {/* Swipe instruction */}
-            <Text style={styles.instructionText}>
-              {currentImageIndex < splashImages.length - 1 
-                ? 'Swipe left to continue' 
-                : 'Swipe left to start'
+      <StatusBar hidden />
+      <PanGestureHandler onHandlerStateChange={handleSwipe}>
+        <View style={styles.imageContainer}>
+          <Image
+            key={currentImageIndex}
+            source={splashImages[currentImageIndex]}
+            style={styles.splashImage}
+            resizeMode="cover"
+            onLoad={() => {
+              if (currentImageIndex === 0) {
+                setSplashReady(true);
               }
+            }}
+          />
+
+          <View style={styles.quoteContainer}>
+            <Text style={styles.quoteText}>
+              {splashQuotes[currentImageIndex]}
             </Text>
           </View>
-        </PanGestureHandler>
-      </LinearGradient>
+
+          <View style={styles.progressContainer}>
+            {splashImages.map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.progressDot,
+                  index === currentImageIndex ? styles.activeDot : styles.inactiveDot
+                ]}
+              />
+            ))}
+          </View>
+
+          <Text style={styles.instructionText}>
+            {currentImageIndex < splashImages.length - 1
+              ? 'Swipe left to continue'
+              : 'Swipe left to start'}
+          </Text>
+        </View>
+      </PanGestureHandler>
     </GestureHandlerRootView>
   );
 };
@@ -96,22 +100,16 @@ const SplashScreen = ({ onComplete }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#000000',
   },
   imageContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000000',
   },
   splashImage: {
-    width: width,
-    height: height,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    // Ensure instant rendering without any transitions
-    transform: [{ translateX: 0 }, { translateY: 0 }],
+    ...StyleSheet.absoluteFillObject,
+    width,
+    height,
   },
   quoteContainer: {
     position: 'absolute',

@@ -4,18 +4,18 @@
     "slug": "asab",
     "version": "1.0.99",
     "orientation": "portrait",
-    "icon": "./assets/images/ASAB4.png",
+    "icon": "./assets/images/asabicon.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/images/ASAB4.png",
-      "resizeMode": "contain",
+      "image": "./assets/images/splash1.png",
+      "resizeMode": "cover",
       "backgroundColor": "#000000"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "icon": "./assets/images/ASAB4.png",
+      "icon": "./assets/images/asabicon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.bilal.asab",
       "displayName": "ASAB",
@@ -41,11 +41,11 @@
       }
     },
     "android": {
-      "icon": "./assets/images/ASAB4.png",
+      "icon": "./assets/images/asabicon.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/ASAB4.png",
+        "foregroundImage": "./assets/images/asabicon.png",
         "backgroundColor": "#000000",
-        "monochromeImage": "./assets/images/ASAB4.png"
+        "monochromeImage": "./assets/images/asabicon.png"
       },
       "permissions": [
         "android.permission.CAMERA",
@@ -64,10 +64,18 @@
       "package": "com.bilal.asab"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/images/asabicon.png"
     },
     "scheme": "com.bilal.asab",
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash1.png",
+          "resizeMode": "cover",
+          "backgroundColor": "#000000"
+        }
+      ],
       "expo-router",
       "expo-font",
       "expo-video",
@@ -98,7 +106,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/ASAB4.png",
+          "icon": "./assets/images/asabicon.png",
           "color": "#ffffff",
           "sounds": []
         }
