@@ -82,6 +82,31 @@ const checks = [
     name: 'Call module untouched (no screen share bridge import)',
     pass: () => !read('components/VideoSDKCall.jsx').includes('videosdkIosScreenShare'),
   },
+  {
+    name: 'iOS Obj-C VideosdkRPK + bridging fix plugin',
+    pass: () => {
+      const hasPlugin = read('app.config.js').includes('withVideosdkIosBridgingFix.js');
+      const hasPatch = fs.existsSync(
+        path.join(root, 'patches', '@videosdk.live+expo-ios-screen-share+0.0.3.patch')
+      );
+      const objcM = read('plugins/static/VideosdkRPK.m');
+      const patchedPlugin = read(
+        'node_modules/@videosdk.live/expo-ios-screen-share/build/withIosBroadcastExtension.js'
+      );
+      const patchedM = read(
+        'node_modules/@videosdk.live/expo-ios-screen-share/build/static/VideosdkRPK.m'
+      );
+      return (
+        hasPlugin &&
+        hasPatch &&
+        objcM.includes('@implementation VideosdkRPK') &&
+        objcM.includes('RCT_EXPORT_MODULE') &&
+        patchedM.includes('@implementation VideosdkRPK') &&
+        !patchedM.includes('RCT_EXTERN_MODULE') &&
+        !patchedPlugin.includes('VideosdkRPK.swift')
+      );
+    },
+  },
 ];
 
 let failed = 0;

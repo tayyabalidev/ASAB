@@ -116,6 +116,7 @@ module.exports = () => {
               bundleId: iosBundleId,
             },
           ],
+          "./plugins/withVideosdkIosBridgingFix.js",
         ]
       : []),
   ];

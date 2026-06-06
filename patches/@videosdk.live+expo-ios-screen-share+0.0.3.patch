@@ -1,0 +1,181 @@
+diff --git a/node_modules/@videosdk.live/expo-ios-screen-share/build/static/VideosdkRPK.m b/node_modules/@videosdk.live/expo-ios-screen-share/build/static/VideosdkRPK.m
+index 7d37b48..eff282e 100644
+--- a/node_modules/@videosdk.live/expo-ios-screen-share/build/static/VideosdkRPK.m
++++ b/node_modules/@videosdk.live/expo-ios-screen-share/build/static/VideosdkRPK.m
+@@ -1,8 +1,109 @@
+-#import <Foundation/Foundation.h>
+ #import <React/RCTBridgeModule.h>
+-#import "React/RCTEventEmitter.h"
++#import <React/RCTEventEmitter.h>
++#import <ReplayKit/ReplayKit.h>
+ 
+-@interface RCT_EXTERN_MODULE(VideosdkRPK, RCTEventEmitter)
+-RCT_EXTERN_METHOD(startBroadcast)
++@interface VideosdkRPK : RCTEventEmitter <RCTBridgeModule>
++@end
++
++static void VideosdkRPKStartNotificationCallback(CFNotificationCenterRef center,
++                                                 void *observer,
++                                                 CFStringRef name,
++                                                 const void *object,
++                                                 CFDictionaryRef userInfo) {
++  [[NSNotificationCenter defaultCenter] postNotificationName:@"START_BROADCAST" object:nil];
++}
++
++static void VideosdkRPKStopNotificationCallback(CFNotificationCenterRef center,
++                                                void *observer,
++                                                CFStringRef name,
++                                                const void *object,
++                                                CFDictionaryRef userInfo) {
++  [[NSNotificationCenter defaultCenter] postNotificationName:@"STOP_BROADCAST" object:nil];
++}
++
++@implementation VideosdkRPK {
++  NSString *_status;
++}
++
++RCT_EXPORT_MODULE();
++
+++ (BOOL)requiresMainQueueSetup {
++  return YES;
++}
++
++- (instancetype)init {
++  if (self = [super init]) {
++    _status = @"Empty";
++
++    [[NSNotificationCenter defaultCenter] addObserver:self
++                                             selector:@selector(startBroadcastCallback:)
++                                                 name:@"START_BROADCAST"
++                                               object:nil];
++    [[NSNotificationCenter defaultCenter] addObserver:self
++                                             selector:@selector(stopBroadcastCallback:)
++                                                 name:@"STOP_BROADCAST"
++                                               object:nil];
++
++    CFNotificationCenterRef notificationCenter = CFNotificationCenterGetDarwinNotifyCenter();
++    CFNotificationCenterAddObserver(
++      notificationCenter,
++      NULL,
++      VideosdkRPKStartNotificationCallback,
++      CFSTR("iOS_BroadcastStarted"),
++      NULL,
++      CFNotificationSuspensionBehaviorDeliverImmediately);
++    CFNotificationCenterAddObserver(
++      notificationCenter,
++      NULL,
++      VideosdkRPKStopNotificationCallback,
++      CFSTR("iOS_BroadcastStopped"),
++      NULL,
++      CFNotificationSuspensionBehaviorDeliverImmediately);
++  }
++  return self;
++}
++
++- (void)dealloc {
++  [[NSNotificationCenter defaultCenter] removeObserver:self];
++}
++
++- (NSArray<NSString *> *)supportedEvents {
++  return @[@"onScreenShare"];
++}
++
++- (NSDictionary *)constantsToExport {
++  return @{@"initialCount": _status ?: @"Empty"};
++}
++
++- (void)startBroadcastCallback:(NSNotification *)notification {
++  _status = @"START_BROADCAST";
++  [self sendEventWithName:@"onScreenShare" body:_status];
++  _status = @"STARTED_BROADCASTING";
++}
++
++- (void)stopBroadcastCallback:(NSNotification *)notification {
++  _status = @"STOP_BROADCAST";
++  [self sendEventWithName:@"onScreenShare" body:_status];
++  _status = @"Empty";
++}
++
++RCT_EXPORT_METHOD(startBroadcast) {
++  dispatch_async(dispatch_get_main_queue(), ^{
++    RPSystemBroadcastPickerView *pickerView =
++      [[RPSystemBroadcastPickerView alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
++    pickerView.translatesAutoresizingMaskIntoConstraints = NO;
++
++    NSString *infoPlistExtensionName =
++      [[NSBundle mainBundle] objectForInfoDictionaryKey:@"RTCScreenSharingExtensionName"];
++    NSString *finalExtensionName =
++      infoPlistExtensionName ?: @"org.reactjs.native.example.RNCodeSample";
++    pickerView.preferredExtension = finalExtensionName;
++
++    UIButton *tap = (UIButton *)pickerView.subviews.firstObject;
++    if ([tap isKindOfClass:[UIButton class]]) {
++      [tap sendActionsForControlEvents:UIControlEventTouchUpInside];
++    }
++  });
++}
+ 
+ @end
+diff --git a/node_modules/@videosdk.live/expo-ios-screen-share/build/withIosBroadcastExtension.js b/node_modules/@videosdk.live/expo-ios-screen-share/build/withIosBroadcastExtension.js
+index 3ebc704..f4b9908 100644
+--- a/node_modules/@videosdk.live/expo-ios-screen-share/build/withIosBroadcastExtension.js
++++ b/node_modules/@videosdk.live/expo-ios-screen-share/build/withIosBroadcastExtension.js
+@@ -206,7 +206,7 @@ const withVideosdkRPKFiles = (config, props) => {
+             const projectName = config.modRequest.projectName;
+             const appPath = path.join(iosRootPath, projectName);
+             await fs.promises.mkdir(appPath, { recursive: true });
+-            const files = ['VideosdkRPK.m', 'VideosdkRPK.swift'];
++            const files = ['VideosdkRPK.m'];
+             for (const file of files) {
+                 const src = path.resolve(__dirname, 'static', file);
+                 const dest = path.join(appPath, file);
+@@ -246,7 +246,7 @@ const withVideosdkRPKFiles = (config, props) => {
+         const groupUUID = Object.entries(allGroups).find(([_, group]) => group.name === groupName || group.path === groupName)?.[0];
+         if (!groupUUID)
+             throw new Error(`❌ Could not find group "${groupName}" in Xcode project`);
+-        const fileNames = ['VideosdkRPK.swift', 'VideosdkRPK.m'];
++        const fileNames = ['VideosdkRPK.m'];
+         for (const fileName of fileNames) {
+             const filePath = `${groupName}/${fileName}`;
+             if (project.hasFile(filePath)) {
+@@ -263,22 +263,35 @@ const withVideosdkRPKFiles = (config, props) => {
+         return config;
+     });
+     // Step 4: Patch or create Objective-C bridging header
+-    const BRIDGING_HEADER_IMPORT = '#import "React/RCTEventEmitter.h"';
++    const BRIDGING_HEADER_IMPORTS = [
++        '#import <React/RCTBridgeModule.h>',
++        '#import <React/RCTEventEmitter.h>',
++    ];
+     config = (0, config_plugins_1.withDangerousMod)(config, ['ios', (config) => {
+             const projectRoot = config.modRequest.projectRoot;
+             const appName = config_plugins_1.IOSConfig.XcodeUtils.getProjectName(projectRoot);
+             const iosAppDir = path.join(projectRoot, 'ios', appName);
+             const bridgingHeaderFile = `${appName}-Bridging-Header.h`;
+             const bridgingHeaderPath = path.join(iosAppDir, bridgingHeaderFile);
++            const headerBody = `// ${bridgingHeaderFile}\n${BRIDGING_HEADER_IMPORTS.join('\n')}\n`;
+             if (!fs.existsSync(bridgingHeaderPath)) {
+-                fs.writeFileSync(bridgingHeaderPath, `// ${bridgingHeaderFile}\n${BRIDGING_HEADER_IMPORT}\n`, 'utf8');
++                fs.writeFileSync(bridgingHeaderPath, headerBody, 'utf8');
+             }
+             else {
+                 let content = fs.readFileSync(bridgingHeaderPath, 'utf8');
+-                if (!content.includes(BRIDGING_HEADER_IMPORT)) {
+-                    content += `\n${BRIDGING_HEADER_IMPORT}\n`;
+-                    fs.writeFileSync(bridgingHeaderPath, content, 'utf8');
++                for (const importLine of BRIDGING_HEADER_IMPORTS) {
++                    if (!content.includes(importLine)) {
++                        content += `\n${importLine}\n`;
++                    }
+                 }
++                content = content.replace(/#import "React\/RCTEventEmitter.h"/g, '#import <React/RCTEventEmitter.h>');
++                fs.writeFileSync(bridgingHeaderPath, content, 'utf8');
++            }
++            const mPath = path.join(iosAppDir, 'VideosdkRPK.m');
++            if (fs.existsSync(mPath)) {
++                let mContent = fs.readFileSync(mPath, 'utf8');
++                mContent = mContent.replace(/#import "React\/RCTEventEmitter.h"/g, '#import <React/RCTEventEmitter.h>');
++                fs.writeFileSync(mPath, mContent, 'utf8');
+             }
+             return config;
+         }]);
