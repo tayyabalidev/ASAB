@@ -1777,6 +1777,13 @@ export const resources = {
         cameraPermissionMessage: "Grant camera access to preview and go live.",
         cameraPermissionGrant: "Grant Permission",
         charCount: "{{count}}/{{max}}",
+        thumbnailLabel: "Stream Thumbnail",
+        thumbnailHint: "Shown on the live list and while viewers wait for your stream to start.",
+        thumbnailUpload: "Upload thumbnail",
+        thumbnailRemove: "Remove thumbnail",
+        thumbnailPermissionTitle: "Photo Library Permission",
+        thumbnailPermissionMessage: "Allow photo access to upload a stream thumbnail.",
+        thumbnailPickError: "Could not select thumbnail. Please try again.",
         tipsTitle: "Live Streaming Tips",
         tips: [
           "Choose a well-lit area",

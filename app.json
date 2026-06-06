@@ -2,12 +2,12 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.0.98",
+    "version": "1.0.99",
     "orientation": "portrait",
-    "icon": "./assets/images/asab.png",
+    "icon": "./assets/images/ASAB4.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/images/ASAB4.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
@@ -15,7 +15,7 @@
       "**/*"
     ],
     "ios": {
-      "icon": "./assets/images/asab.png",
+      "icon": "./assets/images/ASAB4.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.bilal.asab",
       "displayName": "ASAB",
@@ -41,11 +41,11 @@
       }
     },
     "android": {
-      "icon": "./assets/images/asab.png",
+      "icon": "./assets/images/ASAB4.png",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/asab.png",
+        "foregroundImage": "./assets/images/ASAB4.png",
         "backgroundColor": "#000000",
-        "monochromeImage": "./assets/images/asab.png"
+        "monochromeImage": "./assets/images/ASAB4.png"
       },
       "permissions": [
         "android.permission.CAMERA",
@@ -98,7 +98,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/asab.png",
+          "icon": "./assets/images/ASAB4.png",
           "color": "#ffffff",
           "sounds": []
         }

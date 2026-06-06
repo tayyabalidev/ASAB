@@ -11,9 +11,12 @@ import {
   Platform,
   Modal,
   InteractionManager,
+  Image,
+  ImageBackground,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useGlobalContext } from '../../context/GlobalProvider';
 import { createLiveStream } from '../../lib/livestream';
@@ -50,6 +53,7 @@ const GoLive = () => {
   const [selectedQuality, setSelectedQuality] = useState('auto');
   const [selectedLiveMode, setSelectedLiveMode] = useState('camera');
   const [loading, setLoading] = useState(false);
+  const [thumbnailAsset, setThumbnailAsset] = useState(null);
 
   const liveModeOptions = [
     {
@@ -106,6 +110,30 @@ const GoLive = () => {
     setShowPreview(true);
   };
 
+  const pickThumbnail = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          t('liveGo.thumbnailPermissionTitle'),
+          t('liveGo.thumbnailPermissionMessage')
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        setThumbnailAsset(result.assets[0]);
+      }
+    } catch (_) {
+      Alert.alert(t('common.error'), t('liveGo.thumbnailPickError'));
+    }
+  };
+
   const handleGoLive = async () => {
     setLoading(true);
     try {
@@ -115,7 +143,8 @@ const GoLive = () => {
         title.trim(),
         description.trim(),
         selectedCategory,
-        selectedLiveMode
+        selectedLiveMode,
+        { thumbnailAsset }
       );
 
       // Close preview so expo-camera releases the device before VideoSDK WebRTC opens it.
@@ -184,16 +213,27 @@ const GoLive = () => {
 
           {/* Live Preview Card */}
           <View style={styles.previewCard}>
-            <View style={styles.liveIndicator}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>{t('live.badge')}</Text>
+            {thumbnailAsset?.uri ? (
+              <ImageBackground
+                source={{ uri: thumbnailAsset.uri }}
+                style={styles.previewCardImage}
+                imageStyle={styles.previewCardImageInner}
+              >
+                <View style={styles.previewCardImageOverlay} />
+              </ImageBackground>
+            ) : null}
+            <View style={styles.previewCardContent}>
+              <View style={styles.liveIndicator}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>{t('live.badge')}</Text>
+              </View>
+              <Text style={[styles.previewTitle, { textAlign: isRTL ? 'right' : 'left' }]}>
+                {t('liveGo.previewTitle')}
+              </Text>
+              <Text style={[styles.previewSubtitle, { textAlign: isRTL ? 'right' : 'center' }]}>
+                {t('liveGo.previewSubtitle')}
+              </Text>
             </View>
-            <Text style={[styles.previewTitle, { textAlign: isRTL ? 'right' : 'left' }]}>
-              {t('liveGo.previewTitle')}
-            </Text>
-            <Text style={[styles.previewSubtitle, { textAlign: isRTL ? 'right' : 'center' }]}>
-              {t('liveGo.previewSubtitle')}
-            </Text>
           </View>
 
           {/* Stream Title */}
@@ -235,6 +275,40 @@ const GoLive = () => {
             <Text style={[styles.charCount, { textAlign: isRTL ? 'left' : 'right' }]}>
               {t('liveGo.charCount', { count: description.length, max: 300 })}
             </Text>
+          </View>
+
+          {/* Stream Thumbnail */}
+          <View style={styles.inputSection}>
+            <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('liveGo.thumbnailLabel')}
+            </Text>
+            <Text style={[styles.thumbnailHint, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('liveGo.thumbnailHint')}
+            </Text>
+            <TouchableOpacity
+              style={styles.thumbnailPicker}
+              onPress={pickThumbnail}
+              activeOpacity={0.85}
+            >
+              {thumbnailAsset?.uri ? (
+                <Image source={{ uri: thumbnailAsset.uri }} style={styles.thumbnailPreview} />
+              ) : (
+                <View style={styles.thumbnailPlaceholder}>
+                  <Text style={styles.thumbnailPlaceholderIcon}>🖼️</Text>
+                  <Text style={styles.thumbnailPlaceholderText}>
+                    {t('liveGo.thumbnailUpload')}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {thumbnailAsset?.uri ? (
+              <TouchableOpacity
+                style={styles.thumbnailRemoveBtn}
+                onPress={() => setThumbnailAsset(null)}
+              >
+                <Text style={styles.thumbnailRemoveText}>{t('liveGo.thumbnailRemove')}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* Category Selection */}
@@ -480,11 +554,24 @@ const styles = StyleSheet.create({
   previewCard: {
     backgroundColor: '#1a1a2e',
     borderRadius: 15,
-    padding: 30,
-    alignItems: 'center',
     marginBottom: 30,
     borderWidth: 2,
     borderColor: '#a77df8',
+    overflow: 'hidden',
+  },
+  previewCardImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  previewCardImageInner: {
+    borderRadius: 13,
+  },
+  previewCardImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  previewCardContent: {
+    padding: 30,
+    alignItems: 'center',
   },
   liveIndicator: {
     flexDirection: 'row',
@@ -546,6 +633,51 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'right',
     marginTop: 5,
+  },
+  thumbnailHint: {
+    color: '#888',
+    fontSize: 13,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  thumbnailPicker: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(167,125,248,0.35)',
+  },
+  thumbnailPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbnailPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  thumbnailPlaceholderIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  thumbnailPlaceholderText: {
+    color: '#a77df8',
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  thumbnailRemoveBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    paddingVertical: 6,
+  },
+  thumbnailRemoveText: {
+    color: '#ff6b81',
+    fontSize: 14,
+    fontWeight: '600',
   },
   categoriesContainer: {
     paddingVertical: 5,

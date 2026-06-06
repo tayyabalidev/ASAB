@@ -35,10 +35,33 @@ module.exports = () => {
       ? String(debugLogsRaw).trim() !== '0'
       : false;
 
+  const appleTeamId =
+    trimEnv("EXPO_APPLE_TEAM_ID") || trimEnv("APPLE_TEAM_ID") || "";
+
+  const basePlugins = (appJson.expo.plugins || []).filter(
+    (entry) =>
+      !(
+        Array.isArray(entry) &&
+        entry[0] === "@videosdk.live/expo-ios-screen-share"
+      )
+  );
+
+  const plugins = [
+    ...basePlugins,
+    [
+      "@videosdk.live/expo-ios-screen-share",
+      {
+        appleTeamId: appleTeamId || "UNCONFIGURED",
+        extensionName: "ASABBroadcast",
+      },
+    ],
+  ];
+
   return {
     ...appJson,
     expo: {
       ...appJson.expo,
+      plugins,
       extra: {
         ...(appJson.expo.extra || {}),
         videosdkTokenBaseUrl,
@@ -50,6 +73,7 @@ module.exports = () => {
           ? { videosdkRoomPathExplicit }
           : {}),
         videosdkDebugLogs,
+        ...(appleTeamId ? { appleTeamId } : {}),
       },
     },
   };

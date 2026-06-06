@@ -23,6 +23,7 @@ import {
   unfollowStreamer,
   isFollowing,
   getFollowerCount,
+  resolveLiveStreamThumbnailUrl,
 } from '../lib/livestream';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken, waitForMeetingJoinFn } from '../lib/videosdkHelper';
@@ -35,7 +36,7 @@ const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'mis
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
 
-function LiveHlsViewerInner({ liveMode, onPlaybackEnded, onMeetingReady }) {
+function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeetingReady }) {
   const [hlsUrl, setHlsUrl] = useState(null);
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
   const [waitSeconds, setWaitSeconds] = useState(0);
@@ -186,25 +187,43 @@ function LiveHlsViewerInner({ liveMode, onPlaybackEnded, onMeetingReady }) {
   if (!hlsUrl) {
     return (
       <View style={styles.hlsWaiting}>
-        <ActivityIndicator color="#a77df8" size="large" />
-        <Text style={styles.hlsWaitingText}>Waiting for live videoΓÇª</Text>
-        <Text style={styles.hlsWaitingHint}>The host may still be starting the stream.</Text>
-        <Text style={styles.hlsStateText}>State: {hlsStateText}</Text>
-        {waitSeconds >= 20 ? (
-          <Text style={styles.hlsTroubleshoot}>
-            Taking longer than expected. Confirm the host has started broadcasting.
-          </Text>
+        {thumbnailUri ? (
+          <Image
+            source={{ uri: thumbnailUri }}
+            style={styles.hlsWaitingBackground}
+            resizeMode="cover"
+          />
         ) : null}
+        <View style={styles.hlsWaitingOverlay}>
+          <ActivityIndicator color="#a77df8" size="large" />
+          <Text style={styles.hlsWaitingText}>Waiting for live video…</Text>
+          <Text style={styles.hlsWaitingHint}>
+            {isCameraLive
+              ? 'The host may still be starting the stream.'
+              : 'Screen share may take 15–30 seconds to appear after the host starts sharing.'}
+          </Text>
+          <Text style={styles.hlsStateText}>State: {hlsStateText}</Text>
+          {waitSeconds >= 20 ? (
+            <Text style={styles.hlsTroubleshoot}>
+              Taking longer than expected. Confirm the host has started broadcasting.
+            </Text>
+          ) : null}
+        </View>
       </View>
     );
   }
 
   return (
-    <View style={[styles.hlsVideoWrap, isCameraLive && styles.hlsVideoMirror]}>
+    <View
+      style={[
+        styles.hlsVideoWrap,
+        isCameraLive ? styles.hlsVideoMirror : styles.hlsVideoScreen,
+      ]}
+    >
       <VideoView
         player={player}
         style={styles.hlsVideo}
-        contentFit="cover"
+        contentFit={isCameraLive ? 'cover' : 'contain'}
         nativeControls={false}
       />
     </View>
@@ -238,6 +257,7 @@ function LiveViewerJoinedLayers({ showChat, displayName, canRaiseHand }) {
 
 function LiveViewerInMeeting({
   liveMode,
+  thumbnailUri,
   onPlaybackEnded,
   showChat = true,
   displayName = 'Viewer',
@@ -249,6 +269,7 @@ function LiveViewerInMeeting({
     <View style={styles.viewerMeetingRoot}>
       <LiveHlsViewerInner
         liveMode={liveMode}
+        thumbnailUri={thumbnailUri}
         onPlaybackEnded={onPlaybackEnded}
         onMeetingReady={() => setMeetingReady(true)}
       />
@@ -267,6 +288,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
   const { user } = useGlobalContext();
   const effectiveRoomId = stream?.videosdkRoomId || null;
   const liveMode = stream?.liveMode === 'screen' ? 'screen' : 'camera';
+  const streamThumbnailUri = resolveLiveStreamThumbnailUrl(stream);
   const [viewerCount, setViewerCount] = useState(stream?.viewerCount || 0);
   const [isFollowingUser, setIsFollowingUser] = useState(false);
   const [followerCount, setFollowerCount] = useState(0);
@@ -382,8 +404,17 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
   if (tokenLoading) {
     return (
       <View style={[styles.container, styles.centerFill]}>
-        <ActivityIndicator color="#a77df8" />
-        <Text style={styles.loadingLabel}>Connecting to live roomΓÇª</Text>
+        {streamThumbnailUri ? (
+          <Image
+            source={{ uri: streamThumbnailUri }}
+            style={styles.connectingBackground}
+            resizeMode="cover"
+          />
+        ) : null}
+        <View style={styles.connectingOverlay}>
+          <ActivityIndicator color="#a77df8" />
+          <Text style={styles.loadingLabel}>Connecting to live room…</Text>
+        </View>
       </View>
     );
   }
@@ -454,6 +485,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
         >
           <LiveViewerInMeeting
             liveMode={liveMode}
+            thumbnailUri={streamThumbnailUri}
             onPlaybackEnded={handlePlaybackEnded}
             showChat={showChat}
             displayName={user.username || 'Viewer'}
@@ -515,6 +547,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  connectingBackground: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  connectingOverlay: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    ...StyleSheet.absoluteFillObject,
+  },
   loadingLabel: {
     color: '#ccc',
     marginTop: 12,
@@ -557,6 +599,10 @@ const styles = StyleSheet.create({
   hlsVideoMirror: {
     transform: [{ scaleX: -1 }],
   },
+  hlsVideoScreen: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   hlsVideo: {
     flex: 1,
     width: '100%',
@@ -565,10 +611,17 @@ const styles = StyleSheet.create({
   hlsWaiting: {
     flex: 1,
     minHeight: height * 0.45,
+    backgroundColor: '#0a0a0a',
+  },
+  hlsWaitingBackground: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  hlsWaitingOverlay: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0a0a0a',
     padding: 24,
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   hlsWaitingText: {
     color: '#fff',

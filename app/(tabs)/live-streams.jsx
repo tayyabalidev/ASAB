@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useGlobalContext } from '../../context/GlobalProvider';
-import { getActiveLiveStreams, endLiveStream, forceEndUserStreams } from '../../lib/livestream';
+import { getActiveLiveStreams, endLiveStream, forceEndUserStreams, resolveLiveStreamThumbnailUrl } from '../../lib/livestream';
 import { EmptyState } from '../../components';
 
 const LiveStreamCard = ({ stream, onPress, onEndStream, currentUserId, t, isRTL }) => {
@@ -26,7 +26,7 @@ const LiveStreamCard = ({ stream, onPress, onEndStream, currentUserId, t, isRTL 
     <TouchableOpacity style={styles.card} onPress={onPress}>
       <View style={styles.thumbnailContainer}>
         <Image 
-          source={{ uri: stream.thumbnail || stream.hostAvatar }} 
+          source={{ uri: resolveLiveStreamThumbnailUrl(stream) || stream.hostAvatar }} 
           style={styles.thumbnail}
         />
         
