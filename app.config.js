@@ -7,6 +7,7 @@ const appJson = require("./app.json");
 
 const SPLASH_IMAGE = "./assets/images/splash1.png";
 const APP_ICON = "./assets/images/asabicon.png";
+const BROADCAST_EXTENSION_NAME = "ASABBroadcast";
 
 function trimEnv(key) {
   const v = process.env[key];
@@ -86,6 +87,8 @@ module.exports = () => {
   const appleTeamId =
     trimEnv("EXPO_APPLE_TEAM_ID") || trimEnv("APPLE_TEAM_ID") || "";
   const iosBundleId = appJson.expo?.ios?.bundleIdentifier || "com.bilal.asab";
+  const iosAppGroupId = `group.${iosBundleId}.appgroup`;
+  const broadcastBundleId = `${iosBundleId}.${BROADCAST_EXTENSION_NAME}`;
 
   if (!appleTeamId) {
     console.warn(
@@ -109,7 +112,7 @@ module.exports = () => {
             "@videosdk.live/expo-ios-screen-share",
             {
               appleTeamId,
-              extensionName: "ASABBroadcast",
+              extensionName: BROADCAST_EXTENSION_NAME,
               bundleId: iosBundleId,
             },
           ],
@@ -134,6 +137,31 @@ module.exports = () => {
           : {}),
         videosdkDebugLogs,
         ...(appleTeamId ? { appleTeamId } : {}),
+        eas: {
+          ...(appJson.expo.extra?.eas || {}),
+          ...(appleTeamId
+            ? {
+                build: {
+                  ...(appJson.expo.extra?.eas?.build || {}),
+                  experimental: {
+                    ios: {
+                      appExtensions: [
+                        {
+                          targetName: BROADCAST_EXTENSION_NAME,
+                          bundleIdentifier: broadcastBundleId,
+                          entitlements: {
+                            "com.apple.security.application-groups": [
+                              iosAppGroupId,
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              }
+            : {}),
+        },
       },
     }),
   };

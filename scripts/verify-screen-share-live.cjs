@@ -30,10 +30,13 @@ const checks = [
       const plugin = (cfg.expo.plugins || []).find(
         (p) => Array.isArray(p) && p[0] === '@videosdk.live/expo-ios-screen-share'
       );
+      const ext = cfg.expo.extra?.eas?.build?.experimental?.ios?.appExtensions?.[0];
       return (
         Boolean(plugin) &&
         plugin[1].appleTeamId === '95294KGVY6' &&
-        plugin[1].bundleId === 'com.bilal.asab'
+        plugin[1].bundleId === 'com.bilal.asab' &&
+        ext?.targetName === 'ASABBroadcast' &&
+        ext?.bundleIdentifier === 'com.bilal.asab.ASABBroadcast'
       );
     },
   },
