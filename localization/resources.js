@@ -1980,7 +1980,33 @@ export const resources = {
       liveBroadcast: {
         missingStream: "Stream information is missing.",
         endedTitle: "Live Stream Ended",
-        endedMessage: "Your broadcast has ended. Returning to home."
+        endedMessage: "Your broadcast has ended. Returning to home.",
+        screenSharePrompt:
+          "Approve screen capture when prompted. Your shared screen is sent to viewers without showing a local preview (prevents capture loop).",
+        screenShareActive: "You're sharing your screen",
+        screenShareActiveHint: "Viewers see your shared content. Controls stay visible here.",
+        cameraStarting: "Camera starting…",
+        cameraLoading: "Camera stream loading…",
+        statusLive: "LIVE",
+        statusInRoom: "IN ROOM",
+        statusReconnecting: "RECONNECTING",
+        statusConnecting: "CONNECTING",
+        startingStream: "Starting stream…",
+        endStream: "End stream",
+        retry: "Retry",
+        preparingMicScreen: "Preparing microphone for screen sharing…",
+        preparingCameraMic: "Preparing camera and microphone…",
+        screenShareUnavailable:
+          "iOS screen sharing requires a native rebuild with expo-ios-screen-share and EXPO_APPLE_TEAM_ID.",
+        screenShareStartFailed:
+          "Could not start screen capture. Allow screen recording when prompted.",
+        screenShareDenied:
+          "Screen capture was denied or failed. Try again or end the stream.",
+        screenShareTimeout:
+          "Screen capture did not start in time. Allow screen recording when prompted, then tap Retry.",
+        screenShareStopped:
+          "Screen sharing stopped. Tap Retry to share again or End stream to finish.",
+        viewerCount: "{{count}} watching"
       },
       liveViewer: {
         streamEndedTitle: "Stream Ended",

@@ -79,6 +79,23 @@ const checks = [
     pass: () => read('components/LiveStreamBroadcasterImpl.sdk.jsx').includes('handleStopScreenShare'),
   },
   {
+    name: 'Viewer HLS prefers livestreamUrl (low latency)',
+    pass: () => {
+      const src = read('lib/videosdkLiveHls.js');
+      const idxLive = src.indexOf('source.livestreamUrl');
+      const idxPlayback = src.indexOf('source.playbackHlsUrl');
+      return idxLive >= 0 && idxPlayback >= 0 && idxLive < idxPlayback;
+    },
+  },
+  {
+    name: 'Host screen mode avoids RTCView preview loop',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      const screenBlock = src.slice(src.indexOf("if (liveMode === 'screen')"), src.indexOf('let streamURL = null'));
+      return !screenBlock.includes('RTCView') && screenBlock.includes('liveBroadcast.screenShareActive');
+    },
+  },
+  {
     name: 'Call module untouched (no screen share bridge import)',
     pass: () => !read('components/VideoSDKCall.jsx').includes('videosdkIosScreenShare'),
   },

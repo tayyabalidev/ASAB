@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import {
   MeetingProvider,
@@ -28,7 +29,7 @@ import {
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken, waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
-import { pickLiveHlsUrl, seekHlsNearLiveEdge } from '../lib/videosdkLiveHls';
+import { pickLiveHlsUrl, seekHlsNearLiveEdge, HLS_LIVE_EDGE_SYNC_MS } from '../lib/videosdkLiveHls';
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
@@ -117,6 +118,10 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
 
     startPlayback();
 
+    const syncTimer = setInterval(() => {
+      seekHlsNearLiveEdge(player);
+    }, HLS_LIVE_EDGE_SYNC_MS);
+
     try {
       statusSub = player.addListener('statusChange', (ev) => {
         if (cancelled) return;
@@ -128,6 +133,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
 
     return () => {
       cancelled = true;
+      clearInterval(syncTimer);
       try {
         statusSub?.remove?.();
       } catch (_) {}
@@ -494,12 +500,13 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
         </MeetingProvider>
 
         <View style={styles.viewerBadge} pointerEvents="none">
-          <Text style={styles.viewerBadgeText}>≡ƒæü {viewerCount}</Text>
+          <Feather name="eye" size={14} color="#fff" style={styles.viewerBadgeIcon} />
+          <Text style={styles.viewerBadgeText}>{viewerCount}</Text>
         </View>
 
         {onClose && (
           <TouchableOpacity style={styles.closeFab} onPress={onClose}>
-            <Text style={styles.closeFabText}>Γ£ò</Text>
+            <Feather name="x" size={22} color="#fff" />
           </TouchableOpacity>
         )}
       </View>
@@ -653,10 +660,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 12,
     left: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.55)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
+  },
+  viewerBadgeIcon: {
+    marginRight: 6,
   },
   viewerBadgeText: {
     color: '#fff',

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 import {
   MeetingProvider,
   useMeeting,
@@ -165,52 +166,34 @@ function isPublisherParticipantMode(mode) {
 }
 
 function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
+  const { t } = useTranslation();
   const {
     localWebcamOn,
     localWebcamStream,
     localScreenShareOn,
-    localScreenShareStream,
   } = useMeeting();
   const {
     webcamOn: participantWebcamOn,
     webcamStream: participantWebcamStream,
     screenShareOn,
-    screenShareStream,
   } = useParticipant(participantId);
   const webcamOn = participantWebcamOn ?? localWebcamOn;
 
   if (liveMode === 'screen') {
-    let screenUrl = null;
-    try {
-      if (localScreenShareOn && localScreenShareStream?.track) {
-        screenUrl = new MediaStream([localScreenShareStream.track]).toURL();
-      } else if (screenShareOn && screenShareStream?.track) {
-        screenUrl = new MediaStream([screenShareStream.track]).toURL();
-      } else if (localScreenShareStream && typeof localScreenShareStream.toURL === 'function') {
-        screenUrl = localScreenShareStream.toURL();
-      } else if (screenShareStream && typeof screenShareStream.toURL === 'function') {
-        screenUrl = screenShareStream.toURL();
-      }
-    } catch (_) {
-      screenUrl = null;
-    }
-    if (screenUrl) {
+    const sharing = Boolean(localScreenShareOn || screenShareOn);
+    if (sharing) {
       return (
-        <RTCView
-          streamURL={screenUrl}
-          style={styles.video}
-          objectFit="contain"
-          mirror={false}
-          zOrder={0}
-        />
+        <View style={styles.placeholder}>
+          <Feather name="monitor" size={48} color="#a77df8" />
+          <Text style={styles.screenShareActiveTitle}>{t('liveBroadcast.screenShareActive')}</Text>
+          <Text style={styles.placeholderText}>{t('liveBroadcast.screenShareActiveHint')}</Text>
+        </View>
       );
     }
     return (
       <View style={styles.placeholder}>
         <ActivityIndicator color="#fff" />
-        <Text style={styles.placeholderText}>
-          Approve screen capture when prompted, then your screen will appear hereΓÇª
-        </Text>
+        <Text style={styles.placeholderText}>{t('liveBroadcast.screenSharePrompt')}</Text>
       </View>
     );
   }
@@ -238,7 +221,7 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
       <View style={styles.placeholder}>
         <ActivityIndicator color="#fff" />
         <Text style={styles.placeholderText}>
-          {webcamOn ? 'Camera stream loadingΓÇª' : 'Camera startingΓÇª'}
+          {webcamOn ? t('liveBroadcast.cameraLoading') : t('liveBroadcast.cameraStarting')}
         </Text>
       </View>
     );
@@ -259,11 +242,12 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
 }
 
 function LocalPreview({ liveMode, localParticipantId, useFrontCamera }) {
+  const { t } = useTranslation();
   if (!localParticipantId) {
     return (
       <View style={styles.placeholder}>
         <ActivityIndicator color="#fff" />
-        <Text style={styles.placeholderText}>Camera startingΓÇª</Text>
+        <Text style={styles.placeholderText}>{t('liveBroadcast.cameraStarting')}</Text>
       </View>
     );
   }
@@ -289,6 +273,7 @@ function BroadcasterMeetingInner({
   hostDisplayName,
 }) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const [showChat, setShowChat] = useState(false);
   const [showGuests, setShowGuests] = useState(false);
   /** Tracks front vs back for preview mirroring (VideoSDK ILS: mirror only for local front). */
@@ -412,9 +397,7 @@ function BroadcasterMeetingInner({
 
       if (Platform.OS === 'ios') {
         if (!VideosdkIosScreenShare.isAvailable) {
-          throw new Error(
-            'iOS screen sharing requires a native rebuild with expo-ios-screen-share and EXPO_APPLE_TEAM_ID.'
-          );
+          throw new Error(t('liveBroadcast.screenShareUnavailable'));
         }
         await VideosdkIosScreenShare.startBroadcast();
         return;
@@ -439,7 +422,7 @@ function BroadcasterMeetingInner({
         }
       }
       if (!started) {
-        throw new Error('Could not start screen capture. Allow screen recording when prompted.');
+        throw new Error(t('liveBroadcast.screenShareStartFailed'));
       }
 
       await new Promise((r) => setTimeout(r, 800));
@@ -453,11 +436,9 @@ function BroadcasterMeetingInner({
       }
     } catch (err) {
       screenSharePendingRef.current = false;
-      setScreenShareError(
-        err?.message || 'Screen capture was denied or failed. Try again or end the stream.'
-      );
+      setScreenShareError(err?.message || t('liveBroadcast.screenShareDenied'));
     }
-  }, []);
+  }, [t]);
 
   const publishHostMediaAfterJoin = useCallback(async () => {
     if (mediaPublishAttemptedRef.current || endedRef.current) return;
@@ -480,9 +461,7 @@ function BroadcasterMeetingInner({
         await startHostScreenShare();
       } catch (err) {
         screenSharePendingRef.current = false;
-        setScreenShareError(
-          err?.message || 'Screen capture was denied or failed. Try again or end the stream.'
-        );
+        setScreenShareError(err?.message || t('liveBroadcast.screenShareDenied'));
       }
       return;
     }
@@ -498,7 +477,7 @@ function BroadcasterMeetingInner({
       }
     } catch (e) {
     }
-  }, [roomDebug, startHostScreenShare]);
+  }, [roomDebug, startHostScreenShare, t]);
 
   const {
     join,
@@ -662,7 +641,7 @@ function BroadcasterMeetingInner({
                   ? `${stateReason}. `
                   : `VideoSDK ${stateText} before the host could stay in the room. `) +
                   'Start a NEW live stream (do not reuse an old room id). ' +
-                  'Check camera/mic permissions and network (WiΓÇæFi or cellular). ' +
+                  'Check camera/mic permissions and network (Wi-Fi or cellular). ' +
                   `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}.`
           );
           setPhase('error');
@@ -844,9 +823,7 @@ function BroadcasterMeetingInner({
         return;
       }
       screenSharePendingRef.current = false;
-      setScreenShareError(
-        'Screen capture did not start in time. Allow screen recording when prompted, then tap Retry.'
-      );
+      setScreenShareError(t('liveBroadcast.screenShareTimeout'));
     }, SCREEN_SHARE_READY_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [
@@ -855,6 +832,7 @@ function BroadcasterMeetingInner({
     screenShareTrackReady,
     localScreenShareOn,
     screenShareError,
+    t,
   ]);
 
   const handleRetryScreenShare = useCallback(async () => {
@@ -883,10 +861,8 @@ function BroadcasterMeetingInner({
     }
     setScreenShareTrackReady(false);
     screenSharePendingRef.current = false;
-    setScreenShareError(
-      'Screen sharing stopped. Tap Retry to share again or End stream to finish.'
-    );
-  }, [liveMode]);
+    setScreenShareError(t('liveBroadcast.screenShareStopped'));
+  }, [liveMode, t]);
 
   const participantCount = countRoomParticipants(participants, localParticipant);
 
@@ -908,7 +884,7 @@ function BroadcasterMeetingInner({
   const participantPillLabel = hostInRoom
     ? String(displayParticipantCount)
     : joinPending
-      ? 'ΓÇª'
+      ? '…'
       : '0';
 
 
@@ -1202,25 +1178,24 @@ function BroadcasterMeetingInner({
             <View style={styles.dot} />
             <Text style={styles.liveText}>
               {phase === 'live'
-                ? 'LIVE'
+                ? t('liveBroadcast.statusLive')
                 : hostInRoom
-                  ? 'IN ROOM'
+                  ? t('liveBroadcast.statusInRoom')
                   : connectedOnceRef.current && lastSdkState === 'DISCONNECTED'
-                    ? 'RECONNECTING'
-                    : 'CONNECTING'}
+                    ? t('liveBroadcast.statusReconnecting')
+                    : t('liveBroadcast.statusConnecting')}
             </Text>
           </View>
           <View style={styles.participantPill}>
-            <Text style={styles.participantPillText}>
-              ≡ƒæñ {participantPillLabel}
-            </Text>
+            <Feather name="user" size={13} color="#fff" style={styles.participantPillIcon} />
+            <Text style={styles.participantPillText}>{participantPillLabel}</Text>
           </View>
         </View>
       </View>
       {phase === 'joining' && (
         <View style={styles.banner}>
           <ActivityIndicator color="#fff" size="small" />
-          <Text style={styles.bannerText}> Starting stream…</Text>
+          <Text style={styles.bannerText}>{t('liveBroadcast.startingStream')}</Text>
         </View>
       )}
       {liveMode === 'screen' && screenShareError ? (
@@ -1228,10 +1203,10 @@ function BroadcasterMeetingInner({
           <Text style={styles.screenShareErrorText}>{screenShareError}</Text>
           <View style={styles.screenShareErrorActions}>
             <TouchableOpacity style={styles.screenShareRetryBtn} onPress={handleRetryScreenShare}>
-              <Text style={styles.screenShareRetryText}>Retry</Text>
+              <Text style={styles.screenShareRetryText}>{t('liveBroadcast.retry')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.screenShareEndBtn} onPress={handleEndPress}>
-              <Text style={styles.screenShareEndText}>End stream</Text>
+              <Text style={styles.screenShareEndText}>{t('liveBroadcast.endStream')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1264,7 +1239,7 @@ function BroadcasterMeetingInner({
         activeOpacity={0.85}
         accessibilityLabel="Open chat"
       >
-        <Text style={styles.chatFabText}>≡ƒÆ¼</Text>
+        <Feather name="message-circle" size={22} color="#fff" />
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.sideFab, styles.sideFabRight, { bottom: Math.max(insets.bottom, 16) + 152 }]}
@@ -1280,7 +1255,7 @@ function BroadcasterMeetingInner({
           <View style={styles.chatModalHeader}>
             <Text style={styles.chatModalTitle}>Live chat</Text>
             <TouchableOpacity onPress={() => setShowChat(false)} hitSlop={12}>
-              <Text style={styles.chatModalClose}>Γ£ò</Text>
+              <Feather name="x" size={22} color="#fff" />
             </TouchableOpacity>
           </View>
           <LiveMeetingChat displayName={hostDisplayName || 'Host'} showRaiseHand={false} />
@@ -1291,7 +1266,7 @@ function BroadcasterMeetingInner({
         style={[styles.endStream, { bottom: Math.max(insets.bottom, 16) + 16 }]}
         onPress={handleEndPress}
       >
-        <Text style={styles.endStreamText}>End stream</Text>
+        <Text style={styles.endStreamText}>{t('liveBroadcast.endStream')}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -1307,6 +1282,7 @@ export default function LiveStreamBroadcasterImpl({
   liveMode = 'camera',
   onStreamEnd,
 }) {
+  const { t } = useTranslation();
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mediaPermissionsReady, setMediaPermissionsReady] = useState(false);
@@ -1471,8 +1447,8 @@ export default function LiveStreamBroadcasterImpl({
         <ActivityIndicator color="#a77df8" style={{ flex: 1 }} />
         <Text style={styles.sub}>
           {liveMode === 'screen'
-            ? 'Preparing microphone for screen sharing…'
-            : 'Preparing camera and microphone…'}
+            ? t('liveBroadcast.preparingMicScreen')
+            : t('liveBroadcast.preparingCameraMic')}
         </Text>
       </View>
     );
@@ -1529,6 +1505,16 @@ const styles = StyleSheet.create({
     color: '#aaa',
     marginTop: 12,
     fontSize: 15,
+    textAlign: 'center',
+    paddingHorizontal: 24,
+    lineHeight: 22,
+  },
+  screenShareActiveTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginTop: 16,
+    textAlign: 'center',
   },
   topBar: {
     position: 'absolute',
@@ -1550,6 +1536,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.25)',
+  },
+  participantPillIcon: {
+    marginRight: 6,
   },
   participantPillText: {
     color: '#fff',
