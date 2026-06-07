@@ -1984,7 +1984,8 @@ export const resources = {
         screenSharePrompt:
           "Approve screen capture when prompted. Your shared screen is sent to viewers without showing a local preview (prevents capture loop).",
         screenShareActive: "You're sharing your screen",
-        screenShareActiveHint: "Viewers see your shared content. Controls stay visible here.",
+        screenShareActiveHint:
+          "Your camera is shown as a picture-in-picture overlay for viewers. The shared screen preview is hidden here to prevent a capture loop.",
         cameraStarting: "Camera starting…",
         cameraLoading: "Camera stream loading…",
         statusLive: "LIVE",
@@ -1994,7 +1995,7 @@ export const resources = {
         startingStream: "Starting stream…",
         endStream: "End stream",
         retry: "Retry",
-        preparingMicScreen: "Preparing microphone for screen sharing…",
+        preparingScreenBroadcast: "Preparing microphone and camera for screen sharing…",
         preparingCameraMic: "Preparing camera and microphone…",
         screenShareUnavailable:
           "iOS screen sharing requires a native rebuild with expo-ios-screen-share and EXPO_APPLE_TEAM_ID.",

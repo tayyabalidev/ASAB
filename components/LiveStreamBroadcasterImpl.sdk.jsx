@@ -59,6 +59,8 @@ try {
 }
 
 const { width, height } = Dimensions.get('window');
+const HOST_CAMERA_PIP_WIDTH = Math.min(Math.round(width * 0.28), 128);
+const HOST_CAMERA_PIP_HEIGHT = Math.round((HOST_CAMERA_PIP_WIDTH * 16) / 9);
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
@@ -95,7 +97,7 @@ async function prewarmMedia(liveMode) {
   try {
     const stream = await mediaDevices.getUserMedia({
       audio: true,
-      video: liveMode !== 'screen',
+      video: true,
     });
     stream?.getTracks()?.forEach((track) => {
       try {
@@ -165,8 +167,29 @@ function isPublisherParticipantMode(mode) {
   return m === 'SEND_AND_RECV' || m === 'CONFERENCE' || m === 'SEND_RECV';
 }
 
+function resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream) {
+  try {
+    if (participantWebcamStream?.track) {
+      return new MediaStream([participantWebcamStream.track]).toURL();
+    }
+    if (localWebcamStream?.track) {
+      return new MediaStream([localWebcamStream.track]).toURL();
+    }
+    if (participantWebcamStream && typeof participantWebcamStream.toURL === 'function') {
+      return participantWebcamStream.toURL();
+    }
+    if (localWebcamStream && typeof localWebcamStream.toURL === 'function') {
+      return localWebcamStream.toURL();
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
 function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const {
     localWebcamOn,
     localWebcamStream,
@@ -181,40 +204,50 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
 
   if (liveMode === 'screen') {
     const sharing = Boolean(localScreenShareOn || screenShareOn);
-    if (sharing) {
+    if (!sharing) {
       return (
         <View style={styles.placeholder}>
+          <ActivityIndicator color="#fff" />
+          <Text style={styles.placeholderText}>{t('liveBroadcast.screenSharePrompt')}</Text>
+        </View>
+      );
+    }
+
+    const cameraStreamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
+    const previewMirror = Boolean(useFrontCamera);
+
+    return (
+      <View style={styles.screenShareHostRoot}>
+        <View style={styles.screenShareHostBackdrop}>
           <Feather name="monitor" size={48} color="#a77df8" />
           <Text style={styles.screenShareActiveTitle}>{t('liveBroadcast.screenShareActive')}</Text>
           <Text style={styles.placeholderText}>{t('liveBroadcast.screenShareActiveHint')}</Text>
         </View>
-      );
-    }
-    return (
-      <View style={styles.placeholder}>
-        <ActivityIndicator color="#fff" />
-        <Text style={styles.placeholderText}>{t('liveBroadcast.screenSharePrompt')}</Text>
+        <View
+          style={[
+            styles.hostCameraPip,
+            { top: Math.max(insets.top, 8) + 8, right: Math.max(insets.right, 8) + 8 },
+          ]}
+        >
+          {webcamOn && cameraStreamURL ? (
+            <RTCView
+              streamURL={cameraStreamURL}
+              style={styles.hostCameraPipVideo}
+              objectFit="cover"
+              mirror={previewMirror}
+              zOrder={Platform.OS === 'android' ? 2 : 0}
+            />
+          ) : (
+            <View style={styles.hostCameraPipPlaceholder}>
+              <ActivityIndicator color="#a77df8" size="small" />
+            </View>
+          )}
+        </View>
       </View>
     );
   }
 
-  let streamURL = null;
-  try {
-    if (participantWebcamStream?.track) {
-      streamURL = new MediaStream([participantWebcamStream.track]).toURL();
-    } else if (localWebcamStream?.track) {
-      streamURL = new MediaStream([localWebcamStream.track]).toURL();
-    } else if (
-      participantWebcamStream &&
-      typeof participantWebcamStream.toURL === 'function'
-    ) {
-      streamURL = participantWebcamStream.toURL();
-    } else if (localWebcamStream && typeof localWebcamStream.toURL === 'function') {
-      streamURL = localWebcamStream.toURL();
-    }
-  } catch (_) {
-    streamURL = null;
-  }
+  const streamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
 
   if (!webcamOn || !streamURL) {
     return (
@@ -459,6 +492,14 @@ function BroadcasterMeetingInner({
       try {
         await delay(SCREEN_SHARE_AFTER_MIC_MS);
         await startHostScreenShare();
+        await delay(MEDIA_PUBLISH_WEBCAM_MS);
+        const facingMode = useFrontCameraRef.current ? 'user' : 'environment';
+        try {
+          const customTrack = await createHostCameraTrack(qualityRef.current, facingMode);
+          await Promise.resolve(enableWebcamFnRef.current?.(customTrack));
+        } catch (_) {
+          await Promise.resolve(enableWebcamFnRef.current?.());
+        }
       } catch (err) {
         screenSharePendingRef.current = false;
         setScreenShareError(err?.message || t('liveBroadcast.screenShareDenied'));
@@ -507,8 +548,7 @@ function BroadcasterMeetingInner({
       setLastSdkState('MEETING_JOINED');
       setPhase('live');
       publishHostMediaAfterJoin();
-      // SPOTLIGHT + priority:'PIN' HLS layout only renders pinned participants.
-      // Without this pin, HLS has nothing to composite and the pipeline rejects/empties.
+      // GRID + PIN: during screenshare, VideoSDK composites screen (main) + pinned webcams (side panel).
       try {
         const lp = localParticipantRef.current;
         if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
@@ -900,7 +940,11 @@ function BroadcasterMeetingInner({
       liveMode === 'camera' && Boolean(localMicOn) && !cameraVideoReady;
     const producerReady =
       liveMode === 'screen'
-        ? Boolean(localMicOn && screenShareTrackReady)
+        ? Boolean(
+            localMicOn &&
+              screenShareTrackReady &&
+              (Boolean(localWebcamOn && localWebcamStream) || participantHasWebcamTrack)
+          )
         : cameraVideoReady || cameraAudioOnlyReady;
 
     if (!producerReady) {
@@ -912,7 +956,7 @@ function BroadcasterMeetingInner({
     const attempt = hlsStartAttemptRef.current;
 
     // Fallback pin: if onMeetingJoined fired before localParticipant was materialized,
-    // pin now. SPOTLIGHT + PIN layout requires at least one pinned participant.
+    // pin now. GRID + PIN layout composites screenshare (main) and webcam (side panel).
     try {
       const lp = localParticipant || localParticipantRef.current;
       if (lp && !pinAttemptedRef.current && typeof lp.pin === 'function') {
@@ -939,7 +983,7 @@ function BroadcasterMeetingInner({
         const isScreen = liveModeRef.current === 'screen';
         actionsRef.current.startHls?.({
           layout: isScreen
-            ? { type: 'SPOTLIGHT', priority: 'PIN', gridSize: 1 }
+            ? { type: 'GRID', priority: 'PIN', gridSize: 4 }
             : { type: 'GRID', priority: 'SPEAKER', gridSize: 4 },
           theme: 'DARK',
           mode: 'video-and-audio',
@@ -1006,7 +1050,7 @@ function BroadcasterMeetingInner({
 
         try {
           if (InCallManager && typeof InCallManager.start === 'function') {
-            InCallManager.start({ media: liveMode === 'screen' ? 'audio' : 'video' });
+            InCallManager.start({ media: 'video' });
           }
         } catch (incallErr) {
         }
@@ -1358,7 +1402,7 @@ export default function LiveStreamBroadcasterImpl({
     setMediaPermissionsError(null);
     setMediaPermissionsReady(false);
     (async () => {
-      const permCallType = liveMode === 'screen' ? 'audio' : 'video';
+      const permCallType = 'video';
       const before = await getCallMediaPermissionSnapshot(permCallType);
       if (cancelled) return;
       const ok = await ensureCallMediaPermissions(permCallType);
@@ -1367,7 +1411,7 @@ export default function LiveStreamBroadcasterImpl({
       if (!ok) {
         setMediaPermissionsError(
           liveMode === 'screen'
-            ? 'Microphone permission is required for live streaming.'
+            ? 'Camera and microphone permissions are required for screen sharing.'
             : 'Camera and microphone permissions are required for live streaming.'
         );
         setMediaPermissionsReady(false);
@@ -1447,7 +1491,7 @@ export default function LiveStreamBroadcasterImpl({
         <ActivityIndicator color="#a77df8" style={{ flex: 1 }} />
         <Text style={styles.sub}>
           {liveMode === 'screen'
-            ? t('liveBroadcast.preparingMicScreen')
+            ? t('liveBroadcast.preparingScreenBroadcast')
             : t('liveBroadcast.preparingCameraMic')}
         </Text>
       </View>
@@ -1515,6 +1559,37 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 16,
     textAlign: 'center',
+  },
+  screenShareHostRoot: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  screenShareHostBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  hostCameraPip: {
+    position: 'absolute',
+    width: HOST_CAMERA_PIP_WIDTH,
+    height: HOST_CAMERA_PIP_HEIGHT,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(167,125,248,0.85)',
+    backgroundColor: '#111',
+    zIndex: 6,
+  },
+  hostCameraPipVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  hostCameraPipPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#111',
   },
   topBar: {
     position: 'absolute',

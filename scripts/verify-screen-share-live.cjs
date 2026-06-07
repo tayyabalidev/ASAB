@@ -61,6 +61,29 @@ const checks = [
     },
   },
   {
+    name: 'Screen share HLS uses GRID PIN for screen + camera composite',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      return (
+        src.includes("type: 'GRID', priority: 'PIN', gridSize: 4") &&
+        src.includes('enableWebcamFnRef.current') &&
+        src.includes('screenShareTrackReady') &&
+        src.includes('participantHasWebcamTrack')
+      );
+    },
+  },
+  {
+    name: 'Host screen mode uses camera PiP without screen capture preview loop',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      const previewBlock = src.slice(
+        src.indexOf('function LocalPreviewInner'),
+        src.indexOf('function LocalPreview(')
+      );
+      return previewBlock.includes('hostCameraPip') && !previewBlock.includes('localScreenShareStream');
+    },
+  },
+  {
     name: 'Broadcaster: HLS landscape for screen mode',
     pass: () =>
       read('components/LiveStreamBroadcasterImpl.sdk.jsx').includes(
@@ -85,14 +108,6 @@ const checks = [
       const idxLive = src.indexOf('source.livestreamUrl');
       const idxPlayback = src.indexOf('source.playbackHlsUrl');
       return idxLive >= 0 && idxPlayback >= 0 && idxLive < idxPlayback;
-    },
-  },
-  {
-    name: 'Host screen mode avoids RTCView preview loop',
-    pass: () => {
-      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
-      const screenBlock = src.slice(src.indexOf("if (liveMode === 'screen')"), src.indexOf('let streamURL = null'));
-      return !screenBlock.includes('RTCView') && screenBlock.includes('liveBroadcast.screenShareActive');
     },
   },
   {
