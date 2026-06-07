@@ -76,10 +76,9 @@ const checks = [
     name: 'Screen live publishes webcam before screen capture',
     pass: () => {
       const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
-      const block = src.slice(
-        src.indexOf("if (liveModeRef.current === 'screen')"),
-        src.indexOf('if (liveModeRef.current === \'screen\')') + 900
-      );
+      const fnStart = src.indexOf('const publishHostMediaAfterJoin');
+      const fnEnd = src.indexOf('const {', fnStart);
+      const block = src.slice(fnStart, fnEnd);
       const webcamIdx = block.indexOf('enableWebcamFnRef.current');
       const shareIdx = block.indexOf('startHostScreenShare');
       return webcamIdx >= 0 && shareIdx >= 0 && webcamIdx < shareIdx;
@@ -93,7 +92,9 @@ const checks = [
         src.includes('AppState.addEventListener') &&
         src.includes('ensureScreenLiveWebcam') &&
         src.includes('onWebcamStreamDisabled') &&
-        src.includes('resumeAllStreamsFnRef')
+        src.includes('resumeAllStreamsFnRef') &&
+        src.includes('SCREEN_WEBCAM_BACKGROUND_KEEPALIVE_MS') &&
+        src.includes('forceRefresh')
       );
     },
   },
