@@ -361,7 +361,7 @@ export default function RootLayout() {
     }
   }, [error]);
 
-  // Native splash stays visible until Splash1 mounts or logged-in home redirect.
+  // Native splash is background-only; full-screen Splash1 is shown in components/SplashScreen.jsx.
 
   // Get Stripe publishable key from environment
   // Expo automatically makes EXPO_PUBLIC_* variables available at build time

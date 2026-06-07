@@ -2,14 +2,13 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/images/asabicon.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/images/splash1.png",
-      "resizeMode": "cover",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#000000",
+      "resizeMode": "cover"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -33,6 +32,10 @@
         "NSMicrophoneUsageDescription": "This app needs access to microphone for audio calls and video recording",
         "NSPhotoLibraryUsageDescription": "This app needs access to photo library to select and upload videos",
         "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication",
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ],
         "UIStatusBarStyle": "UIStatusBarStyleLightContent",
         "UIViewControllerBasedStatusBarAppearance": false
       },
@@ -71,9 +74,13 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash1.png",
-          "resizeMode": "cover",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#000000",
+          "android": {
+            "backgroundColor": "#000000"
+          },
+          "ios": {
+            "backgroundColor": "#000000"
+          }
         }
       ],
       "expo-router",

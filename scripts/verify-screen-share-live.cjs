@@ -73,6 +73,39 @@ const checks = [
     },
   },
   {
+    name: 'Screen live publishes webcam before screen capture',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      const block = src.slice(
+        src.indexOf("if (liveModeRef.current === 'screen')"),
+        src.indexOf('if (liveModeRef.current === \'screen\')') + 900
+      );
+      const webcamIdx = block.indexOf('enableWebcamFnRef.current');
+      const shareIdx = block.indexOf('startHostScreenShare');
+      return webcamIdx >= 0 && shareIdx >= 0 && webcamIdx < shareIdx;
+    },
+  },
+  {
+    name: 'Screen live webcam recovery on AppState + stream disabled',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      return (
+        src.includes('AppState.addEventListener') &&
+        src.includes('ensureScreenLiveWebcam') &&
+        src.includes('onWebcamStreamDisabled') &&
+        src.includes('resumeAllStreamsFnRef')
+      );
+    },
+  },
+  {
+    name: 'iOS background modes for live WebRTC session',
+    pass: () => {
+      const app = JSON.parse(read('app.json'));
+      const modes = app.expo?.ios?.infoPlist?.UIBackgroundModes || [];
+      return modes.includes('audio') && modes.includes('voip');
+    },
+  },
+  {
     name: 'Host screen mode uses camera PiP without screen capture preview loop',
     pass: () => {
       const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');

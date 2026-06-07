@@ -1,37 +1,36 @@
 /**
- * Keeps Android native splash logos aligned with splash1.png after prebuild/EAS.
+ * Keeps Android native launch splash as a solid background only (no centered logo).
+ * Full-screen splash imagery is handled in JS (components/SplashScreen.jsx).
  */
 const fs = require("fs");
 const path = require("path");
 
-const splashSource = path.join(__dirname, "..", "assets", "images", "splash1.png");
-const densities = ["mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"];
+const launcherBackgroundPath = path.join(
+  __dirname,
+  "..",
+  "android",
+  "app",
+  "src",
+  "main",
+  "res",
+  "drawable",
+  "ic_launcher_background.xml"
+);
 
-if (!fs.existsSync(splashSource)) {
-  console.log("[ensure-android-splash] splash1.png missing — skipping.");
+const BACKGROUND_ONLY = `<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+  <item android:drawable="@color/splashscreen_background"/>
+</layer-list>
+`;
+
+if (!fs.existsSync(launcherBackgroundPath)) {
+  console.log("[ensure-android-splash] ic_launcher_background.xml missing — skipping.");
   process.exit(0);
 }
 
-let updated = 0;
-for (const density of densities) {
-  const target = path.join(
-    __dirname,
-    "..",
-    "android",
-    "app",
-    "src",
-    "main",
-    "res",
-    `drawable-${density}`,
-    "splashscreen_logo.png"
-  );
-  if (!fs.existsSync(path.dirname(target))) continue;
-  fs.copyFileSync(splashSource, target);
-  updated += 1;
+const current = fs.readFileSync(launcherBackgroundPath, "utf8");
+if (current.trim() !== BACKGROUND_ONLY.trim()) {
+  fs.writeFileSync(launcherBackgroundPath, BACKGROUND_ONLY);
+  console.log("[ensure-android-splash] Removed centered splash logo from native launch background.");
+} else {
+  console.log("[ensure-android-splash] Native launch background already background-only.");
 }
-
-console.log(
-  updated
-    ? `[ensure-android-splash] Synced splash1.png to ${updated} Android density buckets.`
-    : "[ensure-android-splash] No Android splash targets found."
-);

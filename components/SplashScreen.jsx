@@ -8,13 +8,10 @@ const { width, height } = Dimensions.get('screen');
 
 const SplashScreen = ({ onComplete }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [splashReady, setSplashReady] = useState(false);
 
   useEffect(() => {
-    if (splashReady) {
-      ExpoSplashScreen.hideAsync();
-    }
-  }, [splashReady]);
+    ExpoSplashScreen.hideAsync();
+  }, []);
 
   const splashImages = [
     require('../assets/images/splash1.png'),
@@ -61,11 +58,6 @@ const SplashScreen = ({ onComplete }) => {
             source={splashImages[currentImageIndex]}
             style={styles.splashImage}
             resizeMode="cover"
-            onLoad={() => {
-              if (currentImageIndex === 0) {
-                setSplashReady(true);
-              }
-            }}
           />
 
           <View style={styles.quoteContainer}>

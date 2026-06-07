@@ -5,7 +5,6 @@
  */
 const appJson = require("./app.json");
 
-const SPLASH_IMAGE = "./assets/images/splash1.png";
 const APP_ICON = "./assets/images/asabicon.png";
 const BROADCAST_EXTENSION_NAME = "ASABBroadcast";
 
@@ -23,10 +22,13 @@ function withStartupAssets(expo) {
       return [
         entry[0],
         {
-          ...entry[1],
-          image: SPLASH_IMAGE,
-          resizeMode: "cover",
           backgroundColor: "#000000",
+          android: {
+            backgroundColor: "#000000",
+          },
+          ios: {
+            backgroundColor: "#000000",
+          },
         },
       ];
     }
@@ -38,9 +40,8 @@ function withStartupAssets(expo) {
     icon: APP_ICON,
     splash: {
       ...(expo.splash || {}),
-      image: SPLASH_IMAGE,
-      resizeMode: "cover",
       backgroundColor: "#000000",
+      resizeMode: "cover",
     },
     ios: {
       ...(expo.ios || {}),

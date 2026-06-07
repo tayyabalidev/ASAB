@@ -10,6 +10,7 @@ import {
   InteractionManager,
   Platform,
   Modal,
+  AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -50,6 +51,7 @@ const MEDIA_PUBLISH_WEBCAM_MS = Platform.OS === 'ios' ? 120 : 200;
 const SCREEN_SHARE_AFTER_MIC_MS = Platform.OS === 'ios' ? 250 : 350;
 const SCREEN_HLS_EXTRA_DELAY_MS = Platform.OS === 'ios' ? 200 : 300;
 const SCREEN_SHARE_READY_TIMEOUT_MS = 60000;
+const SCREEN_WEBCAM_RECOVERY_COOLDOWN_MS = 2500;
 
 let InCallManager = null;
 try {
@@ -123,8 +125,18 @@ function normalizeMeetingState(state) {
 }
 
 /** Tracks local webcam track without calling useParticipant with a fake id (crashes on Android). */
-function HostLocalWebcamProbe({ participantId, onTrackReady }) {
-  const { webcamOn, webcamStream } = useParticipant(participantId);
+function HostLocalWebcamProbe({ participantId, onTrackReady, onWebcamStreamDisabled }) {
+  const handleStreamDisabled = useCallback(
+    (stream) => {
+      if (stream?.kind === 'video') {
+        onWebcamStreamDisabled?.();
+      }
+    },
+    [onWebcamStreamDisabled]
+  );
+  const { webcamOn, webcamStream } = useParticipant(participantId, {
+    onStreamDisabled: handleStreamDisabled,
+  });
   useEffect(() => {
     onTrackReady(Boolean(webcamOn && webcamStream?.track));
   }, [webcamOn, webcamStream?.track, onTrackReady]);
@@ -347,6 +359,11 @@ function BroadcasterMeetingInner({
   const toggleScreenShareFnRef = useRef(null);
   const screenSharePendingRef = useRef(false);
   const localScreenShareOnRef = useRef(false);
+  const localWebcamOnRef = useRef(false);
+  const resumeAllStreamsFnRef = useRef(null);
+  const ensureScreenLiveWebcamRef = useRef(null);
+  const webcamRecoveryInFlightRef = useRef(false);
+  const lastWebcamRecoveryAtRef = useRef(0);
   const mediaPublishAttemptedRef = useRef(false);
   const micReadyRef = useRef(false);
   const [meetingJoined, setMeetingJoined] = useState(false);
@@ -490,8 +507,7 @@ function BroadcasterMeetingInner({
 
     if (liveModeRef.current === 'screen') {
       try {
-        await delay(SCREEN_SHARE_AFTER_MIC_MS);
-        await startHostScreenShare();
+        // Publish webcam while the app is foreground before MediaProjection / ReplayKit starts.
         await delay(MEDIA_PUBLISH_WEBCAM_MS);
         const facingMode = useFrontCameraRef.current ? 'user' : 'environment';
         try {
@@ -500,6 +516,8 @@ function BroadcasterMeetingInner({
         } catch (_) {
           await Promise.resolve(enableWebcamFnRef.current?.());
         }
+        await delay(SCREEN_SHARE_AFTER_MIC_MS);
+        await startHostScreenShare();
       } catch (err) {
         screenSharePendingRef.current = false;
         setScreenShareError(err?.message || t('liveBroadcast.screenShareDenied'));
@@ -533,6 +551,7 @@ function BroadcasterMeetingInner({
     enableScreenShare,
     disableScreenShare,
     toggleScreenShare,
+    resumeAllStreams,
     localWebcamOn,
     localWebcamStream,
     localMicOn,
@@ -808,6 +827,7 @@ function BroadcasterMeetingInner({
   enableScreenShareFnRef.current = enableScreenShare;
   disableScreenShareFnRef.current = disableScreenShare;
   toggleScreenShareFnRef.current = toggleScreenShare;
+  resumeAllStreamsFnRef.current = resumeAllStreams;
   joinFnRef.current = join;
   leaveFnRef.current = leave;
   enableMicFnRef.current = enableMic;
@@ -818,6 +838,52 @@ function BroadcasterMeetingInner({
 
   const localParticipantIdForMedia = localParticipant?.id || '';
   const [participantHasWebcamTrack, setParticipantHasWebcamTrack] = useState(false);
+
+  const ensureScreenLiveWebcam = useCallback(async () => {
+    if (
+      endedRef.current ||
+      liveModeRef.current !== 'screen' ||
+      !meetingJoinedRef.current ||
+      webcamRecoveryInFlightRef.current
+    ) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastWebcamRecoveryAtRef.current < SCREEN_WEBCAM_RECOVERY_COOLDOWN_MS) {
+      return;
+    }
+    webcamRecoveryInFlightRef.current = true;
+    lastWebcamRecoveryAtRef.current = now;
+    try {
+      if (Platform.OS === 'android' && ReactNativeForegroundService?.startAll) {
+        try {
+          ReactNativeForegroundService.startAll();
+        } catch (_) {}
+      }
+      try {
+        await Promise.resolve(resumeAllStreamsFnRef.current?.());
+      } catch (_) {}
+      if (!localWebcamOnRef.current) {
+        const facingMode = useFrontCameraRef.current ? 'user' : 'environment';
+        try {
+          const customTrack = await createHostCameraTrack(qualityRef.current, facingMode);
+          await Promise.resolve(enableWebcamFnRef.current?.(customTrack));
+        } catch (_) {
+          await Promise.resolve(enableWebcamFnRef.current?.());
+        }
+      }
+    } catch (_) {
+      /* best-effort recovery while screen sharing */
+    } finally {
+      webcamRecoveryInFlightRef.current = false;
+    }
+  }, []);
+
+  ensureScreenLiveWebcamRef.current = ensureScreenLiveWebcam;
+
+  useEffect(() => {
+    localWebcamOnRef.current = Boolean(localWebcamOn);
+  }, [localWebcamOn]);
 
   useEffect(() => {
     localScreenShareOnRef.current = Boolean(localScreenShareOn);
@@ -838,7 +904,9 @@ function BroadcasterMeetingInner({
     if (liveMode !== 'screen' || Platform.OS !== 'ios') return undefined;
     const subscription = VideosdkIosScreenShare.addListener((event) => {
       if (event === 'START_BROADCAST') {
-        Promise.resolve(toggleScreenShareFnRef.current?.()).catch(() => {});
+        Promise.resolve(toggleScreenShareFnRef.current?.())
+          .then(() => ensureScreenLiveWebcamRef.current?.())
+          .catch(() => {});
       } else if (event === 'STOP_BROADCAST') {
         Promise.resolve(toggleScreenShareFnRef.current?.()).catch(() => {});
       }
@@ -847,6 +915,48 @@ function BroadcasterMeetingInner({
       VideosdkIosScreenShare.removeListener(subscription);
     };
   }, [liveMode]);
+
+  useEffect(() => {
+    if (liveMode !== 'screen' || !meetingJoined) return undefined;
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (endedRef.current) return;
+      if (nextState === 'active') {
+        ensureScreenLiveWebcamRef.current?.();
+        return;
+      }
+      if (nextState === 'background' || nextState === 'inactive') {
+        if (Platform.OS === 'android' && ReactNativeForegroundService?.startAll) {
+          try {
+            ReactNativeForegroundService.startAll();
+          } catch (_) {}
+        }
+      }
+    });
+    return () => subscription.remove();
+  }, [liveMode, meetingJoined]);
+
+  useEffect(() => {
+    if (
+      liveMode !== 'screen' ||
+      !meetingJoined ||
+      !localScreenShareOn ||
+      (localWebcamOn && localWebcamStream) ||
+      participantHasWebcamTrack
+    ) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      ensureScreenLiveWebcamRef.current?.();
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [
+    liveMode,
+    meetingJoined,
+    localScreenShareOn,
+    localWebcamOn,
+    localWebcamStream,
+    participantHasWebcamTrack,
+  ]);
 
   useEffect(() => {
     if (liveMode !== 'screen' || !meetingJoined || screenShareTrackReady || localScreenShareOn) {
@@ -1195,6 +1305,7 @@ function BroadcasterMeetingInner({
           <HostLocalWebcamProbe
             participantId={localParticipantIdForMedia}
             onTrackReady={setParticipantHasWebcamTrack}
+            onWebcamStreamDisabled={ensureScreenLiveWebcam}
           />
           {liveMode === 'screen' ? (
             <HostScreenShareProbe

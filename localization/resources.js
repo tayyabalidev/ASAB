@@ -1985,7 +1985,7 @@ export const resources = {
           "Approve screen capture when prompted. Your shared screen is sent to viewers without showing a local preview (prevents capture loop).",
         screenShareActive: "You're sharing your screen",
         screenShareActiveHint:
-          "Your camera is shown as a picture-in-picture overlay for viewers. The shared screen preview is hidden here to prevent a capture loop.",
+          "Your camera stays live for viewers in the side panel. The shared screen preview is hidden here to prevent a capture loop. If you switch apps, return to ASAB briefly if your camera drops.",
         cameraStarting: "Camera starting…",
         cameraLoading: "Camera stream loading…",
         statusLive: "LIVE",
