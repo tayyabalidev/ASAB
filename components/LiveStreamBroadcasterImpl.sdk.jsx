@@ -61,8 +61,6 @@ try {
 }
 
 const { width, height } = Dimensions.get('window');
-const HOST_CAMERA_PIP_WIDTH = Math.min(Math.round(width * 0.28), 128);
-const HOST_CAMERA_PIP_HEIGHT = Math.round((HOST_CAMERA_PIP_WIDTH * 16) / 9);
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
@@ -201,16 +199,11 @@ function resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream) {
 
 function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
   const { t } = useTranslation();
-  const insets = useSafeAreaInsets();
+  const { localScreenShareOn, localWebcamOn, localWebcamStream } = useMeeting();
   const {
-    localWebcamOn,
-    localWebcamStream,
-    localScreenShareOn,
-  } = useMeeting();
-  const {
+    screenShareOn,
     webcamOn: participantWebcamOn,
     webcamStream: participantWebcamStream,
-    screenShareOn,
   } = useParticipant(participantId);
   const webcamOn = participantWebcamOn ?? localWebcamOn;
 
@@ -225,35 +218,12 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
       );
     }
 
-    const cameraStreamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
-    const previewMirror = Boolean(useFrontCamera);
-
     return (
       <View style={styles.screenShareHostRoot}>
         <View style={styles.screenShareHostBackdrop}>
           <Feather name="monitor" size={48} color="#a77df8" />
           <Text style={styles.screenShareActiveTitle}>{t('liveBroadcast.screenShareActive')}</Text>
           <Text style={styles.placeholderText}>{t('liveBroadcast.screenShareActiveHint')}</Text>
-        </View>
-        <View
-          style={[
-            styles.hostCameraPip,
-            { top: Math.max(insets.top, 8) + 8, right: Math.max(insets.right, 8) + 8 },
-          ]}
-        >
-          {webcamOn && cameraStreamURL ? (
-            <RTCView
-              streamURL={cameraStreamURL}
-              style={styles.hostCameraPipVideo}
-              objectFit="cover"
-              mirror={previewMirror}
-              zOrder={Platform.OS === 'android' ? 2 : 0}
-            />
-          ) : (
-            <View style={styles.hostCameraPipPlaceholder}>
-              <ActivityIndicator color="#a77df8" size="small" />
-            </View>
-          )}
         </View>
       </View>
     );
@@ -1680,27 +1650,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
-  },
-  hostCameraPip: {
-    position: 'absolute',
-    width: HOST_CAMERA_PIP_WIDTH,
-    height: HOST_CAMERA_PIP_HEIGHT,
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: 'rgba(167,125,248,0.85)',
-    backgroundColor: '#111',
-    zIndex: 6,
-  },
-  hostCameraPipVideo: {
-    width: '100%',
-    height: '100%',
-  },
-  hostCameraPipPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#111',
   },
   topBar: {
     position: 'absolute',

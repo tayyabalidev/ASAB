@@ -106,14 +106,18 @@ const checks = [
     },
   },
   {
-    name: 'Host screen mode uses camera PiP without screen capture preview loop',
+    name: 'Host screen mode hides local camera preview (avoids double PiP in HLS)',
     pass: () => {
       const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
       const previewBlock = src.slice(
         src.indexOf('function LocalPreviewInner'),
         src.indexOf('function LocalPreview(')
       );
-      return previewBlock.includes('hostCameraPip') && !previewBlock.includes('localScreenShareStream');
+      return (
+        previewBlock.includes('screenShareHostBackdrop') &&
+        !previewBlock.includes('hostCameraPip') &&
+        !previewBlock.includes('localScreenShareStream')
+      );
     },
   },
   {
