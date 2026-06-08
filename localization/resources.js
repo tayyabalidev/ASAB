@@ -1982,7 +1982,7 @@ export const resources = {
         endedTitle: "Live Stream Ended",
         endedMessage: "Your broadcast has ended. Returning to home.",
         screenSharePrompt:
-          "Approve screen capture when prompted. Your shared screen is sent to viewers without showing a local preview (prevents capture loop).",
+          "Approve screen capture when prompted. On Android, device audio (games, videos) is shared with the stream — keep your mic unmuted. On iOS, turn on Microphone and Share Audio in the broadcast picker.",
         screenShareActive: "You're sharing your screen",
         screenShareActiveHint:
           "Your camera is composited into the live stream for viewers. Keep ASAB in the background while sharing other apps so the camera can stay live.",

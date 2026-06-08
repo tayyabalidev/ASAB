@@ -129,10 +129,24 @@ const checks = [
       ),
   },
   {
-    name: 'Viewer: contain mode for screen HLS',
+    name: 'Viewer: full-bleed cover mode for screen HLS',
     pass: () => {
       const src = read('components/LiveStreamPlayerImpl.sdk.jsx');
-      return src.includes("contentFit={isCameraLive ? 'cover' : 'contain'}");
+      return src.includes('contentFit="cover"') && src.includes('hlsVideoScreen');
+    },
+  },
+  {
+    name: 'Broadcaster enables Android system audio for screen share',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      const helper = read('lib/videosdkScreenShare.js');
+      return (
+        src.includes('invokeScreenShareEnable') &&
+        src.includes('ensureScreenShareMicAndSystemAudio') &&
+        src.includes('ensureAndroidSystemAudioCapture') &&
+        helper.includes('enableAudio: true') &&
+        helper.includes('enableSystemAudio')
+      );
     },
   },
   {

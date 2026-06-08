@@ -303,7 +303,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
       <VideoView
         player={player}
         style={styles.hlsVideo}
-        contentFit={isCameraLive ? 'cover' : 'contain'}
+        contentFit="cover"
         nativeControls={false}
         allowsPictureInPicture={false}
       />
@@ -318,7 +318,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
   );
 }
 
-function LiveViewerJoinedLayers({ showChat, displayName, canRaiseHand }) {
+function LiveViewerJoinedLayers({ showChat, displayName, canRaiseHand, liveMode }) {
   const { localParticipant } = useMeeting();
   const localMode = String(localParticipant?.mode || '').toUpperCase();
   const localIsSpeaker =
@@ -331,7 +331,13 @@ function LiveViewerJoinedLayers({ showChat, displayName, canRaiseHand }) {
       <LiveCoHostInviteListener />
       {localIsSpeaker ? <LiveCoHostGuestMedia /> : null}
       {showChat ? (
-        <View style={styles.chatOverlay} pointerEvents="box-none">
+        <View
+          style={[
+            styles.chatOverlay,
+            liveMode === 'screen' ? styles.chatOverlayScreen : null,
+          ]}
+          pointerEvents="box-none"
+        >
           <LiveMeetingChat
             displayName={displayName}
             showRaiseHand={canRaiseHand}
@@ -366,6 +372,7 @@ function LiveViewerInMeeting({
           showChat={showChat}
           displayName={displayName}
           canRaiseHand={canRaiseHand}
+          liveMode={liveMode}
         />
       ) : null}
     </View>
@@ -376,6 +383,8 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
   const { user } = useGlobalContext();
   const effectiveRoomId = stream?.videosdkRoomId || null;
   const liveMode = stream?.liveMode === 'screen' ? 'screen' : 'camera';
+  const isScreenLive = liveMode === 'screen';
+  const chatBottomInset = showChat ? (isScreenLive ? height * 0.14 : height * 0.44) : 24;
   const streamThumbnailUri = resolveLiveStreamThumbnailUrl(stream);
   const [viewerCount, setViewerCount] = useState(stream?.viewerCount || 0);
   const [isFollowingUser, setIsFollowingUser] = useState(false);
@@ -593,7 +602,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
         )}
       </View>
 
-      <View style={[styles.bottomOverlay, showChat && { paddingBottom: height * 0.44 }]}>
+      <View style={[styles.bottomOverlay, { paddingBottom: chatBottomInset }]}>
         <View style={styles.hostInfoContainer}>
           <View style={styles.hostInfo}>
             <Image
@@ -680,6 +689,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     zIndex: 28,
   },
+  chatOverlayScreen: {
+    height: '28%',
+  },
   hlsVideoWrap: {
     flex: 1,
     width: '100%',
@@ -689,8 +701,9 @@ const styles = StyleSheet.create({
     transform: [{ scaleX: -1 }],
   },
   hlsVideoScreen: {
-    justifyContent: 'center',
-    alignItems: 'center',
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#000',
   },
   hlsVideo: {
     flex: 1,
