@@ -8,6 +8,7 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -29,7 +30,15 @@ import {
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken, waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
-import { pickLiveHlsUrl, seekHlsNearLiveEdge, HLS_LIVE_EDGE_SYNC_MS } from '../lib/videosdkLiveHls';
+import {
+  pickLiveHlsUrl,
+  listLiveHlsUrlFallbacks,
+  buildHlsVideoSource,
+  seekHlsNearLiveEdge,
+  shouldSyncHlsLiveEdge,
+  HLS_LIVE_EDGE_SYNC_MS,
+  HLS_IOS_RETRY_DELAY_MS,
+} from '../lib/videosdkLiveHls';
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
@@ -40,11 +49,15 @@ const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'mis
 function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeetingReady }) {
   const [hlsUrl, setHlsUrl] = useState(null);
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
+  const [playbackError, setPlaybackError] = useState(null);
   const [waitSeconds, setWaitSeconds] = useState(0);
   const joinOnceRef = useRef(false);
   const meetingJoinedRef = useRef(false);
   const playbackStartedRef = useRef(false);
   const lastLoadedUrlRef = useRef(null);
+  const hlsPayloadRef = useRef(null);
+  const hlsUrlAttemptRef = useRef(0);
+  const playbackRetryTimerRef = useRef(null);
   const actionsRef = useRef({});
   const onMeetingReadyRef = useRef(onMeetingReady);
   const isCameraLive = liveMode !== 'screen';
@@ -58,10 +71,30 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
     p.muted = false;
   });
 
-  const applyHlsUrl = useCallback((nextUrl) => {
+  const applyHlsPayload = useCallback((payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    hlsPayloadRef.current = payload;
+    hlsUrlAttemptRef.current = 0;
+    const nextUrl = pickLiveHlsUrl(payload, Platform.OS);
     if (!nextUrl || nextUrl === lastLoadedUrlRef.current) return;
     lastLoadedUrlRef.current = nextUrl;
+    setPlaybackError(null);
     setHlsUrl(nextUrl);
+  }, []);
+
+  const tryNextHlsUrl = useCallback(() => {
+    const payload = hlsPayloadRef.current;
+    const urls = listLiveHlsUrlFallbacks(payload, Platform.OS);
+    if (urls.length === 0) return false;
+    const nextAttempt = hlsUrlAttemptRef.current + 1;
+    if (nextAttempt >= urls.length) return false;
+    hlsUrlAttemptRef.current = nextAttempt;
+    const nextUrl = urls[nextAttempt];
+    lastLoadedUrlRef.current = nextUrl;
+    setPlaybackError(null);
+    setHlsStateText(`RETRY_HLS_${nextAttempt + 1}`);
+    setHlsUrl(nextUrl);
+    return true;
   }, []);
 
   const { join, leave, hlsUrls } = useMeeting({
@@ -72,15 +105,13 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
     },
     onHlsStarted: (payload = {}) => {
       setHlsStateText('HLS_STARTED');
-      const u = pickLiveHlsUrl(payload);
-      if (u) applyHlsUrl(u);
+      applyHlsPayload(payload);
     },
     onHlsStateChanged: (payload = {}) => {
       const status = payload?.status;
       if (status) setHlsStateText(status);
-      if (status === 'HLS_PLAYABLE') {
-        const u = pickLiveHlsUrl(payload);
-        if (u) applyHlsUrl(u);
+      if (status === 'HLS_PLAYABLE' || status === 'HLS_STARTED') {
+        applyHlsPayload(payload);
       }
       if (status === 'HLS_STOPPED' && playbackStartedRef.current) {
         onPlaybackEnded?.();
@@ -89,15 +120,16 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
     onMeetingLeft: () => {
       if (!meetingJoinedRef.current) return;
     },
-    onError: () => {
-      setHlsStateText('ERROR');
+    onError: (err) => {
+      const msg = err?.message || err?.reason || 'Meeting error';
+      setHlsStateText(`ERROR: ${msg}`);
     },
   });
 
   useEffect(() => {
-    const u = pickLiveHlsUrl(hlsUrls);
-    if (u) applyHlsUrl(u);
-  }, [hlsUrls, applyHlsUrl]);
+    if (!hlsUrls) return;
+    applyHlsPayload(hlsUrls);
+  }, [hlsUrls, applyHlsPayload]);
 
   useEffect(() => {
     if (!hlsUrl) return undefined;
@@ -105,35 +137,68 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
     let cancelled = false;
     let statusSub = null;
 
+    const scheduleRetry = () => {
+      if (cancelled) return;
+      if (playbackRetryTimerRef.current) {
+        clearTimeout(playbackRetryTimerRef.current);
+      }
+      playbackRetryTimerRef.current = setTimeout(() => {
+        if (cancelled) return;
+        if (tryNextHlsUrl()) return;
+        setPlaybackError('Could not start live video on this device.');
+        setHlsStateText('PLAYBACK_ERROR');
+      }, HLS_IOS_RETRY_DELAY_MS);
+    };
+
     const startPlayback = async () => {
       try {
-        await player.replaceAsync({ uri: hlsUrl, contentType: 'hls' });
+        setPlaybackError(null);
+        await player.replaceAsync(buildHlsVideoSource(hlsUrl));
         if (cancelled) return;
-        player.play();
-        seekHlsNearLiveEdge(player);
+        if (Platform.OS !== 'ios') {
+          player.play();
+          seekHlsNearLiveEdge(player);
+        }
       } catch (_) {
-        if (!cancelled) setHlsStateText('ERROR');
+        if (!cancelled) scheduleRetry();
       }
     };
 
     startPlayback();
 
-    const syncTimer = setInterval(() => {
-      seekHlsNearLiveEdge(player);
-    }, HLS_LIVE_EDGE_SYNC_MS);
+    const syncTimer = shouldSyncHlsLiveEdge()
+      ? setInterval(() => {
+          seekHlsNearLiveEdge(player);
+        }, HLS_LIVE_EDGE_SYNC_MS)
+      : null;
 
     try {
       statusSub = player.addListener('statusChange', (ev) => {
         if (cancelled) return;
-        if (ev?.status === 'readyToPlay' || ev?.status === 'playing') {
+        const status = ev?.status;
+        if (status === 'readyToPlay') {
+          try {
+            player.play();
+          } catch (_) {}
           seekHlsNearLiveEdge(player);
+        }
+        if (status === 'playing') {
+          setPlaybackError(null);
+          seekHlsNearLiveEdge(player);
+        }
+        if (status === 'error' || status === 'failed') {
+          scheduleRetry();
         }
       });
     } catch (_) {}
 
     return () => {
       cancelled = true;
-      clearInterval(syncTimer);
+      if (syncTimer) clearInterval(syncTimer);
+      if (playbackRetryTimerRef.current) {
+        clearTimeout(playbackRetryTimerRef.current);
+        playbackRetryTimerRef.current = null;
+      }
       try {
         statusSub?.remove?.();
       } catch (_) {}
@@ -141,12 +206,12 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
         player.pause();
       } catch (_) {}
     };
-  }, [hlsUrl, player]);
+  }, [hlsUrl, player, tryNextHlsUrl]);
 
   actionsRef.current.join = join;
   actionsRef.current.leave = leave;
 
-  // Join once ΓÇö do not call leave() in this effect's cleanup (Strict Mode / re-renders
+  // Join once — do not call leave() in this effect's cleanup (Strict Mode / re-renders
   // were disconnecting viewers before join completed). Leave only on unmount below.
   useEffect(() => {
     if (joinOnceRef.current) return undefined;
@@ -165,9 +230,14 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
         if (cancelled || !joinFn) {
           throw new Error('VideoSDK viewer join() was not ready');
         }
+        if (Platform.OS === 'ios') {
+          await new Promise((r) => setTimeout(r, 120));
+        }
         await Promise.resolve(joinFn());
-      } catch (_) {
-        if (!cancelled) setHlsStateText('ERROR');
+      } catch (err) {
+        if (!cancelled) {
+          setHlsStateText(`JOIN_ERROR: ${err?.message || 'join failed'}`);
+        }
       }
     })();
     return () => {
@@ -177,6 +247,10 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
 
   useEffect(() => {
     return () => {
+      if (playbackRetryTimerRef.current) {
+        clearTimeout(playbackRetryTimerRef.current);
+        playbackRetryTimerRef.current = null;
+      }
       if (!meetingJoinedRef.current) return;
       try {
         actionsRef.current.leave?.();
@@ -231,7 +305,15 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
         style={styles.hlsVideo}
         contentFit={isCameraLive ? 'cover' : 'contain'}
         nativeControls={false}
+        allowsPictureInPicture={false}
       />
+      {playbackError ? (
+        <View style={styles.hlsPlaybackErrorOverlay} pointerEvents="none">
+          <Feather name="video-off" size={40} color="#888" />
+          <Text style={styles.hlsPlaybackErrorText}>{playbackError}</Text>
+          <Text style={styles.hlsStateText}>{hlsStateText}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -655,6 +737,20 @@ const styles = StyleSheet.create({
     marginTop: 10,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  hlsPlaybackErrorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    paddingHorizontal: 24,
+  },
+  hlsPlaybackErrorText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 12,
+    textAlign: 'center',
   },
   viewerBadge: {
     position: 'absolute',

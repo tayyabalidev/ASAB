@@ -140,12 +140,40 @@ const checks = [
     pass: () => read('components/LiveStreamBroadcasterImpl.sdk.jsx').includes('handleStopScreenShare'),
   },
   {
-    name: 'Viewer HLS prefers livestreamUrl (low latency)',
+    name: 'Viewer HLS URL order is platform-aware (iOS playback, Android low latency)',
     pass: () => {
       const src = read('lib/videosdkLiveHls.js');
-      const idxLive = src.indexOf('source.livestreamUrl');
-      const idxPlayback = src.indexOf('source.playbackHlsUrl');
-      return idxLive >= 0 && idxPlayback >= 0 && idxLive < idxPlayback;
+      const iosBlock = src.slice(src.indexOf('HLS_URL_KEYS_IOS'), src.indexOf('function hlsUrlOrder'));
+      const androidBlock = src.slice(
+        src.indexOf('HLS_URL_KEYS_ANDROID'),
+        src.indexOf('HLS_URL_KEYS_IOS')
+      );
+      const iosPlaybackIdx = iosBlock.indexOf('playbackHlsUrl');
+      const iosLiveIdx = iosBlock.indexOf('livestreamUrl');
+      const androidLiveIdx = androidBlock.indexOf('livestreamUrl');
+      const androidPlaybackIdx = androidBlock.indexOf('playbackHlsUrl');
+      return (
+        iosPlaybackIdx >= 0 &&
+        iosLiveIdx >= 0 &&
+        iosPlaybackIdx < iosLiveIdx &&
+        androidLiveIdx >= 0 &&
+        androidPlaybackIdx >= 0 &&
+        androidLiveIdx < androidPlaybackIdx &&
+        src.includes('shouldSyncHlsLiveEdge') &&
+        src.includes("return platform !== 'ios'")
+      );
+    },
+  },
+  {
+    name: 'Viewer retries alternate HLS URLs on iOS playback failure',
+    pass: () => {
+      const src = read('components/LiveStreamPlayerImpl.sdk.jsx');
+      return (
+        src.includes('listLiveHlsUrlFallbacks') &&
+        src.includes('tryNextHlsUrl') &&
+        src.includes('buildHlsVideoSource') &&
+        src.includes("status === 'error'")
+      );
     },
   },
   {
