@@ -2,21 +2,19 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
-  Dimensions,
-  TouchableOpacity,
   Alert,
   Text,
+  TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { LiveStreamPlayer, LiveReactions } from '../components';
+import { LiveStreamPlayer } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/livestream';
 import { useTranslation } from 'react-i18next';
-
-const { height } = Dimensions.get('window');
 
 function firstRouteParam(value) {
   if (value == null) return undefined;
@@ -100,25 +98,19 @@ const LiveViewer = () => {
             </View>
           ) : null}
 
-          <LiveReactions streamId={streamId} isHost={false} />
-
           <TouchableOpacity
             style={[
               styles.chatToggle,
-              {
-                bottom: showChat
-                  ? stream.liveMode === 'screen'
-                    ? height * 0.14
-                    : height * 0.44
-                  : Math.max(24, height * 0.06),
-              },
+              { bottom: showChat ? 252 : Math.max(insets.bottom + 16, 24) },
             ]}
             onPress={() => setShowChat((prev) => !prev)}
+            accessibilityLabel={showChat ? 'Hide chat' : 'Show chat'}
           >
-            <View style={styles.chatToggleIcon}>
-              <View style={styles.chatBubble1} />
-              <View style={styles.chatBubble2} />
-            </View>
+            <Feather
+              name="message-circle"
+              size={22}
+              color={showChat ? '#fff' : 'rgba(255,255,255,0.55)'}
+            />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -160,37 +152,16 @@ const styles = StyleSheet.create({
   },
   chatToggle: {
     position: 'absolute',
-    left: 20,
-    zIndex: 32,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    left: 16,
+    zIndex: 30,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  chatToggleIcon: {
-    width: 24,
-    height: 24,
-    position: 'relative',
-  },
-  chatBubble1: {
-    position: 'absolute',
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    top: 0,
-    left: 0,
-  },
-  chatBubble2: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#a77df8',
-    bottom: 0,
-    right: 0,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
 });
 

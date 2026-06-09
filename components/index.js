@@ -12,6 +12,8 @@ export { GoogleSignInButton } from './CustomButton';
 export { default as LiveStreamBroadcaster } from './LiveStreamBroadcaster';
 export { default as LiveStreamPlayer } from './LiveStreamPlayer';
 export { default as LiveReactions } from './LiveReactions';
+export { default as LiveStreamChatOverlay } from './LiveStreamChatOverlay';
+export { default as LiveStreamHeartReactions } from './LiveStreamHeartReactions';
 export { default as SplashScreen } from './SplashScreen';
 export { default as ThemeToggle } from './ThemeToggle';
 export { default as LanguageSelector } from './LanguageSelector';

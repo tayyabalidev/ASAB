@@ -9,7 +9,6 @@ import {
   Dimensions,
   InteractionManager,
   Platform,
-  Modal,
   AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,7 +40,8 @@ import {
 } from '../lib/videosdkScreenShare';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import VideosdkIosScreenShare from '../lib/videosdkIosScreenShare';
-import LiveMeetingChat from './LiveMeetingChat';
+import LiveStreamChatOverlay from './LiveStreamChatOverlay';
+import LiveStreamHeartReactions from './LiveStreamHeartReactions';
 import LiveHostGuestControls from './LiveHostGuestControls';
 import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 
@@ -311,7 +311,7 @@ function BroadcasterMeetingInner({
 }) {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
-  const [showChat, setShowChat] = useState(false);
+  const [showChat, setShowChat] = useState(true);
   const [showGuests, setShowGuests] = useState(false);
   /** Tracks front vs back for preview mirroring (VideoSDK ILS: mirror only for local front). */
   const [useFrontCamera, setUseFrontCamera] = useState(true);
@@ -1472,12 +1472,24 @@ function BroadcasterMeetingInner({
       ) : null}
       <TouchableOpacity
         style={[styles.sideFab, styles.sideFabRight, { bottom: Math.max(insets.bottom, 16) + 88 }]}
-        onPress={() => setShowChat(true)}
+        onPress={() => setShowChat((prev) => !prev)}
         activeOpacity={0.85}
-        accessibilityLabel="Open chat"
+        accessibilityLabel={showChat ? 'Hide chat' : 'Show chat'}
       >
-        <Feather name="message-circle" size={22} color="#fff" />
+        <Feather name="message-circle" size={22} color={showChat ? '#fff' : 'rgba(255,255,255,0.45)'} />
       </TouchableOpacity>
+      <LiveStreamChatOverlay
+        streamId={streamId}
+        displayName={hostDisplayName || 'Host'}
+        visible={showChat}
+        bottomOffset={Math.max(insets.bottom, 16) + 72}
+        compact={liveMode === 'screen'}
+      />
+      <LiveStreamHeartReactions
+        streamId={streamId}
+        isHost
+        bottomOffset={Math.max(insets.bottom, 16) + 88}
+      />
       <TouchableOpacity
         style={[styles.sideFab, styles.sideFabRight, { bottom: Math.max(insets.bottom, 16) + 152 }]}
         onPress={() => setShowGuests(true)}
@@ -1486,18 +1498,6 @@ function BroadcasterMeetingInner({
       >
         <Feather name="users" size={20} color="#fff" />
       </TouchableOpacity>
-
-      <Modal visible={showChat} animationType="slide" transparent onRequestClose={() => setShowChat(false)}>
-        <View style={styles.chatModal}>
-          <View style={styles.chatModalHeader}>
-            <Text style={styles.chatModalTitle}>Live chat</Text>
-            <TouchableOpacity onPress={() => setShowChat(false)} hitSlop={12}>
-              <Feather name="x" size={22} color="#fff" />
-            </TouchableOpacity>
-          </View>
-          <LiveMeetingChat displayName={hostDisplayName || 'Host'} showRaiseHand={false} />
-        </View>
-      </Modal>
 
       <TouchableOpacity
         style={[styles.endStream, { bottom: Math.max(insets.bottom, 16) + 16 }]}
@@ -1900,32 +1900,6 @@ const styles = StyleSheet.create({
   },
   chatFabText: {
     fontSize: 22,
-  },
-  chatModal: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.95)',
-    marginTop: height * 0.28,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  chatModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.15)',
-  },
-  chatModalTitle: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  chatModalClose: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '600',
   },
   endStream: {
     position: 'absolute',

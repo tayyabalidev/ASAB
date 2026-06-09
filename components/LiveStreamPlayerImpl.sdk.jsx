@@ -16,7 +16,8 @@ import {
   MeetingProvider,
   useMeeting,
 } from '@videosdk.live/react-native-sdk';
-import LiveMeetingChat from './LiveMeetingChat';
+import LiveStreamChatOverlay from './LiveStreamChatOverlay';
+import LiveStreamHeartReactions from './LiveStreamHeartReactions';
 import { LiveCoHostInviteListener, LiveCoHostGuestMedia } from './LiveCoHostGuest';
 import { useGlobalContext } from '../context/GlobalProvider';
 import {
@@ -318,44 +319,49 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
   );
 }
 
-function LiveViewerJoinedLayers({ showChat, displayName, canRaiseHand, liveMode }) {
+function LiveViewerJoinedLayers({
+  streamId,
+  showChat,
+  displayName,
+  liveMode,
+}) {
   const { localParticipant } = useMeeting();
   const localMode = String(localParticipant?.mode || '').toUpperCase();
   const localIsSpeaker =
     localMode === 'SEND_AND_RECV' ||
     localMode === 'SEND_RECV' ||
     localMode === 'CONFERENCE';
+  const isScreenLive = liveMode === 'screen';
+  // Keep chat above the host info card (~80px) + bottom padding (~100px).
+  const chatBottomOffset = isScreenLive ? 128 : 188;
 
   return (
     <>
       <LiveCoHostInviteListener />
       {localIsSpeaker ? <LiveCoHostGuestMedia /> : null}
-      {showChat ? (
-        <View
-          style={[
-            styles.chatOverlay,
-            liveMode === 'screen' ? styles.chatOverlayScreen : null,
-          ]}
-          pointerEvents="box-none"
-        >
-          <LiveMeetingChat
-            displayName={displayName}
-            showRaiseHand={canRaiseHand}
-            style={styles.chatOverlayInner}
-          />
-        </View>
-      ) : null}
+      <LiveStreamChatOverlay
+        streamId={streamId}
+        displayName={displayName}
+        visible={showChat}
+        bottomOffset={chatBottomOffset}
+        compact={isScreenLive}
+      />
+      <LiveStreamHeartReactions
+        streamId={streamId}
+        isHost={false}
+        bottomOffset={chatBottomOffset - 8}
+      />
     </>
   );
 }
 
 function LiveViewerInMeeting({
+  streamId,
   liveMode,
   thumbnailUri,
   onPlaybackEnded,
   showChat = true,
   displayName = 'Viewer',
-  canRaiseHand = false,
 }) {
   const [meetingReady, setMeetingReady] = useState(false);
 
@@ -369,9 +375,9 @@ function LiveViewerInMeeting({
       />
       {meetingReady ? (
         <LiveViewerJoinedLayers
+          streamId={streamId}
           showChat={showChat}
           displayName={displayName}
-          canRaiseHand={canRaiseHand}
           liveMode={liveMode}
         />
       ) : null}
@@ -383,8 +389,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
   const { user } = useGlobalContext();
   const effectiveRoomId = stream?.videosdkRoomId || null;
   const liveMode = stream?.liveMode === 'screen' ? 'screen' : 'camera';
-  const isScreenLive = liveMode === 'screen';
-  const chatBottomInset = showChat ? (isScreenLive ? height * 0.14 : height * 0.44) : 24;
+  const chatBottomInset = liveMode === 'screen' ? 128 : 188;
   const streamThumbnailUri = resolveLiveStreamThumbnailUrl(stream);
   const [viewerCount, setViewerCount] = useState(stream?.viewerCount || 0);
   const [isFollowingUser, setIsFollowingUser] = useState(false);
@@ -581,12 +586,12 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
           token={token}
         >
           <LiveViewerInMeeting
+            streamId={stream.$id}
             liveMode={liveMode}
             thumbnailUri={streamThumbnailUri}
             onPlaybackEnded={handlePlaybackEnded}
             showChat={showChat}
             displayName={user.username || 'Viewer'}
-            canRaiseHand={Boolean(stream.hostId && user.$id !== stream.hostId)}
           />
         </MeetingProvider>
 
@@ -674,23 +679,6 @@ const styles = StyleSheet.create({
   viewerMeetingRoot: {
     flex: 1,
     backgroundColor: '#000',
-  },
-  chatOverlayInner: {
-    flex: 1,
-  },
-  chatOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '42%',
-    backgroundColor: 'rgba(0,0,0,0.72)',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    zIndex: 28,
-  },
-  chatOverlayScreen: {
-    height: '28%',
   },
   hlsVideoWrap: {
     flex: 1,

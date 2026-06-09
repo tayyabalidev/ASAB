@@ -13,7 +13,8 @@
     "postinstall": "patch-package && node scripts/remove-nested-react.cjs",
     "eas-build-post-install": "node scripts/ensure-android-colors.cjs && node scripts/ensure-android-splash.cjs && node scripts/ensure-android-icon.cjs",
     "verify:videosdk-live": "node scripts/verify-videosdk-live.cjs",
-    "verify:screen-share-live": "node scripts/verify-screen-share-live.cjs"
+    "verify:screen-share-live": "node scripts/verify-screen-share-live.cjs",
+    "verify:live-chat-reactions": "node scripts/verify-live-chat-reactions.cjs"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^13.0.0",

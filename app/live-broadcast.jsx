@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { View, StyleSheet, Alert, TouchableOpacity, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { LiveStreamBroadcaster, LiveReactions } from '../components';
+import { LiveStreamBroadcaster } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { useTranslation } from 'react-i18next';
 import { peekLiveHostSession, clearLiveHostSession } from '../lib/pendingLiveBroadcast';
@@ -89,7 +89,6 @@ const LiveBroadcast = () => {
           liveMode={liveModeParam}
           onStreamEnd={handleStreamEnd}
         />
-        <LiveReactions streamId={streamId} isHost={true} />
       </View>
     </SafeAreaView>
   );
