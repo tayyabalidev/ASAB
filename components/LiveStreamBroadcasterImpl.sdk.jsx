@@ -231,6 +231,9 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
 
   if (liveMode === 'screen') {
     const sharing = Boolean(localScreenShareOn || screenShareOn);
+    const streamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
+    const showWebcamPip = sharing && Boolean(webcamOn && streamURL);
+
     if (!sharing) {
       return (
         <View style={styles.placeholder}>
@@ -247,6 +250,17 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
           <Text style={styles.screenShareActiveTitle}>{t('liveBroadcast.screenShareActive')}</Text>
           <Text style={styles.placeholderText}>{t('liveBroadcast.screenShareActiveHint')}</Text>
         </View>
+        {showWebcamPip ? (
+          <View style={styles.hostWebcamPip} pointerEvents="none">
+            <RTCView
+              streamURL={streamURL}
+              style={styles.hostWebcamPipVideo}
+              objectFit="cover"
+              mirror={Boolean(useFrontCamera)}
+              zOrder={2}
+            />
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -1756,6 +1770,28 @@ const styles = StyleSheet.create({
   screenShareHostRoot: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  hostWebcamPip: {
+    position: 'absolute',
+    right: 16,
+    bottom: 128,
+    width: 104,
+    height: 148,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: '#111',
+    zIndex: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  hostWebcamPipVideo: {
+    width: '100%',
+    height: '100%',
   },
   screenShareHostBackdrop: {
     flex: 1,

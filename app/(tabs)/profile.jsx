@@ -288,8 +288,17 @@ const Profile = () => {
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [showProgressBar, setShowProgressBar] = useState(false);
   const [isVideoReady, setIsVideoReady] = useState(false);
-  
-  // Modal interaction states
+  const [modalStreamUri, setModalStreamUri] = useState(null);
+
+  const resolveProfileStreamUri = useCallback((post) => {
+    if (!post) return null;
+    return (
+      getPlaybackUriForPost(post) ||
+      (!isMuxPlaceholderVideo(post?.video)
+        ? getIOSCompatibleVideoUrl(post.video) || post.video
+        : null)
+    );
+  }, []);
   const [bookmarked, setBookmarked] = useState(false);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
@@ -1052,6 +1061,7 @@ const Profile = () => {
     
     setModalVideo(videoData);
     setModalIndex(index);
+    setModalStreamUri(resolveProfileStreamUri(videoData));
     setModalVisible(true);
     setIsVideoPlaying(true);
     setShowProgressBar(false);
@@ -1060,11 +1070,48 @@ const Profile = () => {
     setIsVideoReady(false);
   };
 
+  useEffect(() => {
+    if (!modalVisible || !modalVideo) {
+      setModalStreamUri(null);
+      return;
+    }
+    setModalStreamUri(resolveProfileStreamUri(modalVideo));
+  }, [modalVisible, modalVideo, resolveProfileStreamUri]);
+
+  useEffect(() => {
+    if (!modalVisible || !isVideoPlaying || !modalStreamUri) return undefined;
+    let cancelled = false;
+    const ensurePlaying = async () => {
+      for (let attempt = 0; attempt < 10 && !cancelled; attempt += 1) {
+        try {
+          const ref = modalVideoRef.current;
+          if (!ref) {
+            await new Promise((r) => setTimeout(r, 80));
+            continue;
+          }
+          const status = await ref.getStatusAsync?.();
+          if (status?.isLoaded) {
+            await ref.playAsync?.();
+            return;
+          }
+        } catch (_) {
+          /* retry */
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    };
+    ensurePlaying();
+    return () => {
+      cancelled = true;
+    };
+  }, [modalVisible, isVideoPlaying, modalStreamUri, modalVideo?.$id, isVideoReady]);
+
   const navigateToNextVideo = () => {
     if (modalIndex < posts.length - 1) {
       const nextVideo = posts[modalIndex + 1];
       setModalVideo(nextVideo);
       setModalIndex(modalIndex + 1);
+      setModalStreamUri(resolveProfileStreamUri(nextVideo));
       setIsVideoPlaying(true);
       setIsVideoReady(false);
       setShowProgressBar(false);
@@ -1081,6 +1128,7 @@ const Profile = () => {
       const prevVideo = posts[modalIndex - 1];
       setModalVideo(prevVideo);
       setModalIndex(modalIndex - 1);
+      setModalStreamUri(resolveProfileStreamUri(prevVideo));
       setIsVideoPlaying(true);
       setIsVideoReady(false);
       setShowProgressBar(false);
@@ -2915,11 +2963,7 @@ const Profile = () => {
                           modalVideo.thumbnail && !String(modalVideo.thumbnail).includes("placeholder")
                             ? getVideoPosterUri(modalVideo.thumbnail, modalVideo.video)
                             : undefined;
-                        const profileStreamUri =
-                          getPlaybackUriForPost(modalVideo) ||
-                          (!isMuxPlaceholderVideo(modalVideo?.video)
-                            ? getIOSCompatibleVideoUrl(modalVideo.video) || modalVideo.video
-                            : null);
+                        const profileStreamUri = modalStreamUri;
                         if (!profileStreamUri) {
                           return (
                             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
@@ -2931,6 +2975,7 @@ const Profile = () => {
                         return (
                       <>
                         <Video
+                          key={modalStreamUri || modalVideo.$id}
                           ref={modalVideoRef}
                           source={{ uri: profileStreamUri }}
                           style={{ flex: 1, width: '100%', height: '100%' }}
@@ -2946,6 +2991,9 @@ const Profile = () => {
                             if (status.isLoaded) {
                               setPlaybackDuration(status.durationMillis || 0);
                               setIsVideoReady(true);
+                              if (isVideoPlaying) {
+                                modalVideoRef.current?.playAsync?.().catch(() => {});
+                              }
                             }
                           }}
                           onPlaybackStatusUpdate={status => {
@@ -2971,8 +3019,8 @@ const Profile = () => {
                             allowsExternalPlayback: false,
                             playInSilentModeIOS: true,
                             ignoreSilentSwitch: 'ignore',
-                            automaticallyWaitsToMinimizeStalling: true,
-                            preferredForwardBufferDuration: 12,
+                            automaticallyWaitsToMinimizeStalling: false,
+                            preferredForwardBufferDuration: 0,
                           })}
                         />
                         

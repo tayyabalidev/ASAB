@@ -23,7 +23,7 @@ import { getFilterCSS, getVideoFilterCSS } from "../../lib/filterCss";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused, theme, isDarkMode }) => {
+const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused, theme, isDarkMode, cardHeight = SCREEN_HEIGHT }) => {
   const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
   const { t } = useTranslation();
   const [play, setPlay] = useState(false);
@@ -281,6 +281,27 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       setShowPlayPauseOverlay(false);
     }
   }, [isVisible, isHomeFocused]);
+
+  useEffect(() => {
+    if (!isVideoMedia(item?.video, item?.postType) || isMuxEncoding) return undefined;
+    let cancelled = false;
+    const syncPlayback = async () => {
+      if (!videoRef.current) return;
+      try {
+        if (isVisible && isHomeFocused && play) {
+          await videoRef.current.playAsync();
+        } else {
+          await videoRef.current.pauseAsync();
+        }
+      } catch (_) {
+        /* player may not be mounted yet */
+      }
+    };
+    if (!cancelled) syncPlayback();
+    return () => {
+      cancelled = true;
+    };
+  }, [isVisible, isHomeFocused, play, item?.$id, item?.video, item?.postType, isMuxEncoding]);
 
   // Cleanup progress bar timeout on unmount
   useEffect(() => {
@@ -663,7 +684,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
 
   return (
     <View style={{ 
-      height: SCREEN_HEIGHT, 
+      height: cardHeight, 
       backgroundColor: themedColor('#000', theme.background), 
       overflow: 'hidden', 
       position: 'relative',
@@ -1087,6 +1108,9 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                   if (status.isLoaded) {
                     setPlaybackDuration(status.durationMillis || 0);
                     setIsVideoReady(true);
+                    if (play && isVisible && isHomeFocused) {
+                      videoRef.current?.playAsync?.().catch(() => {});
+                    }
                   }
                 }}
                 onPlaybackStatusUpdate={(status) => {
@@ -1101,8 +1125,8 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                   allowsExternalPlayback: false,
                   playInSilentModeIOS: true,
                   ignoreSilentSwitch: 'ignore',
-                  automaticallyWaitsToMinimizeStalling: true,
-                  preferredForwardBufferDuration: 12,
+                  automaticallyWaitsToMinimizeStalling: false,
+                  preferredForwardBufferDuration: 2,
                 })}
               />
             );
@@ -1769,7 +1793,8 @@ const Home = () => {
   const { t } = useTranslation();
   const [selectedTab, setSelectedTab] = useState('forYou'); // 'forYou' or 'following'
   const [refreshing, setRefreshing] = useState(false);
-  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(null);
+  const [feedHeaderHeight, setFeedHeaderHeight] = useState(640);
   const [currentTrendingIndex, setCurrentTrendingIndex] = useState(0);
   const [isHomeFocused, setIsHomeFocused] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -2066,40 +2091,20 @@ const Home = () => {
     setRefreshing(false);
   };
 
-  // Reset video index when switching tabs
+  // Reset video index when switching tabs and scroll back to header
   useEffect(() => {
-    setCurrentVideoIndex(0);
+    setCurrentVideoIndex(null);
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [selectedTab]);
 
   // Handle focus/blur to stop videos when navigating away and refresh data
   useFocusEffect(
     useCallback(() => {
       setIsHomeFocused(true);
-      // Refresh posts when screen comes into focus (including trending)
-      // BUT: Don't refetch trending posts if modal is open to prevent resetting like state
-      if (refetchForYou) {
-        refetchForYou();
-      }
-      if (refetchForYouPhotos) {
-        refetchForYouPhotos();
-      }
-      if (refetchFollowing) {
-        refetchFollowing();
-      }
-      // Only refetch trending posts if modal is NOT open
-      // This prevents the like state from being reset when data is refetched
-      if (!trendingModalVisible) {
-        if (refetchLatestPosts) {
-          refetchLatestPosts();
-        }
-        if (refetchLatestPhotos) {
-          refetchLatestPhotos();
-        }
-      }
       return () => {
         setIsHomeFocused(false);
       };
-    }, [refetchForYou, refetchForYouPhotos, refetchFollowing, refetchLatestPosts, refetchLatestPhotos, trendingModalVisible])
+    }, [])
   );
 
   // Sync trending modal data when trendingModalVideo changes
@@ -2388,22 +2393,45 @@ const Home = () => {
     }
   };
 
-  const handleViewableItemsChanged = useCallback(({ viewableItems }) => {
-    if (viewableItems.length > 0) {
-      const newIndex = viewableItems[0].index;
-      setCurrentVideoIndex(newIndex);
-      
-      // Ensure the video starts playing when it becomes visible
-      if (__DEV__) {
-        
-      }
+  const onViewableItemsChanged = useRef(({ viewableItems }) => {
+    const primary = viewableItems.find(
+      (entry) => entry.isViewable && entry.index != null && entry.item && !entry.item.isAd
+    );
+    if (primary?.index != null) {
+      setCurrentVideoIndex(primary.index);
     }
-  }, []);
+  }).current;
 
-  const viewabilityConfig = {
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 100,
-  };
+  const viewabilityConfigCallbackPairs = useRef([
+    {
+      viewabilityConfig: {
+        itemVisiblePercentThreshold: 80,
+        minimumViewTime: 150,
+      },
+      onViewableItemsChanged,
+    },
+  ]).current;
+
+  const handleHomeHeaderLayout = useCallback((event) => {
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+    if (nextHeight > 0 && nextHeight !== feedHeaderHeight) {
+      setFeedHeaderHeight(nextHeight);
+    }
+  }, [feedHeaderHeight]);
+
+  const getVideoItemLayout = useCallback(
+    (_, index) => ({
+      length: SCREEN_HEIGHT,
+      offset: feedHeaderHeight + SCREEN_HEIGHT * index,
+      index,
+    }),
+    [feedHeaderHeight]
+  );
+
+  const feedSnapOffsets = useMemo(() => {
+    if (!feedHeaderHeight || displayPosts.length === 0) return undefined;
+    return displayPosts.map((_, index) => feedHeaderHeight + index * SCREEN_HEIGHT);
+  }, [feedHeaderHeight, displayPosts.length]);
 
   const renderVideoCard = useCallback(
     ({ item, index }) => {
@@ -2421,11 +2449,12 @@ const Home = () => {
         <StrollVideoCard
           item={item}
           index={index}
-          isVisible={index === currentVideoIndex}
+          isVisible={currentVideoIndex === index}
           onVideoStateChange={() => {}} // Empty function since we're not using it anymore
           isHomeFocused={isHomeFocused}
           theme={theme}
           isDarkMode={isDarkMode}
+          cardHeight={SCREEN_HEIGHT}
         />
       );
     },
@@ -2985,41 +3014,16 @@ const Home = () => {
             right: 0,
             bottom: 0,
             backgroundColor: themedColor('rgba(0, 0, 0, 0.35)', 'rgba(255, 255, 255, 0.35)')
-          }} />
+          }} pointerEvents="none" />
 
-
-        {/* Combined Scrollable Content with Trending and Videos */}
         <FlatList
             ref={flatListRef}
             data={displayPosts}
             keyExtractor={(item) => item.$id}
             renderItem={renderVideoCard}
-            pagingEnabled
-            showsVerticalScrollIndicator={false}
-            snapToInterval={SCREEN_HEIGHT}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            onViewableItemsChanged={handleViewableItemsChanged}
-            viewabilityConfig={viewabilityConfig}
-            onScroll={(event) => {
-              const offsetY = event.nativeEvent.contentOffset.y;
-              // Show button when scrolled down more than 2 screen heights
-              setShowScrollToTop(offsetY > SCREEN_HEIGHT * 2);
-            }}
-            scrollEventThrottle={400}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-            }
-            style={{ flex: 1 }}
-            contentContainerStyle={{ flexGrow: 1 }}
-            removeClippedSubviews={false}
-            maxToRenderPerBatch={5}
-            updateCellsBatchingPeriod={50}
-            initialNumToRender={3}
-            windowSize={11}
-            ListHeaderComponent={useMemo(() => (
-            // Header Section with User Name and Search
-            <View style={{ 
+            ListHeaderComponent={
+              <View onLayout={handleHomeHeaderLayout}>
+            <View style={{
               paddingVertical: 20,
               borderBottomWidth: 1,
               borderBottomColor: themedColor('rgba(255,255,255,0.1)', 'rgba(15,23,42,0.1)')
@@ -3250,7 +3254,30 @@ const Home = () => {
                 </View>
               </View>
             </View>
-        ), [selectedTab, combinedLatestPosts, trendingCarouselPosts, trendingCreators, searchQuery, isSearching, searchResults, user, theme, isRTL, isDarkMode, themedColor, t, currentTrendingIndex, renderTrendingItem, handleTrendingScroll])}
+              </View>
+            }
+            showsVerticalScrollIndicator={false}
+            snapToOffsets={feedSnapOffsets}
+            snapToAlignment="start"
+            decelerationRate="fast"
+            disableIntervalMomentum
+            nestedScrollEnabled
+            viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs}
+            getItemLayout={feedHeaderHeight > 0 ? getVideoItemLayout : undefined}
+            onScroll={(event) => {
+              const offsetY = event.nativeEvent.contentOffset.y;
+              setShowScrollToTop(offsetY > feedHeaderHeight + SCREEN_HEIGHT);
+            }}
+            scrollEventThrottle={400}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+            style={{ flex: 1 }}
+            removeClippedSubviews={Platform.OS === 'android'}
+            maxToRenderPerBatch={3}
+            updateCellsBatchingPeriod={50}
+            initialNumToRender={2}
+            windowSize={7}
         />
         
         {/* Scroll to Top Button */}

@@ -139,12 +139,13 @@ const checks = [
     },
   },
   {
-    name: 'Components barrel exports chat + heart modules',
+    name: 'Components barrel does not eagerly load VideoSDK chat/reactions',
     pass: () => {
       const src = read('components/index.js');
       return (
-        src.includes('LiveStreamChatOverlay') &&
-        src.includes('LiveStreamHeartReactions')
+        !src.includes("from './LiveStreamChatOverlay'") &&
+        !src.includes("from './LiveStreamHeartReactions'") &&
+        !src.includes("from './LiveReactions'")
       );
     },
   },

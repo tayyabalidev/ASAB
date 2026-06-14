@@ -28,7 +28,6 @@ class VideoSDKErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('VideoSDK ErrorBoundary caught:', error, errorInfo);
     this.props.onError?.(error);
   }
 
@@ -83,7 +82,6 @@ const VideoSDKCallWrapper = (props) => {
         if (isMounted) {
           const errorMessage = err.message || 'VideoSDK SDK not available';
           videosdkTrace('S2_SDK', 'INIT_FAILED', { message: errorMessage });
-          console.error('VideoSDKCallWrapper error:', errorMessage);
 
           if (
             errorMessage.includes('Native module') ||
@@ -111,8 +109,7 @@ const VideoSDKCallWrapper = (props) => {
   const handleEndCallPress = React.useCallback(() => {
     try {
       props.onCallEnd?.();
-    } catch (e) {
-      console.error('Error in End Call handler:', e);
+    } catch (e) { 
       try {
         props.onCallEnd?.();
       } catch (_) {}

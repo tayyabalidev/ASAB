@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { View, Image, ImageBackground, FlatList, TouchableOpacity, Text, Alert, Linking, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, FlatList as RNFlatList, Share } from "react-native";
@@ -58,6 +58,17 @@ const UserProfile = () => {
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [showProgressBar, setShowProgressBar] = useState(false);
   const [isVideoReady, setIsVideoReady] = useState(false);
+  const [modalStreamUri, setModalStreamUri] = useState(null);
+
+  const resolveProfileStreamUri = useCallback((post) => {
+    if (!post) return null;
+    return (
+      getPlaybackUriForPost(post) ||
+      (!isMuxPlaceholderVideo(post?.video)
+        ? getIOSCompatibleVideoUrl(post.video) || post.video
+        : null)
+    );
+  }, []);
   
   // Earnings Dashboard States
   const [totalEarnings, setTotalEarnings] = useState(0);
@@ -141,7 +152,6 @@ const UserProfile = () => {
         const totalLikes = await getUserLikesCount(id);
         if (isMounted) setLikesCount(totalLikes);
       } catch (error) {
-        console.error('Error fetching profile user:', error);
         if (isMounted) {
           Alert.alert(t('common.error'), error.message || t('profile.alerts.loadProfileError'));
           router.back();
@@ -540,8 +550,10 @@ const UserProfile = () => {
   };
 
   const openVideoModal = (item, index) => {
+    const streamUri = resolveProfileStreamUri(item);
     setModalVideo(item);
     setModalIndex(index);
+    setModalStreamUri(streamUri);
     setModalVisible(true);
     setIsVideoPlaying(true);
     setShowProgressBar(false);
@@ -550,11 +562,48 @@ const UserProfile = () => {
     setIsVideoReady(false);
   };
 
+  useEffect(() => {
+    if (!modalVisible || !modalVideo) {
+      setModalStreamUri(null);
+      return;
+    }
+    setModalStreamUri(resolveProfileStreamUri(modalVideo));
+  }, [modalVisible, modalVideo, resolveProfileStreamUri]);
+
+  useEffect(() => {
+    if (!modalVisible || !isVideoPlaying || !modalStreamUri) return undefined;
+    let cancelled = false;
+    const ensurePlaying = async () => {
+      for (let attempt = 0; attempt < 10 && !cancelled; attempt += 1) {
+        try {
+          const ref = modalVideoRef.current;
+          if (!ref) {
+            await new Promise((r) => setTimeout(r, 80));
+            continue;
+          }
+          const status = await ref.getStatusAsync?.();
+          if (status?.isLoaded) {
+            await ref.playAsync?.();
+            return;
+          }
+        } catch (_) {
+          /* retry */
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    };
+    ensurePlaying();
+    return () => {
+      cancelled = true;
+    };
+  }, [modalVisible, isVideoPlaying, modalStreamUri, modalVideo?.$id, isVideoReady]);
+
   const navigateToNextVideo = () => {
     if (modalIndex < posts.length - 1) {
       const nextVideo = posts[modalIndex + 1];
       setModalVideo(nextVideo);
       setModalIndex(modalIndex + 1);
+      setModalStreamUri(resolveProfileStreamUri(nextVideo));
       setIsVideoPlaying(true);
       setIsVideoReady(false);
       setShowProgressBar(false);
@@ -571,6 +620,7 @@ const UserProfile = () => {
       const prevVideo = posts[modalIndex - 1];
       setModalVideo(prevVideo);
       setModalIndex(modalIndex - 1);
+      setModalStreamUri(resolveProfileStreamUri(prevVideo));
       setIsVideoPlaying(true);
       setIsVideoReady(false);
       setShowProgressBar(false);
@@ -1337,11 +1387,7 @@ const UserProfile = () => {
                         modalVideo.thumbnail && !String(modalVideo.thumbnail).includes("placeholder")
                           ? getVideoPosterUri(modalVideo.thumbnail, modalVideo.video)
                           : undefined;
-                      const profileStreamUri =
-                        getPlaybackUriForPost(modalVideo) ||
-                        (!isMuxPlaceholderVideo(modalVideo?.video)
-                          ? getIOSCompatibleVideoUrl(modalVideo.video) || modalVideo.video
-                          : null);
+                      const profileStreamUri = modalStreamUri;
                       if (!profileStreamUri) {
                         return (
                           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
@@ -1353,6 +1399,7 @@ const UserProfile = () => {
                       return (
                     <>
                       <Video
+                        key={modalStreamUri || modalVideo.$id}
                         ref={modalVideoRef}
                         source={{ uri: profileStreamUri }}
                         style={{ flex: 1, width: '100%', height: '100%' }}
@@ -1368,6 +1415,9 @@ const UserProfile = () => {
                           if (status.isLoaded) {
                             setPlaybackDuration(status.durationMillis || 0);
                             setIsVideoReady(true);
+                            if (isVideoPlaying) {
+                              modalVideoRef.current?.playAsync?.().catch(() => {});
+                            }
                           }
                         }}
                         onPlaybackStatusUpdate={status => {
