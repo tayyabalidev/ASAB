@@ -140,6 +140,9 @@ module.exports = () => {
         videosdkDebugLogs,
         ...(appleTeamId ? { appleTeamId } : {}),
         eas: {
+          projectId:
+            appJson.expo.extra?.eas?.projectId ||
+            "ae0ceb34-c46e-4f8e-9d13-804335663376",
           ...(appJson.expo.extra?.eas || {}),
           ...(appleTeamId
             ? {

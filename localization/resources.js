@@ -1985,7 +1985,7 @@ export const resources = {
           "Approve screen capture when prompted. On Android, device audio (games, videos) is shared with the stream — keep your mic unmuted. On iOS, turn on Microphone and Share Audio in the broadcast picker.",
         screenShareActive: "You're sharing your screen",
         screenShareActiveHint:
-          "Your camera is composited into the live stream for viewers. Keep ASAB in the background while sharing other apps so the camera can stay live.",
+          "Drag the camera preview to move it. Your camera stays live for viewers when you switch apps. The preview only shows while ASAB is open — phone floating windows are not available during screen share on iOS.",
         cameraStarting: "Camera starting…",
         cameraLoading: "Camera stream loading…",
         statusLive: "LIVE",

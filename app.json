@@ -2,7 +2,7 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.1.6",
+    "version": "1.1.7",
     "orientation": "portrait",
     "icon": "./assets/images/asabicon.png",
     "userInterfaceStyle": "dark",
@@ -126,7 +126,7 @@
       "videosdkTokenBaseUrl": "",
       "videosdkRoomBaseUrl": "",
       "eas": {
-        "projectId": "ce1f375b-6f7c-42c7-ae65-7d6b98ece5e8"
+        "projectId": "ae0ceb34-c46e-4f8e-9d13-804335663376"
       }
     }
   }

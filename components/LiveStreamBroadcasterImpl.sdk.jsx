@@ -10,6 +10,7 @@ import {
   InteractionManager,
   Platform,
   AppState,
+  PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -67,6 +68,8 @@ try {
 }
 
 const { width, height } = Dimensions.get('window');
+const HOST_PIP_WIDTH = 104;
+const HOST_PIP_HEIGHT = 148;
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
@@ -219,6 +222,119 @@ function resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream) {
   return null;
 }
 
+function ScreenShareHostWebcamPip({ participantId, useFrontCamera = true, insets }) {
+  const { localScreenShareOn, localWebcamOn, localWebcamStream } = useMeeting();
+  const {
+    screenShareOn,
+    webcamOn: participantWebcamOn,
+    webcamStream: participantWebcamStream,
+  } = useParticipant(participantId);
+  const webcamOn = participantWebcamOn ?? localWebcamOn;
+  const sharing = Boolean(localScreenShareOn || screenShareOn);
+  const streamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
+
+  const bottomReserve = Math.max(insets?.bottom || 0, 16) + 72;
+  const boundsRef = useRef({
+    minX: 10,
+    maxX: width - HOST_PIP_WIDTH - 10,
+    minY: (insets?.top || 0) + 52,
+    maxY: height - HOST_PIP_HEIGHT - bottomReserve,
+  });
+  boundsRef.current = {
+    minX: 10,
+    maxX: width - HOST_PIP_WIDTH - 10,
+    minY: (insets?.top || 0) + 52,
+    maxY: height - HOST_PIP_HEIGHT - bottomReserve,
+  };
+
+  const clampPos = useCallback((x, y) => {
+    const b = boundsRef.current;
+    return {
+      x: Math.min(b.maxX, Math.max(b.minX, x)),
+      y: Math.min(b.maxY, Math.max(b.minY, y)),
+    };
+  }, []);
+
+  const defaultPos = useMemo(() => {
+    return clampPos(width - HOST_PIP_WIDTH - 16, height - HOST_PIP_HEIGHT - bottomReserve - 56);
+  }, [bottomReserve, clampPos, insets?.top]);
+
+  const posRef = useRef(defaultPos);
+  const dragStartRef = useRef(defaultPos);
+  const [pos, setPos] = useState(defaultPos);
+
+  useEffect(() => {
+    posRef.current = defaultPos;
+    dragStartRef.current = defaultPos;
+    setPos(defaultPos);
+  }, [defaultPos]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
+      onPanResponderGrant: () => {
+        dragStartRef.current = { ...posRef.current };
+      },
+      onPanResponderMove: (_, gesture) => {
+        const next = clampPos(
+          dragStartRef.current.x + gesture.dx,
+          dragStartRef.current.y + gesture.dy
+        );
+        posRef.current = next;
+        setPos(next);
+      },
+      onPanResponderRelease: (_, gesture) => {
+        const next = clampPos(
+          dragStartRef.current.x + gesture.dx,
+          dragStartRef.current.y + gesture.dy
+        );
+        posRef.current = next;
+        dragStartRef.current = next;
+        setPos(next);
+      },
+      onPanResponderTerminate: (_, gesture) => {
+        const next = clampPos(
+          dragStartRef.current.x + gesture.dx,
+          dragStartRef.current.y + gesture.dy
+        );
+        posRef.current = next;
+        dragStartRef.current = next;
+        setPos(next);
+      },
+    })
+  ).current;
+
+  if (!sharing || !webcamOn || !streamURL) {
+    return null;
+  }
+
+  return (
+    <View
+      {...panResponder.panHandlers}
+      style={[
+        styles.hostWebcamPip,
+        {
+          left: pos.x,
+          top: pos.y,
+        },
+      ]}
+    >
+      <RTCView
+        streamURL={streamURL}
+        style={styles.hostWebcamPipVideo}
+        objectFit="cover"
+        mirror={Boolean(useFrontCamera)}
+        zOrder={2}
+      />
+      <View style={styles.hostWebcamPipGrip} pointerEvents="none">
+        <Feather name="move" size={12} color="rgba(255,255,255,0.9)" />
+      </View>
+    </View>
+  );
+}
+
 function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
   const { t } = useTranslation();
   const { localScreenShareOn, localWebcamOn, localWebcamStream } = useMeeting();
@@ -231,8 +347,6 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
 
   if (liveMode === 'screen') {
     const sharing = Boolean(localScreenShareOn || screenShareOn);
-    const streamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
-    const showWebcamPip = sharing && Boolean(webcamOn && streamURL);
 
     if (!sharing) {
       return (
@@ -250,17 +364,6 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
           <Text style={styles.screenShareActiveTitle}>{t('liveBroadcast.screenShareActive')}</Text>
           <Text style={styles.placeholderText}>{t('liveBroadcast.screenShareActiveHint')}</Text>
         </View>
-        {showWebcamPip ? (
-          <View style={styles.hostWebcamPip} pointerEvents="none">
-            <RTCView
-              streamURL={streamURL}
-              style={styles.hostWebcamPipVideo}
-              objectFit="cover"
-              mirror={Boolean(useFrontCamera)}
-              zOrder={2}
-            />
-          </View>
-        ) : null}
       </View>
     );
   }
@@ -1416,6 +1519,17 @@ function BroadcasterMeetingInner({
         localParticipantId={localParticipant?.id}
         useFrontCamera={useFrontCamera}
       />
+      {liveMode === 'screen' &&
+      meetingJoined &&
+      localScreenShareOn &&
+      !screenShareError &&
+      localParticipant?.id ? (
+        <ScreenShareHostWebcamPip
+          participantId={localParticipant.id}
+          useFrontCamera={useFrontCamera}
+          insets={insets}
+        />
+      ) : null}
       <LiveRemoteRtcTiles excludeParticipantId={localParticipant?.id} />
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={styles.topBarRow}>
@@ -1773,25 +1887,32 @@ const styles = StyleSheet.create({
   },
   hostWebcamPip: {
     position: 'absolute',
-    right: 16,
-    bottom: 128,
-    width: 104,
-    height: 148,
+    width: HOST_PIP_WIDTH,
+    height: HOST_PIP_HEIGHT,
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.9)',
     backgroundColor: '#111',
-    zIndex: 12,
+    zIndex: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 12,
   },
   hostWebcamPipVideo: {
     width: '100%',
     height: '100%',
+  },
+  hostWebcamPipGrip: {
+    position: 'absolute',
+    bottom: 6,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   screenShareHostBackdrop: {
     flex: 1,
