@@ -222,17 +222,19 @@ function resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream) {
   return null;
 }
 
-function ScreenShareHostWebcamPip({ participantId, useFrontCamera = true, insets }) {
-  const { localScreenShareOn, localWebcamOn, localWebcamStream } = useMeeting();
-  const {
-    screenShareOn,
-    webcamOn: participantWebcamOn,
-    webcamStream: participantWebcamStream,
-  } = useParticipant(participantId);
-  const webcamOn = participantWebcamOn ?? localWebcamOn;
-  const sharing = Boolean(localScreenShareOn || screenShareOn);
-  const streamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
+function getHostPipDefaultPosition(insets, bottomReserve) {
+  const minX = 10;
+  const maxX = width - HOST_PIP_WIDTH - 10;
+  const minY = (insets?.top || 0) + 52;
+  const maxY = height - HOST_PIP_HEIGHT - bottomReserve;
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  return {
+    x: clamp(width - HOST_PIP_WIDTH - 16, minX, maxX),
+    y: clamp(height - HOST_PIP_HEIGHT - bottomReserve - 56, minY, maxY),
+  };
+}
 
+function DraggableHostWebcamPip({ streamURL, useFrontCamera = true, insets }) {
   const bottomReserve = Math.max(insets?.bottom || 0, 16) + 72;
   const boundsRef = useRef({
     minX: 10,
@@ -255,19 +257,17 @@ function ScreenShareHostWebcamPip({ participantId, useFrontCamera = true, insets
     };
   }, []);
 
-  const defaultPos = useMemo(() => {
-    return clampPos(width - HOST_PIP_WIDTH - 16, height - HOST_PIP_HEIGHT - bottomReserve - 56);
-  }, [bottomReserve, clampPos, insets?.top]);
-
+  const defaultPos = getHostPipDefaultPosition(insets, bottomReserve);
   const posRef = useRef(defaultPos);
   const dragStartRef = useRef(defaultPos);
   const [pos, setPos] = useState(defaultPos);
 
   useEffect(() => {
-    posRef.current = defaultPos;
-    dragStartRef.current = defaultPos;
-    setPos(defaultPos);
-  }, [defaultPos]);
+    const next = getHostPipDefaultPosition(insets, bottomReserve);
+    posRef.current = next;
+    dragStartRef.current = next;
+    setPos(next);
+  }, [bottomReserve, insets?.top, insets?.bottom]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -306,7 +306,7 @@ function ScreenShareHostWebcamPip({ participantId, useFrontCamera = true, insets
     })
   ).current;
 
-  if (!sharing || !webcamOn || !streamURL) {
+  if (!streamURL) {
     return null;
   }
 
@@ -335,7 +335,7 @@ function ScreenShareHostWebcamPip({ participantId, useFrontCamera = true, insets
   );
 }
 
-function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
+function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true, insets }) {
   const { t } = useTranslation();
   const { localScreenShareOn, localWebcamOn, localWebcamStream } = useMeeting();
   const {
@@ -347,6 +347,8 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
 
   if (liveMode === 'screen') {
     const sharing = Boolean(localScreenShareOn || screenShareOn);
+    const streamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
+    const showWebcamPip = sharing && Boolean(webcamOn && streamURL);
 
     if (!sharing) {
       return (
@@ -364,6 +366,13 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
           <Text style={styles.screenShareActiveTitle}>{t('liveBroadcast.screenShareActive')}</Text>
           <Text style={styles.placeholderText}>{t('liveBroadcast.screenShareActiveHint')}</Text>
         </View>
+        {showWebcamPip ? (
+          <DraggableHostWebcamPip
+            streamURL={streamURL}
+            useFrontCamera={useFrontCamera}
+            insets={insets}
+          />
+        ) : null}
       </View>
     );
   }
@@ -395,7 +404,7 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true }) {
   );
 }
 
-function LocalPreview({ liveMode, localParticipantId, useFrontCamera }) {
+function LocalPreview({ liveMode, localParticipantId, useFrontCamera, insets }) {
   const { t } = useTranslation();
   if (!localParticipantId) {
     return (
@@ -410,6 +419,7 @@ function LocalPreview({ liveMode, localParticipantId, useFrontCamera }) {
       liveMode={liveMode}
       participantId={localParticipantId}
       useFrontCamera={useFrontCamera}
+      insets={insets}
     />
   );
 }
@@ -1518,18 +1528,8 @@ function BroadcasterMeetingInner({
         liveMode={liveMode}
         localParticipantId={localParticipant?.id}
         useFrontCamera={useFrontCamera}
+        insets={insets}
       />
-      {liveMode === 'screen' &&
-      meetingJoined &&
-      localScreenShareOn &&
-      !screenShareError &&
-      localParticipant?.id ? (
-        <ScreenShareHostWebcamPip
-          participantId={localParticipant.id}
-          useFrontCamera={useFrontCamera}
-          insets={insets}
-        />
-      ) : null}
       <LiveRemoteRtcTiles excludeParticipantId={localParticipant?.id} />
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={styles.topBarRow}>
