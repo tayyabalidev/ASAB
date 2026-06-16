@@ -2007,6 +2007,8 @@ export const resources = {
           "Screen capture did not start in time. Allow screen recording when prompted, then tap Retry.",
         screenShareStopped:
           "Screen sharing stopped. Tap Retry to share again or End stream to finish.",
+        pipBlurEnable: "Blur camera preview",
+        pipBlurDisable: "Show camera preview",
         viewerCount: "{{count}} watching"
       },
       liveViewer: {

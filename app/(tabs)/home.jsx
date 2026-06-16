@@ -1873,18 +1873,46 @@ const Home = () => {
     });
   }, [forYouPosts, forYouPhotos]);
   
+  const TRENDING_RECENT_WINDOW_DAYS = 3;
+
   // Combine latest videos and photos for trending
   const combinedLatestPosts = useMemo(() => {
+    const nowMs = Date.now();
+    const recentWindowMs = TRENDING_RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    const getEngagementScore = (post) => {
+      const likes = Array.isArray(post?.likes) ? post.likes.length : Number(post?.likes || 0);
+      const comments = Array.isArray(post?.comments)
+        ? post.comments.length
+        : Number(post?.commentsCount || post?.commentCount || 0);
+      const shares = Number(post?.shares || post?.shareCount || 0);
+      const views = Number(post?.views || post?.viewCount || 0);
+      return likes * 4 + comments * 3 + shares * 5 + views * 0.15;
+    };
+    const getTrendingScore = (post) => {
+      const createdMs = new Date(post?.$createdAt || 0).getTime() || 0;
+      const ageHours = Math.max(0, (nowMs - createdMs) / (1000 * 60 * 60));
+      const recencyBoost = Math.max(0, 168 - ageHours) * 2.5; // Strong boost in first 7 days
+      const engagement = getEngagementScore(post);
+      return recencyBoost + engagement;
+    };
+
     const allPosts = [
       ...(latestPosts || []).map(post => ({ ...post, postType: 'video' })),
       ...(latestPhotos || []).map(post => ({ ...post, postType: 'photo' }))
     ];
-    // Sort by creation date (newest first)
-    return allPosts.sort((a, b) => {
-      const dateA = new Date(a.$createdAt || 0);
-      const dateB = new Date(b.$createdAt || 0);
-      return dateB - dateA;
-    });
+    // Keep only recent posts and rank by recency + engagement.
+    return allPosts
+      .filter((post) => {
+        const createdMs = new Date(post?.$createdAt || 0).getTime() || 0;
+        return createdMs > 0 && nowMs - createdMs <= recentWindowMs;
+      })
+      .sort((a, b) => {
+        const scoreDiff = getTrendingScore(b) - getTrendingScore(a);
+        if (scoreDiff !== 0) return scoreDiff;
+        const dateA = new Date(a.$createdAt || 0);
+        const dateB = new Date(b.$createdAt || 0);
+        return dateB - dateA;
+      });
   }, [latestPosts, latestPhotos]);
 
   const trendingCarouselPosts = useMemo(
@@ -2451,14 +2479,14 @@ const Home = () => {
           index={index}
           isVisible={currentVideoIndex === index}
           onVideoStateChange={() => {}} // Empty function since we're not using it anymore
-          isHomeFocused={isHomeFocused}
+          isHomeFocused={isHomeFocused && !trendingModalVisible}
           theme={theme}
           isDarkMode={isDarkMode}
           cardHeight={SCREEN_HEIGHT}
         />
       );
     },
-    [currentVideoIndex, isHomeFocused, theme, isDarkMode]
+    [currentVideoIndex, isHomeFocused, trendingModalVisible, theme, isDarkMode]
   );
 
   // Render trending video item - memoized to update when trendingCreators changes
@@ -2583,6 +2611,7 @@ const Home = () => {
           onPress={() => {
             const list = combinedLatestPosts;
             const idx = list.findIndex((p) => p.$id === item.$id);
+            setCurrentVideoIndex(null);
             setTrendingModalIndex(idx >= 0 ? idx : index);
             setTrendingModalVideo(item);
             setTrendingModalVisible(true);
@@ -3333,6 +3362,7 @@ const Home = () => {
         animationType="slide"
         transparent={false}
         onRequestClose={() => {
+          setCurrentVideoIndex(null);
           setTrendingModalVisible(false);
           setTrendingCommentsModalVisible(false);
         }}
@@ -3352,6 +3382,7 @@ const Home = () => {
               {/* Close Button */}
               <TouchableOpacity 
                 onPress={() => {
+                  setCurrentVideoIndex(null);
                   setTrendingModalVisible(false);
                   setTrendingCommentsModalVisible(false);
                 }} 

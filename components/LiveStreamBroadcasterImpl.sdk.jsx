@@ -13,6 +13,7 @@ import {
   PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import {
@@ -234,7 +235,12 @@ function getHostPipDefaultPosition(insets, bottomReserve) {
   };
 }
 
-function DraggableHostWebcamPip({ streamURL, useFrontCamera = true, insets }) {
+function DraggableHostWebcamPip({
+  streamURL,
+  useFrontCamera = true,
+  insets,
+  isBlurEnabled = false,
+}) {
   const bottomReserve = Math.max(insets?.bottom || 0, 16) + 72;
   const boundsRef = useRef({
     minX: 10,
@@ -328,6 +334,15 @@ function DraggableHostWebcamPip({ streamURL, useFrontCamera = true, insets }) {
         mirror={Boolean(useFrontCamera)}
         zOrder={2}
       />
+      {isBlurEnabled ? (
+        <BlurView
+          intensity={Platform.OS === 'android' ? 72 : 85}
+          tint="dark"
+          style={styles.hostWebcamPipBlur}
+          pointerEvents="none"
+          experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined}
+        />
+      ) : null}
       <View style={styles.hostWebcamPipGrip} pointerEvents="none">
         <Feather name="move" size={12} color="rgba(255,255,255,0.9)" />
       </View>
@@ -335,7 +350,13 @@ function DraggableHostWebcamPip({ streamURL, useFrontCamera = true, insets }) {
   );
 }
 
-function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true, insets }) {
+function LocalPreviewInner({
+  liveMode,
+  participantId,
+  useFrontCamera = true,
+  insets,
+  isBlurEnabled = false,
+}) {
   const { t } = useTranslation();
   const { localScreenShareOn, localWebcamOn, localWebcamStream } = useMeeting();
   const {
@@ -371,6 +392,7 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true, ins
             streamURL={streamURL}
             useFrontCamera={useFrontCamera}
             insets={insets}
+            isBlurEnabled={isBlurEnabled}
           />
         ) : null}
       </View>
@@ -404,7 +426,13 @@ function LocalPreviewInner({ liveMode, participantId, useFrontCamera = true, ins
   );
 }
 
-function LocalPreview({ liveMode, localParticipantId, useFrontCamera, insets }) {
+function LocalPreview({
+  liveMode,
+  localParticipantId,
+  useFrontCamera,
+  insets,
+  isBlurEnabled = false,
+}) {
   const { t } = useTranslation();
   if (!localParticipantId) {
     return (
@@ -420,6 +448,7 @@ function LocalPreview({ liveMode, localParticipantId, useFrontCamera, insets }) 
       participantId={localParticipantId}
       useFrontCamera={useFrontCamera}
       insets={insets}
+      isBlurEnabled={isBlurEnabled}
     />
   );
 }
@@ -440,6 +469,7 @@ function BroadcasterMeetingInner({
   const { t } = useTranslation();
   const [showChat, setShowChat] = useState(true);
   const [showGuests, setShowGuests] = useState(false);
+  const [isBlurEnabled, setIsBlurEnabled] = useState(false);
   /** Tracks front vs back for preview mirroring (VideoSDK ILS: mirror only for local front). */
   const [useFrontCamera, setUseFrontCamera] = useState(true);
   const [phase, setPhase] = useState('joining');
@@ -1084,6 +1114,12 @@ function BroadcasterMeetingInner({
   }, [localScreenShareOn, liveMode, localParticipant, ensureScreenShareMicAndSystemAudio]);
 
   useEffect(() => {
+    if (!localScreenShareOn) {
+      setIsBlurEnabled(false);
+    }
+  }, [localScreenShareOn]);
+
+  useEffect(() => {
     if (liveMode !== 'screen' || Platform.OS !== 'ios') return undefined;
     const subscription = VideosdkIosScreenShare.addListener((event) => {
       if (event === 'START_BROADCAST') {
@@ -1529,6 +1565,7 @@ function BroadcasterMeetingInner({
         localParticipantId={localParticipant?.id}
         useFrontCamera={useFrontCamera}
         insets={insets}
+        isBlurEnabled={isBlurEnabled}
       />
       <LiveRemoteRtcTiles excludeParticipantId={localParticipant?.id} />
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
@@ -1589,14 +1626,37 @@ function BroadcasterMeetingInner({
         </TouchableOpacity>
       ) : null}
       {liveMode === 'screen' && meetingJoined && localScreenShareOn && !screenShareError ? (
-        <TouchableOpacity
-          style={[styles.sideFab, styles.sideFabLeft, { bottom: Math.max(insets.bottom, 16) + 88 }]}
-          onPress={handleStopScreenShare}
-          activeOpacity={0.85}
-          accessibilityLabel="Stop screen sharing"
-        >
-          <Feather name="monitor" size={20} color="#fff" />
-        </TouchableOpacity>
+        <>
+          <TouchableOpacity
+            style={[styles.sideFab, styles.sideFabLeft, { bottom: Math.max(insets.bottom, 16) + 88 }]}
+            onPress={handleStopScreenShare}
+            activeOpacity={0.85}
+            accessibilityLabel="Stop screen sharing"
+          >
+            <Feather name="monitor" size={20} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.sideFab,
+              styles.sideFabLeft,
+              isBlurEnabled && styles.sideFabActive,
+              { bottom: Math.max(insets.bottom, 16) + 152 },
+            ]}
+            onPress={() => setIsBlurEnabled((prev) => !prev)}
+            activeOpacity={0.85}
+            accessibilityLabel={
+              isBlurEnabled
+                ? t('liveBroadcast.pipBlurDisable')
+                : t('liveBroadcast.pipBlurEnable')
+            }
+          >
+            <Feather
+              name={isBlurEnabled ? 'eye-off' : 'eye'}
+              size={20}
+              color={isBlurEnabled ? '#fff' : 'rgba(255,255,255,0.55)'}
+            />
+          </TouchableOpacity>
+        </>
       ) : null}
       <TouchableOpacity
         style={[styles.sideFab, styles.sideFabRight, { bottom: Math.max(insets.bottom, 16) + 88 }]}
@@ -1905,6 +1965,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  hostWebcamPipBlur: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3,
+  },
   hostWebcamPipGrip: {
     position: 'absolute',
     bottom: 6,
@@ -2054,6 +2118,10 @@ const styles = StyleSheet.create({
   },
   sideFabRight: {
     right: 16,
+  },
+  sideFabActive: {
+    backgroundColor: 'rgba(167, 125, 248, 0.55)',
+    borderColor: 'rgba(167, 125, 248, 0.9)',
   },
   chatFabText: {
     fontSize: 22,

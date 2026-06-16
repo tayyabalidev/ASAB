@@ -154,6 +154,8 @@ export default function LiveStreamHeartReactions({
           style={[styles.likeButton, { bottom: bottomOffset }]}
           onPress={handleLike}
           activeOpacity={0.85}
+          hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+          pressRetentionOffset={{ top: 18, bottom: 18, left: 18, right: 18 }}
           accessibilityLabel="Like stream"
         >
           <FontAwesome name="heart" size={26} color="#fff" />
@@ -182,10 +184,10 @@ const styles = StyleSheet.create({
   },
   likeButton: {
     position: 'absolute',
-    right: 16,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    right: 12,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: 'rgba(255, 71, 87, 0.92)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -194,5 +196,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 8,
     elevation: 6,
+    zIndex: 40,
   },
 });

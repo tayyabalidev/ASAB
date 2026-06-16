@@ -2145,6 +2145,31 @@ const Create = () => {
                       handleChangeText={(e) => setForm({ ...form, title: e })}
                       otherStyles="mt-4"
                     />
+                    <FormField
+                      title={t("create.aiPromptLabel")}
+                      value={form.prompt}
+                      placeholder={t("create.aiPromptPlaceholder")}
+                      handleChangeText={(e) => setForm({ ...form, prompt: e })}
+                    />
+                    <View
+                      onLayout={(event) => {
+                        linkInputRef.current = event.nativeEvent.layout;
+                      }}
+                    >
+                      <FormField
+                        title="Link (Optional)"
+                        value={form.link}
+                        placeholder="Add a link to your video (e.g., https://example.com)"
+                        handleChangeText={(e) => setForm({ ...form, link: e })}
+                        onFocus={() => {
+                          setTimeout(() => {
+                            scrollViewRef.current?.scrollToEnd({
+                              animated: true,
+                            });
+                          }, 100);
+                        }}
+                      />
+                    </View>
 
                     <View style={{ gap: 12 }}>
                       <Text
@@ -2516,13 +2541,6 @@ const Create = () => {
                         )}
                       </View>
                     </View>
-
-                    <FormField
-                      title={t("create.aiPromptLabel")}
-                      value={form.prompt}
-                      placeholder={t("create.aiPromptPlaceholder")}
-                      handleChangeText={(e) => setForm({ ...form, prompt: e })}
-                    />
 
                     {/* Video Editing Options */}
                     {form.video && (
@@ -2930,26 +2948,6 @@ const Create = () => {
                       </View>
                     )}
 
-                    {/* Link Field for Videos */}
-                    <View
-                      onLayout={(event) => {
-                        linkInputRef.current = event.nativeEvent.layout;
-                      }}
-                    >
-                      <FormField
-                        title="Link (Optional)"
-                        value={form.link}
-                        placeholder="Add a link to your video (e.g., https://example.com)"
-                        handleChangeText={(e) => setForm({ ...form, link: e })}
-                        onFocus={() => {
-                          setTimeout(() => {
-                            scrollViewRef.current?.scrollToEnd({
-                              animated: true,
-                            });
-                          }, 100);
-                        }}
-                      />
-                    </View>
                   </>
                 ) : (
                   <>
@@ -2962,6 +2960,37 @@ const Create = () => {
                       }
                       otherStyles="mt-4"
                     />
+                    <FormField
+                      title={t("create.aiPromptLabel")}
+                      value={photoForm.caption}
+                      placeholder={t("create.aiPromptPlaceholder")}
+                      handleChangeText={(e) =>
+                        setPhotoForm({ ...photoForm, caption: e })
+                      }
+                      multiline
+                      numberOfLines={3}
+                    />
+                    <View
+                      onLayout={(event) => {
+                        linkInputRef.current = event.nativeEvent.layout;
+                      }}
+                    >
+                      <FormField
+                        title="Link (Optional)"
+                        value={photoForm.link}
+                        placeholder="Add a link to your photo (e.g., https://example.com)"
+                        handleChangeText={(e) =>
+                          setPhotoForm({ ...photoForm, link: e })
+                        }
+                        onFocus={() => {
+                          setTimeout(() => {
+                            scrollViewRef.current?.scrollToEnd({
+                              animated: true,
+                            });
+                          }, 100);
+                        }}
+                      />
+                    </View>
 
                     <View style={{ gap: 12 }}>
                       <Text
@@ -3631,39 +3660,6 @@ const Create = () => {
                         )}
                     </View>
 
-                    <FormField
-                      title="Caption (Optional)"
-                      value={photoForm.caption}
-                      placeholder="Add a caption..."
-                      handleChangeText={(e) =>
-                        setPhotoForm({ ...photoForm, caption: e })
-                      }
-                      multiline
-                      numberOfLines={3}
-                    />
-
-                    {/* Link Field for Photos */}
-                    <View
-                      onLayout={(event) => {
-                        linkInputRef.current = event.nativeEvent.layout;
-                      }}
-                    >
-                      <FormField
-                        title="Link (Optional)"
-                        value={photoForm.link}
-                        placeholder="Add a link to your photo (e.g., https://example.com)"
-                        handleChangeText={(e) =>
-                          setPhotoForm({ ...photoForm, link: e })
-                        }
-                        onFocus={() => {
-                          setTimeout(() => {
-                            scrollViewRef.current?.scrollToEnd({
-                              animated: true,
-                            });
-                          }, 100);
-                        }}
-                      />
-                    </View>
                   </>
                 )}
 
@@ -3744,26 +3740,7 @@ const Create = () => {
                 )}
 
                 {/* Processing Server Status Indicator */}
-                {!useProcessing && (
-                  <View
-                    style={{
-                      marginTop: 12,
-                      padding: 8,
-                      borderRadius: 8,
-                      backgroundColor: themedColor(
-                        "rgba(255,193,7,0.1)",
-                        "rgba(255,193,7,0.1)"
-                      ),
-                      borderWidth: 1,
-                      borderColor: themedColor(
-                        "rgba(255,193,7,0.3)",
-                        "rgba(255,193,7,0.3)"
-                      ),
-                    }}
-                  >
-                    <Text style={{ color: theme.textPrimary, fontSize: 14 }}></Text>
-                  </View>
-                )}
+               
               </ScrollView>
             </KeyboardAvoidingView>
 
