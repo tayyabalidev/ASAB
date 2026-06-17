@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getLatestPosts, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, getVideoPosterUri, toggleFollowUser, getAllPhotoPosts, getLatestPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
+import { getAllPosts, getTrendingVideos, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, getVideoPosterUri, toggleFollowUser, getAllPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
 import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
@@ -1852,9 +1852,8 @@ const Home = () => {
     [user?.$id]
   );
   
-  // Get latest posts for trending section
-  const { data: latestPosts, refetch: refetchLatestPosts } = useAppwrite(getLatestPosts, []);
-  const { data: latestPhotos, refetch: refetchLatestPhotos } = useAppwrite(getLatestPhotoPosts, []);
+  // Top 50 newest trending videos (ranked server-side in getTrendingVideos)
+  const { data: trendingVideos, refetch: refetchTrendingVideos } = useAppwrite(getTrendingVideos, []);
   
   // Get active advertisements
   const { data: activeAds, refetch: refetchAds } = useAppwrite(getActiveAdvertisements, []);
@@ -1873,52 +1872,8 @@ const Home = () => {
     });
   }, [forYouPosts, forYouPhotos]);
   
-  const TRENDING_RECENT_WINDOW_DAYS = 3;
-
-  // Combine latest videos and photos for trending
-  const combinedLatestPosts = useMemo(() => {
-    const nowMs = Date.now();
-    const recentWindowMs = TRENDING_RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-    const getEngagementScore = (post) => {
-      const likes = Array.isArray(post?.likes) ? post.likes.length : Number(post?.likes || 0);
-      const comments = Array.isArray(post?.comments)
-        ? post.comments.length
-        : Number(post?.commentsCount || post?.commentCount || 0);
-      const shares = Number(post?.shares || post?.shareCount || 0);
-      const views = Number(post?.views || post?.viewCount || 0);
-      return likes * 4 + comments * 3 + shares * 5 + views * 0.15;
-    };
-    const getTrendingScore = (post) => {
-      const createdMs = new Date(post?.$createdAt || 0).getTime() || 0;
-      const ageHours = Math.max(0, (nowMs - createdMs) / (1000 * 60 * 60));
-      const recencyBoost = Math.max(0, 168 - ageHours) * 2.5; // Strong boost in first 7 days
-      const engagement = getEngagementScore(post);
-      return recencyBoost + engagement;
-    };
-
-    const allPosts = [
-      ...(latestPosts || []).map(post => ({ ...post, postType: 'video' })),
-      ...(latestPhotos || []).map(post => ({ ...post, postType: 'photo' }))
-    ];
-    // Keep only recent posts and rank by recency + engagement.
-    return allPosts
-      .filter((post) => {
-        const createdMs = new Date(post?.$createdAt || 0).getTime() || 0;
-        return createdMs > 0 && nowMs - createdMs <= recentWindowMs;
-      })
-      .sort((a, b) => {
-        const scoreDiff = getTrendingScore(b) - getTrendingScore(a);
-        if (scoreDiff !== 0) return scoreDiff;
-        const dateA = new Date(a.$createdAt || 0);
-        const dateB = new Date(b.$createdAt || 0);
-        return dateB - dateA;
-      });
-  }, [latestPosts, latestPhotos]);
-
-  const trendingCarouselPosts = useMemo(
-    () => (combinedLatestPosts || []).slice(0, 50),
-    [combinedLatestPosts]
-  );
+  const combinedLatestPosts = useMemo(() => trendingVideos || [], [trendingVideos]);
+  const trendingCarouselPosts = combinedLatestPosts;
 
   useEffect(() => {
     const maxI = Math.max(0, trendingCarouselPosts.length - 1);
@@ -2115,7 +2070,7 @@ const Home = () => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([refetch(), refetchTrendingVideos()]);
     setRefreshing(false);
   };
 
@@ -3194,7 +3149,7 @@ const Home = () => {
                 </View>
               )}
 
-              {/* Trending Videos and Photos Section */}
+              {/* Trending Videos Section */}
               {combinedLatestPosts && combinedLatestPosts.length > 0 ? (
                 <View style={{ 
                   backgroundColor: themedColor('rgba(2,14,13,0.95)', theme.surfaceMuted), 
