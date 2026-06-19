@@ -9,6 +9,7 @@ import { StripeProvider } from '@stripe/stripe-react-native';
 import Constants from 'expo-constants';
 import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser, getOrCreateGoogleUser, appwriteConfig } from '../lib/appwrite';
 import { useBadgeNotifications } from '../hooks/useBadgeNotifications';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 import IncomingCallHandler from '../components/IncomingCallHandler';
 import { canLoadVideoSdkNative } from '../lib/videosdkNativeGate';
 
@@ -29,6 +30,11 @@ SplashScreen.preventAutoHideAsync();
 // ✅ Badge Notification Handler Component
 function BadgeNotificationHandler() {
   useBadgeNotifications();
+  return null;
+}
+
+function PushNotificationHandler() {
+  usePushNotifications();
   return null;
 }
 
@@ -379,6 +385,7 @@ export default function RootLayout() {
       <GlobalProvider>
         <OAuthHandler />
         <BadgeNotificationHandler />
+        <PushNotificationHandler />
         <IncomingCallHandler />
         <Stack
           screenOptions={{

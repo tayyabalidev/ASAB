@@ -34,7 +34,8 @@
         "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication",
         "UIBackgroundModes": [
           "audio",
-          "voip"
+          "voip",
+          "remote-notification"
         ],
         "UIStatusBarStyle": "UIStatusBarStyleLightContent",
         "UIViewControllerBasedStatusBarAppearance": false
@@ -62,7 +63,8 @@
         "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION",
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.WAKE_LOCK",
-        "android.permission.SYSTEM_ALERT_WINDOW"
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.POST_NOTIFICATIONS"
       ],
       "package": "com.bilal.asab"
     },
