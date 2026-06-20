@@ -138,26 +138,67 @@ const Inbox = () => {
   const fetchRecentMessages = async () => {
     if (!currentUser?.$id) return;
     try {
-      const messagesQuery = Query.equal('participants', currentUser.$id);
-      const messagesResponse = await databases.listDocuments(
-        appwriteConfig.databaseId,
-        'chats',
-        [messagesQuery]
-      );
+      const PAGE_SIZE = 100;
+      const allMsgs = [];
+      let offset = 0;
+      while (true) {
+        const page = await databases.listDocuments(
+          appwriteConfig.databaseId,
+          appwriteConfig.messagesCollectionId,
+          [
+            Query.or([
+              Query.equal('senderId', [currentUser.$id]),
+              Query.equal('receiverId', [currentUser.$id]),
+            ]),
+            Query.orderDesc('$createdAt'),
+            Query.limit(PAGE_SIZE),
+            Query.offset(offset),
+          ]
+        );
+        allMsgs.push(...page.documents);
+        if (page.documents.length < PAGE_SIZE) break;
+        offset += PAGE_SIZE;
+      }
 
-      const chatsWithMessages = await Promise.all(
-        messagesResponse.documents.map(async (chat) => {
-          const chatMessagesRes = await databases.listDocuments(
-            appwriteConfig.databaseId,
-            appwriteConfig.messagesCollectionId,
-            [Query.equal('chatId', chat.$id)]
-          );
-          return { ...chat, messages: chatMessagesRes.documents };
+      const partnerMap = new Map();
+      allMsgs.forEach(msg => {
+        const otherUserId = msg.senderId === currentUser.$id ? msg.receiverId : msg.senderId;
+        if (!otherUserId || otherUserId === currentUser.$id) return;
+        if (!partnerMap.has(otherUserId)) partnerMap.set(otherUserId, []);
+        partnerMap.get(otherUserId).push(msg);
+      });
+
+      const chats = await Promise.all(
+        [...partnerMap.entries()].map(async ([otherUserId, messages]) => {
+          let otherUsername = 'User';
+          let otherUserAvatar = images.profile;
+          try {
+            const user = await databases.getDocument(
+              appwriteConfig.databaseId,
+              appwriteConfig.userCollectionId,
+              otherUserId
+            );
+            otherUsername = user.username || user.email || 'User';
+            otherUserAvatar = getAvatarUrl(user.avatar);
+          } catch (_) {}
+          return {
+            $id: otherUserId,
+            otherUserId,
+            otherUsername,
+            otherUserAvatar,
+            messages,
+          };
         })
       );
 
+      chats.sort((a, b) => {
+        const aLast = Math.max(...a.messages.map(m => new Date(m.$createdAt).getTime()));
+        const bLast = Math.max(...b.messages.map(m => new Date(m.$createdAt).getTime()));
+        return bLast - aLast;
+      });
+
       if (!mountedRef.current) return;
-      setRecentMessages(chatsWithMessages);
+      setRecentMessages(chats);
     } catch (error) {
     } finally {
       if (mountedRef.current) setLoading(false);

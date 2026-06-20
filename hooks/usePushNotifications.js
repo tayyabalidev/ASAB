@@ -11,7 +11,7 @@ import {
 } from '../lib/pushNotificationService';
 
 /**
- * Registers the device push token and routes live-stream notification taps to the viewer screen.
+ * Registers the device push token and routes notification taps (live streams, messages).
  */
 export function usePushNotifications() {
   const { user, isLogged, loading } = useGlobalContext();

@@ -290,8 +290,9 @@ const UserProfile = () => {
   };
 
   const handleMessage = () => {
-    // Open chat with this user
-    router.push({ pathname: '/chat', params: { userId: id } });
+    const profileId = Array.isArray(id) ? id[0] : id;
+    if (!profileId) return;
+    router.push({ pathname: '/chat', params: { userId: profileId } });
   };
 
 

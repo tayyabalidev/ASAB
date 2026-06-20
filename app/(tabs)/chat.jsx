@@ -7,6 +7,7 @@ import { Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, ScrollVi
 import { Query } from 'react-native-appwrite';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { account, appwriteConfig, databases, getCurrentUser, storage, uploadFile, createNotification } from '../../lib/appwrite';
+import { sendMessagePushNotification } from '../../lib/pushNotificationService';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import { Audio } from 'expo-av';
@@ -20,8 +21,83 @@ import { useTranslation } from "react-i18next";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { images } from "../../constants";
 
+const MESSAGE_PAGE_SIZE = 100;
+
+async function fetchAllDocuments(collectionId, queries = []) {
+  const all = [];
+  let offset = 0;
+  while (true) {
+    const page = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      collectionId,
+      [...queries, Query.limit(MESSAGE_PAGE_SIZE), Query.offset(offset)]
+    );
+    all.push(...page.documents);
+    if (page.documents.length < MESSAGE_PAGE_SIZE) break;
+    offset += MESSAGE_PAGE_SIZE;
+  }
+  return all;
+}
+
+function mergeMessageLists(existing, incoming) {
+  const map = new Map();
+  existing.filter(m => !m.optimistic).forEach(m => map.set(m.$id, m));
+  incoming.forEach(m => map.set(m.$id, m));
+  const optimistic = existing.filter(m => m.optimistic).filter(om =>
+    ![...map.values()].some(cm =>
+      cm.content === om.content &&
+      cm.senderId === om.senderId &&
+      cm.receiverId === om.receiverId &&
+      cm.type === om.type &&
+      Math.abs(new Date(cm.$createdAt) - new Date(om.$createdAt)) < 10000
+    )
+  );
+  return [...map.values(), ...optimistic].sort(
+    (a, b) => new Date(a.$createdAt) - new Date(b.$createdAt)
+  );
+}
+
+function dedupeById(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    if (!item?.$id || seen.has(item.$id)) return false;
+    seen.add(item.$id);
+    return true;
+  });
+}
+
+function buildUserMessagesQuery(userId, groupIds = []) {
+  return [
+    Query.or([
+      Query.equal('senderId', [userId]),
+      Query.equal('receiverId', [userId]),
+      ...(groupIds.length > 0 ? [Query.equal('chatId', groupIds)] : [])
+    ]),
+  ];
+}
+
+function getMessagePushPreview(type, content) {
+  switch (type) {
+    case 'text':
+      return content?.trim() || 'Sent you a message';
+    case 'image':
+      return '📷 Photo';
+    case 'video':
+      return '🎬 Video';
+    case 'audio':
+      return '🎵 Voice message';
+    case 'document':
+      return content?.trim() || '📎 Document';
+    case 'location':
+      return '📍 Location';
+    default:
+      return 'Sent you a message';
+  }
+}
+
 const Chat = () => {
-  const { userId } = useLocalSearchParams();
+  const { userId: userIdParam } = useLocalSearchParams();
+  const targetUserId = Array.isArray(userIdParam) ? userIdParam[0] : userIdParam;
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
   const [chats, setChats] = useState([]);
@@ -55,6 +131,7 @@ const Chat = () => {
   const [playingAudioId, setPlayingAudioId] = useState(null);
   const [soundObj, setSoundObj] = useState(null);
   const [audioPlaybackStatus, setAudioPlaybackStatus] = useState({});
+  const [partnerProfiles, setPartnerProfiles] = useState({});
   const { t } = useTranslation();
   const { isRTL, theme, isDarkMode } = useGlobalContext();
 
@@ -72,16 +149,13 @@ const Chat = () => {
   const fetchMessagesForChat = async (chatUserOrGroup) => {
     let newMessages = [];
     if (chatUserOrGroup.type === 'group') {
-      const res = await databases.listDocuments(
-        appwriteConfig.databaseId,
+      newMessages = await fetchAllDocuments(
         appwriteConfig.messagesCollectionId,
         [Query.equal('chatId', [chatUserOrGroup.$id]), Query.orderDesc('$createdAt')]
       );
-      newMessages = res.documents.reverse();
+      newMessages = newMessages.reverse();
     } else {
-      // Private chat: fetch all messages between currentUser and selectedUser
-      const res = await databases.listDocuments(
-        appwriteConfig.databaseId,
+      newMessages = await fetchAllDocuments(
         appwriteConfig.messagesCollectionId,
         [
           Query.or([
@@ -97,7 +171,7 @@ const Chat = () => {
           Query.orderDesc('$createdAt')
         ]
       );
-      newMessages = res.documents.reverse();
+      newMessages = newMessages.reverse();
     }
     setMessages(prev => {
       const existingIds = new Set(prev.map(m => m.$id));
@@ -129,7 +203,8 @@ const Chat = () => {
         
         const userRes = await databases.listDocuments(
           appwriteConfig.databaseId,
-          appwriteConfig.userCollectionId
+          appwriteConfig.userCollectionId,
+          [Query.limit(MESSAGE_PAGE_SIZE)]
         );
         setUsers(userRes.documents);
         // Fetch all chats/groups where current user is a member
@@ -138,23 +213,19 @@ const Chat = () => {
           appwriteConfig.chatsCollectionId,
           [Query.contains('members', [userDoc.$id])]
         );
+        const groupDocs = chatRes.documents.filter(c => c.type === 'group');
         setChats(chatRes.documents.filter(c => c.type === 'private'));
-        setGroups(chatRes.documents.filter(c => c.type === 'group'));
+        setGroups(groupDocs);
         // Fetch all messages where current user is sender or receiver
-        const messagesRes = await databases.listDocuments(
-          appwriteConfig.databaseId,
+        const groupIds = groupDocs.map(g => g.$id);
+        const allMessageDocs = await fetchAllDocuments(
           appwriteConfig.messagesCollectionId,
-          [
-            Query.or([
-              Query.equal('senderId', [userDoc.$id]),
-              Query.equal('receiverId', [userDoc.$id])
-            ])
-          ]
+          buildUserMessagesQuery(userDoc.$id, groupIds)
         );
-        setAllMessages(messagesRes.documents); // Store all messages for inbox preview
+        setAllMessages(allMessageDocs);
         // Build a map of users who have messaged me and count
         const receivedMap = new Map();
-        messagesRes.documents.forEach(msg => {
+        allMessageDocs.forEach(msg => {
           if (
             msg.receiverId === userDoc.$id &&
             msg.senderId !== userDoc.$id
@@ -169,7 +240,7 @@ const Chat = () => {
         // Build a set of user IDs for users I have chatted with (sent or received)
         const chatIds = new Set();
         const counts = new Map();
-        messagesRes.documents.forEach(msg => {
+        allMessageDocs.forEach(msg => {
           // If I received a message from someone
           if (msg.receiverId === userDoc.$id && msg.senderId !== userDoc.$id) {
             chatIds.add(msg.senderId);
@@ -201,22 +272,40 @@ const Chat = () => {
     fetchData();
   }, []);
 
-  // Auto-select user when userId param is provided (e.g., from profile page)
-  useEffect(() => {
-    if (userId && users.length > 0 && currentUser && userId !== currentUser.$id) {
-      const targetUser = users.find(u => u.$id === userId);
-      if (targetUser && (!selectedUser || selectedUser.$id !== userId)) {
-        // Create a user object in the format expected by selectedUser
-        const userForChat = {
-          $id: targetUser.$id,
-          username: targetUser.username,
-          avatar: targetUser.avatar,
-          type: 'private' // Private chat
-        };
-        setSelectedUser(userForChat);
+  const openChatForUserId = useCallback(async (userId) => {
+    if (!userId || !currentUser || userId === currentUser.$id) return;
+    if (selectedUser?.$id === userId) return;
+
+    let targetUser = users.find(u => u.$id === userId);
+    if (!targetUser) {
+      try {
+        targetUser = await databases.getDocument(
+          appwriteConfig.databaseId,
+          appwriteConfig.userCollectionId,
+          userId
+        );
+      } catch {
+        return;
       }
     }
-  }, [userId, users, currentUser]);
+
+    const userForChat = {
+      $id: targetUser.$id,
+      username: targetUser.username,
+      avatar: targetUser.avatar,
+      type: 'private',
+    };
+    setPartnerProfiles(prev => ({ ...prev, [targetUser.$id]: targetUser }));
+    setMessages([]);
+    setSelectedUser(userForChat);
+  }, [users, currentUser, selectedUser]);
+
+  // Auto-select user when userId param is provided (e.g., from profile page)
+  useEffect(() => {
+    if (targetUserId) {
+      openChatForUserId(targetUserId);
+    }
+  }, [targetUserId, openChatForUserId]);
 
   // Safeguard: Prevent selectedUser from being cleared unexpectedly during message sending
   useEffect(() => {
@@ -237,28 +326,13 @@ const Chat = () => {
           appwriteConfig.databaseId,
           appwriteConfig.messagesCollectionId,
           [
-            Query.or([
-              Query.equal('senderId', [currentUser.$id]),
-              Query.equal('receiverId', [currentUser.$id]),
-              ...(groupIds.length > 0 ? [Query.equal('chatId', groupIds)] : [])
-            ])
+            ...buildUserMessagesQuery(currentUser.$id, groupIds),
+            Query.orderDesc('$createdAt'),
+            Query.limit(MESSAGE_PAGE_SIZE),
           ]
         );
         if (!isMounted) return;
-        setAllMessages(prev => {
-          const optimistic = prev.filter(m => m.optimistic);
-          const confirmed = res.documents;
-          const stillOptimistic = optimistic.filter(om => {
-            return !confirmed.some(cm =>
-              cm.content === om.content &&
-              cm.senderId === om.senderId &&
-              cm.receiverId === om.receiverId &&
-              cm.type === om.type &&
-              Math.abs(new Date(cm.$createdAt) - new Date(om.$createdAt)) < 10000
-            );
-          });
-          return [...confirmed, ...stillOptimistic];
-        });
+        setAllMessages(prev => mergeMessageLists(prev, res.documents));
       } catch (e) {}
     };
     pollAllMessages();
@@ -278,15 +352,13 @@ const Chat = () => {
       let newMessages = [];
       try {
         if (selectedUser.type === 'group') {
-          const res = await databases.listDocuments(
-            appwriteConfig.databaseId,
+          newMessages = await fetchAllDocuments(
             appwriteConfig.messagesCollectionId,
             [Query.equal('chatId', [selectedUser.$id]), Query.orderDesc('$createdAt')]
           );
-          newMessages = res.documents.reverse();
+          newMessages = newMessages.reverse();
         } else {
-          const res = await databases.listDocuments(
-            appwriteConfig.databaseId,
+          newMessages = await fetchAllDocuments(
             appwriteConfig.messagesCollectionId,
             [
               Query.or([
@@ -302,10 +374,11 @@ const Chat = () => {
               Query.orderDesc('$createdAt')
             ]
           );
-          newMessages = res.documents.reverse();
+          newMessages = newMessages.reverse();
         }
         if (!isMounted) return;
         setMessages(newMessages);
+        setAllMessages(prev => mergeMessageLists(prev, newMessages));
         const unread = newMessages.filter(m => m.receiverId === currentUser.$id && m.is_read === false);
         for (const msg of unread) {
           try {
@@ -384,6 +457,7 @@ const Chat = () => {
           // For backward compatibility, store fileUrl in content if fileUrl is not present
           content: type === 'text' || type === 'location' ? content : (fileUrl || content),
           fileUrl: type !== 'text' && type !== 'location' ? (fileUrl || content) : '',
+          is_read: false,
         }
       );
       
@@ -410,6 +484,12 @@ const Chat = () => {
         } catch (notifError) {
           // Don't fail message send if notification fails
         }
+        sendMessagePushNotification({
+          fromUserId: currentUser.$id,
+          fromUsername: currentUser.username,
+          toUserId: messageData.receiverId,
+          messagePreview: getMessagePushPreview(type, content),
+        }).catch(() => {});
       }
       
       // Ensure selectedUser is still set after successful send
@@ -730,29 +810,88 @@ const Chat = () => {
   };
 
   // Build a set of user IDs for all users you have messaged or who have messaged you
-  const chatPartnerIds = new Set();
-  allMessages.forEach(msg => {
-    if (msg.senderId === currentUser?.$id && msg.receiverId && msg.receiverId !== currentUser?.$id) {
-      chatPartnerIds.add(msg.receiverId);
-    }
-    if (msg.receiverId === currentUser?.$id && msg.senderId && msg.senderId !== currentUser?.$id) {
-      chatPartnerIds.add(msg.senderId);
-    }
-  });
-  // Filter users for chat list: only those in chatPartnerIds or the selectedUser
-  const filteredUsers = users.filter(u =>
-    u.$id !== currentUser?.$id &&
-    (
-      chatPartnerIds.has(u.$id) ||
-      (selectedUser && u.$id === selectedUser.$id)
-    ) &&
-    (u.username?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()))
-  );
+  const chatPartnerIds = useMemo(() => {
+    const ids = new Set();
+    if (!currentUser?.$id) return ids;
+    const groupIds = new Set(groups.map(g => g.$id));
+    allMessages.forEach(msg => {
+      if (msg.chatId && groupIds.has(msg.chatId)) return;
+      if (
+        msg.senderId === currentUser.$id &&
+        msg.receiverId &&
+        msg.receiverId !== currentUser.$id &&
+        !groupIds.has(msg.receiverId)
+      ) {
+        ids.add(msg.receiverId);
+      }
+      if (
+        msg.receiverId === currentUser.$id &&
+        msg.senderId &&
+        msg.senderId !== currentUser.$id &&
+        !groupIds.has(msg.senderId)
+      ) {
+        ids.add(msg.senderId);
+      }
+    });
+    return ids;
+  }, [allMessages, currentUser?.$id, groups]);
+
+  // Load profile data for chat partners not in the cached users list
+  useEffect(() => {
+    if (!currentUser?.$id || chatPartnerIds.size === 0) return;
+    let cancelled = false;
+
+    const toFetch = [...chatPartnerIds].filter(
+      id => !users.some(u => u.$id === id) && !partnerProfiles[id]
+    );
+    if (toFetch.length === 0) return;
+
+    (async () => {
+      const results = await Promise.all(
+        toFetch.map(id =>
+          databases.getDocument(
+            appwriteConfig.databaseId,
+            appwriteConfig.userCollectionId,
+            id
+          ).catch(() => null)
+        )
+      );
+      if (cancelled) return;
+      const fetched = results.filter(Boolean);
+      if (fetched.length === 0) return;
+      setPartnerProfiles(prev => {
+        const next = { ...prev };
+        fetched.forEach(u => { next[u.$id] = u; });
+        return next;
+      });
+    })();
+
+    return () => { cancelled = true; };
+  }, [chatPartnerIds, users, currentUser?.$id, partnerProfiles]);
+
+  const resolvePartnerUser = useCallback((partnerId) => {
+    return users.find(u => u.$id === partnerId) || partnerProfiles[partnerId] || null;
+  }, [users, partnerProfiles]);
+
+  const filteredUsers = [...chatPartnerIds]
+    .map(partnerId =>
+      resolvePartnerUser(partnerId) || {
+        $id: partnerId,
+        username: 'User',
+        avatar: null,
+        type: 'private',
+      }
+    )
+    .filter(u =>
+      u.$id !== currentUser?.$id &&
+      (u.username?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()))
+    );
 
   // 2. Always include the messaged user in the chat list and sort to top
-  let displayedUsers = [...filteredUsers];
+  let displayedUsers = dedupeById([...filteredUsers]);
   if (
     selectedUser &&
+    selectedUser.type !== 'group' &&
     selectedUser.$id !== currentUser?.$id &&
     !displayedUsers.some(u => u.$id === selectedUser.$id)
   ) {
@@ -767,8 +906,8 @@ const Chat = () => {
   // Always include all groups the user is a member of
   const displayedGroups = [...filteredGroups];
 
-  // Combine users and groups for the chat list
-  let displayedChats = [...displayedGroups, ...displayedUsers];
+  // Combine users and groups for the chat list (dedupe in case of id overlap)
+  let displayedChats = dedupeById([...displayedGroups, ...displayedUsers]);
 
   // Place these helper functions before chat list logic
   const getLastMessage = (item) => {
@@ -870,8 +1009,9 @@ const Chat = () => {
 
   const handleOpenChat = async (item) => {
     setMessages([]);
-    setSelectedUser(item);
-    fetchMessagesForChat(item);
+    const chatTarget = item.type === 'group' ? item : { ...item, type: 'private' };
+    setSelectedUser(chatTarget);
+    fetchMessagesForChat(chatTarget);
     // Update lastReadAt in chatReads
     let chatRead = chatReads.find(r => r.chatId === item.$id);
     const nowIso = new Date().toISOString();
@@ -1514,11 +1654,7 @@ const Chat = () => {
                 );
               } else {
                 // Individual chat
-                const userMessages = allMessages.filter(m =>
-                  (m.senderId === currentUser?.$id && m.receiverId === item.$id) ||
-                  (m.senderId === item.$id && m.receiverId === currentUser?.$id)
-                );
-                const lastMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+                const lastMsg = getLastMessage(item);
                 const chatDoc = getPrivateChatDocForUser(item.$id);
                 const isFavourite = chatDoc ? chatDoc.isFavourite : false;
                 
@@ -1640,7 +1776,15 @@ const Chat = () => {
         <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
           {/* Header */}
           <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: theme.divider, backgroundColor: theme.surface }}>
-            <TouchableOpacity onPress={() => setSelectedUser(null)} style={{ marginRight: 12 }}>
+            <TouchableOpacity
+              onPress={() => {
+                setSelectedUser(null);
+                if (targetUserId) {
+                  router.setParams({ userId: undefined });
+                }
+              }}
+              style={{ marginRight: 12 }}
+            >
             <MaterialCommunityIcons name="arrow-left" size={28} color={theme.textPrimary} />
             </TouchableOpacity>
             {selectedUser?.type === 'group' ? (
@@ -1763,7 +1907,7 @@ const Chat = () => {
             {/* Messages */}
             <FlatList
               style={{ flex: 1, backgroundColor: 'transparent' }}
-              data={messages?.filter(m => m?.content || m?.fileUrl || m?.type === 'location') || []}
+              data={dedupeById(messages?.filter(m => m?.content || m?.fileUrl || m?.type === 'location') || [])}
               keyExtractor={item => item.$id}
               renderItem={({ item, index }) => {
                 if (!item || !item.senderId || !currentUser) return null;
