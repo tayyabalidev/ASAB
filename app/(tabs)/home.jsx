@@ -20,6 +20,7 @@ import { appwriteConfig } from "../../lib/appwrite";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
 import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 import { getFilterCSS, getVideoFilterCSS } from "../../lib/filterCss";
+import FeedVideoPlayer from "../../components/FeedVideoPlayer";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -281,27 +282,6 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       setShowPlayPauseOverlay(false);
     }
   }, [isVisible, isHomeFocused]);
-
-  useEffect(() => {
-    if (!isVideoMedia(item?.video, item?.postType) || isMuxEncoding) return undefined;
-    let cancelled = false;
-    const syncPlayback = async () => {
-      if (!videoRef.current) return;
-      try {
-        if (isVisible && isHomeFocused && play) {
-          await videoRef.current.playAsync();
-        } else {
-          await videoRef.current.pauseAsync();
-        }
-      } catch (_) {
-        /* player may not be mounted yet */
-      }
-    };
-    if (!cancelled) syncPlayback();
-    return () => {
-      cancelled = true;
-    };
-  }, [isVisible, isHomeFocused, play, item?.$id, item?.video, item?.postType, isMuxEncoding]);
 
   // Cleanup progress bar timeout on unmount
   useEffect(() => {
@@ -1082,52 +1062,34 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
               );
             }
             
-            // No filters/adjustments, use regular Video component
+            // Native player with Picture-in-Picture when the app is backgrounded
             return (
-              <Video
+              <FeedVideoPlayer
                 ref={videoRef}
-                source={{ 
-                  uri: videoUrl
-                }}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode={ResizeMode.contain}
-                shouldPlay={play}
-                isLooping={true}
+                videoUrl={videoUrl}
+                posterUri={posterUri}
+                shouldPlay={play && isVisible && isHomeFocused}
+                isLooping
                 isMuted={false}
-                useNativeControls={false}
-                progressUpdateIntervalMillis={500}
-                posterSource={posterUri ? { uri: posterUri } : undefined}
-                usePoster={Boolean(posterUri) && !isVideoReady}
-                onError={(error) => {
+                enablePiP
+                onError={() => {
                   if (videoSourceIndex < videoPlaybackCandidates.length - 1) {
                     setVideoSourceIndex((prev) => prev + 1);
                     setIsVideoReady(false);
                   }
                 }}
-                onLoad={(status) => {
-                  if (status.isLoaded) {
-                    setPlaybackDuration(status.durationMillis || 0);
-                    setIsVideoReady(true);
-                    if (play && isVisible && isHomeFocused) {
-                      videoRef.current?.playAsync?.().catch(() => {});
+                onReady={({ durationMillis }) => {
+                  setPlaybackDuration(durationMillis || 0);
+                  setIsVideoReady(true);
+                }}
+                onPlaybackUpdate={({ positionMillis, durationMillis }) => {
+                  if (!isSeeking) {
+                    setPlaybackPosition(positionMillis || 0);
+                    if (durationMillis) {
+                      setPlaybackDuration(durationMillis);
                     }
                   }
                 }}
-                onPlaybackStatusUpdate={(status) => {
-                  if (status.isLoaded && !isSeeking) {
-                    setPlaybackPosition(status.positionMillis || 0);
-                    if (status.durationMillis) {
-                      setPlaybackDuration(status.durationMillis);
-                    }
-                  }
-                }}
-                {...(Platform.OS === 'ios' && {
-                  allowsExternalPlayback: false,
-                  playInSilentModeIOS: true,
-                  ignoreSilentSwitch: 'ignore',
-                  automaticallyWaitsToMinimizeStalling: false,
-                  preferredForwardBufferDuration: 2,
-                })}
               />
             );
           })()
