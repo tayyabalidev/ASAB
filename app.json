@@ -95,6 +95,7 @@
           "supportsPictureInPicture": true
         }
       ],
+      "./plugins/withIosVideoPip",
       "expo-web-browser",
       "expo-camera",
       "@videosdk.live/expo-config-plugin",
