@@ -85,6 +85,8 @@ module.exports = () => {
       ? String(debugLogsRaw).trim() !== '0'
       : false;
 
+  const passwordRecoveryRedirectUrl = trimEnv("EXPO_PUBLIC_PASSWORD_RECOVERY_REDIRECT_URL");
+
   const appleTeamId =
     trimEnv("EXPO_APPLE_TEAM_ID") || trimEnv("APPLE_TEAM_ID") || "";
   const iosBundleId = appJson.expo?.ios?.bundleIdentifier || "com.bilal.asab";
@@ -138,6 +140,9 @@ module.exports = () => {
           ? { videosdkRoomPathExplicit }
           : {}),
         videosdkDebugLogs,
+        ...(passwordRecoveryRedirectUrl
+          ? { passwordRecoveryRedirectUrl }
+          : {}),
         ...(appleTeamId ? { appleTeamId } : {}),
         eas: {
           projectId:

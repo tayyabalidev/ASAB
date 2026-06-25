@@ -8,6 +8,7 @@ import * as Linking from 'expo-linking'; // ✅ fix: use from expo-linking
 import { StripeProvider } from '@stripe/stripe-react-native';
 import Constants from 'expo-constants';
 import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser, getOrCreateGoogleUser, appwriteConfig } from '../lib/appwrite';
+import { isPasswordRecoveryDeepLink, parseRecoveryDeepLink } from '../lib/passwordRecovery';
 import { useBadgeNotifications } from '../hooks/useBadgeNotifications';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import IncomingCallHandler from '../components/IncomingCallHandler';
@@ -52,6 +53,24 @@ function OAuthHandler() {
       
       // Check if this is our app's deep link
       if (!normalizedUrl.includes('com.bilal.asab://') && !normalizedUrl.includes('asab://')) {
+        return;
+      }
+
+      // Password recovery — Appwrite redirects here with userId & secret query params
+      if (isPasswordRecoveryDeepLink(url)) {
+        const { userId, secret } = parseRecoveryDeepLink(url);
+        if (userId && secret) {
+          router.push({
+            pathname: '/(auth)/reset-password',
+            params: { userId, secret },
+          });
+        } else {
+          Alert.alert(
+            'Invalid Link',
+            'This password reset link is invalid or has expired. Please request a new one.',
+            [{ text: 'OK', onPress: () => router.replace('/(auth)/forgot-password') }]
+          );
+        }
         return;
       }
 
@@ -184,8 +203,13 @@ function OAuthHandler() {
         return;
       }
       
-      // Handle other OAuth redirects (fallback)
-      if (normalizedUrl.includes('com.bilal.asab://') && !oauthProcessingRef.current) {
+      // Handle other OAuth redirects (fallback) — skip password recovery paths
+      if (
+        normalizedUrl.includes('com.bilal.asab://') &&
+        !oauthProcessingRef.current &&
+        !normalizedUrl.includes('reset-password') &&
+        !normalizedUrl.includes('recovery')
+      ) {
         oauthProcessingRef.current = true;
         
         try {

@@ -1,5 +1,6 @@
 package com.bilal.asab
 
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 
@@ -9,6 +10,8 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnable
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 import expo.modules.ReactActivityDelegateWrapper
+
+import com.bilal.asab.screenpip.ScreenSharePipHelper
 
 class MainActivity : ReactActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,6 +41,20 @@ class MainActivity : ReactActivity() {
               mainComponentName,
               fabricEnabled
           ){})
+  }
+
+  // @generated screen-share-pip
+  override fun onUserLeaveHint() {
+    ScreenSharePipHelper.onUserLeaveHint(this)
+    super.onUserLeaveHint()
+  }
+
+  override fun onPictureInPictureModeChanged(
+    isInPictureInPictureMode: Boolean,
+    newConfig: Configuration
+  ) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    ScreenSharePipHelper.onPictureInPictureModeChanged(this, isInPictureInPictureMode)
   }
 
   /**

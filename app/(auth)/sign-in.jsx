@@ -358,6 +358,16 @@ const SignIn = () => {
               placeholder={t('auth.passwordPlaceholder')}
               isPassword
             />
+
+            <TouchableOpacity
+              onPress={() => router.push("/(auth)/forgot-password")}
+              className="mt-3"
+              style={{ alignSelf: isRTL ? "flex-start" : "flex-end" }}
+            >
+              <Text className="text-secondary font-psemibold text-sm">
+                {t("auth.forgotPasswordLink")}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           <CustomButton

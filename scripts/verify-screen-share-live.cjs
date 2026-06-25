@@ -107,19 +107,49 @@ const checks = [
     },
   },
   {
-    name: 'Host screen mode hides local camera preview (avoids double PiP in HLS)',
+    name: 'Host screen share PiP bridge wired',
     pass: () => {
       const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
-      const previewBlock = src.slice(
-        src.indexOf('function LocalPreviewInner'),
-        src.indexOf('function LocalPreview(')
-      );
       return (
-        previewBlock.includes('screenShareHostBackdrop') &&
-        !previewBlock.includes('hostCameraPip') &&
-        !previewBlock.includes('localScreenShareStream')
+        src.includes('HostScreenSharePipManager') &&
+        src.includes('enterScreenSharePip') &&
+        src.includes('ScreenSharePipLayout') &&
+        src.includes('isInPipMode')
       );
     },
+  },
+  {
+    name: 'Android screen share PiP native module + plugin',
+    pass: () => {
+      const hasPlugin = read('app.json').includes('withAndroidScreenSharePip');
+      const hasModule = fs.existsSync(
+        path.join(root, 'android/app/src/main/java/com/bilal/asab/screenpip/ScreenSharePipModule.kt')
+      );
+      const manifest = read('android/app/src/main/AndroidManifest.xml');
+      return (
+        hasPlugin &&
+        hasModule &&
+        manifest.includes('supportsPictureInPicture="true"')
+      );
+    },
+  },
+  {
+    name: 'iOS host camera PiP native bridge + plugin',
+    pass: () => {
+      const app = read('app.json');
+      const objc = read('plugins/static/HostCameraPip.m');
+      return (
+        app.includes('withIosHostCameraPip') &&
+        objc.includes('AVPictureInPictureVideoCallViewController') &&
+        objc.includes('startHostCameraPip')
+      );
+    },
+  },
+  {
+    name: 'Screen share PiP QA + entitlement docs',
+    pass: () =>
+      fs.existsSync(path.join(root, 'docs/screen-share-pip-qa.md')) &&
+      fs.existsSync(path.join(root, 'docs/ios-multitasking-camera-entitlement.md')),
   },
   {
     name: 'Broadcaster: HLS landscape for screen mode',

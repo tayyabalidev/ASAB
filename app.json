@@ -67,7 +67,30 @@
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.POST_NOTIFICATIONS"
       ],
-      "package": "com.bilal.asab"
+      "package": "com.bilal.asab",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "com.bilal.asab",
+              "host": "reset-password"
+            },
+            {
+              "scheme": "com.bilal.asab",
+              "host": "auth",
+              "pathPrefix": "/reset-password"
+            },
+            {
+              "scheme": "com.bilal.asab",
+              "host": "auth",
+              "pathPrefix": "/forgot-password"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/images/asabicon.png"
@@ -96,6 +119,8 @@
         }
       ],
       "./plugins/withIosVideoPip",
+      "./plugins/withAndroidScreenSharePip",
+      "./plugins/withIosHostCameraPip",
       "expo-web-browser",
       "expo-camera",
       "@videosdk.live/expo-config-plugin",

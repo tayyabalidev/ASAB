@@ -1,12 +1,8 @@
-<resources>
-  <item name="orange" type="color">#FF4500
+
+  <resources>
+    <item  name="orange"  type="color">#FF4500
     </item>
-  <integer-array name="androidcolors">
+    <integer-array  name="androidcolors">
     <item>@color/orange</item>
-  </integer-array>
-  <color name="iconBackground">#000000</color>
-  <color name="colorPrimary">#023c69</color>
-  <color name="colorPrimaryDark">#000000</color>
-  <color name="splashscreen_background">#000000</color>
-  <color name="notification_icon_color">#ffffff</color>
-</resources>
+    </integer-array>
+  </resources>
