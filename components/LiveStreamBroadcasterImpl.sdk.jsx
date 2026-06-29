@@ -22,7 +22,6 @@ import {
   useParticipant,
   RTCView,
   MediaStream,
-  mediaDevices,
   ReactNativeForegroundService,
   createCameraVideoTrack,
   Constants,
@@ -41,16 +40,9 @@ import {
   invokeScreenShareToggle,
 } from '../lib/videosdkScreenShare';
 import { waitForMeetingJoinFn } from '../lib/videosdkHelper';
+import { prepareIosLiveMediaSession } from '../lib/iosLiveMediaSession';
+import { getScreenSharePipModule } from '../lib/screenSharePipLoader';
 import VideosdkIosScreenShare from '../lib/videosdkIosScreenShare';
-import {
-  addScreenSharePipModeListener,
-  enterScreenSharePip,
-  prepareHostCameraPip,
-  refreshHostCameraPip,
-  setMediaProjectionConsentInProgress,
-  setScreenSharePipEnabled,
-  stopHostCameraPip,
-} from '../lib/screenSharePip';
 import ScreenSharePipLayout from './ScreenSharePipLayout';
 import LiveStreamChatOverlay from './LiveStreamChatOverlay';
 import LiveStreamHeartReactions from './LiveStreamHeartReactions';
@@ -59,25 +51,27 @@ import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
 
 /** Minimal settle delays ΓÇö long waits add perceived lag before HLS is available to viewers. */
 const IOS_PRE_JOIN_DELAY_MS = 80;
+const IOS_MEETING_MOUNT_DELAY_CAMERA_MS = 1000;
+const IOS_MEETING_MOUNT_DELAY_SCREEN_MS = 500;
 const ANDROID_PRE_JOIN_DELAY_MS = 200;
 const ANDROID_POST_PREWARM_MS = 150;
 const HLS_START_DELAY_MS = 80;
 const MEDIA_PUBLISH_MIC_MS = Platform.OS === 'ios' ? 100 : 150;
 const MEDIA_PUBLISH_MIC_TOGGLE_MS = Platform.OS === 'ios' ? 100 : 150;
 const MEDIA_PUBLISH_WEBCAM_MS = Platform.OS === 'ios' ? 120 : 200;
-const SCREEN_SHARE_AFTER_MIC_MS = Platform.OS === 'ios' ? 250 : 900;
+const SCREEN_SHARE_AFTER_MIC_MS = Platform.OS === 'ios' ? 700 : 900;
 const SCREEN_HLS_EXTRA_DELAY_MS = Platform.OS === 'ios' ? 200 : 300;
 const SCREEN_SHARE_READY_TIMEOUT_MS = 60000;
+const SCREEN_SHARE_SDK_ERROR_GRACE_MS = 30000;
+const SCREEN_SHARE_STARTUP_GRACE_MS = 10000;
+const MEETING_READY_FOR_SCREEN_SHARE_MS = 15000;
 const ANDROID_MEDIA_PROJECTION_CONSENT_ARM_MS = 250;
 const ANDROID_FOREGROUND_SERVICE_WARMUP_MS = 600;
 const ANDROID_SCREEN_SHARE_USER_WAIT_MS = 60000;
-const ANDROID_SCREEN_SHARE_SDK_ERROR_GRACE_MS = 30000;
-const MEETING_READY_FOR_SCREEN_SHARE_MS = 15000;
 const ANDROID_PRE_SCREEN_SHARE_SETTLE_MS = 800;
 const SCREEN_WEBCAM_RECOVERY_COOLDOWN_MS = Platform.OS === 'ios' ? 4000 : 2500;
 const SCREEN_WEBCAM_BACKGROUND_KEEPALIVE_MS = Platform.OS === 'ios' ? 10000 : 6000;
-const IOS_HOST_CAMERA_PIP_PREPARE_MS = 2000;
-const PIP_BACKGROUND_KEEPALIVE_MS = Platform.OS === 'ios' ? 2500 : 3500;
+const PIP_BACKGROUND_KEEPALIVE_MS = Platform.OS === 'ios' ? 1000 : 3500;
 
 let InCallManager = null;
 try {
@@ -92,6 +86,33 @@ const HOST_PIP_HEIGHT = 148;
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
+
+function stopScreenSharePipNative() {
+  try {
+    const pip = getScreenSharePipModule();
+    pip.setScreenSharePipEnabled(false);
+    pip.stopHostCameraPip();
+    setAndroidMediaProjectionCaptureActive(false);
+  } catch (_) {}
+}
+
+function setAndroidMediaProjectionConsent(inProgress) {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  try {
+    getScreenSharePipModule().setMediaProjectionConsentInProgress(Boolean(inProgress));
+  } catch (_) {}
+}
+
+function setAndroidMediaProjectionCaptureActive(active) {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  try {
+    getScreenSharePipModule().setMediaProjectionCaptureActive(Boolean(active));
+  } catch (_) {}
+}
 
 async function createHostCameraTrack(quality, facingMode = 'user') {
   const encoderConfig = mapLiveQualityToEncoderConfig(quality);
@@ -114,25 +135,26 @@ async function createHostCameraTrack(quality, facingMode = 'user') {
   });
 }
 
-/**
- * Warm permissions on iOS. On Android, getUserMedia before join often leaves the camera
- * locked and VideoSDK reports meeting state FAILED ΓÇö use permission APIs only there.
- */
-async function prewarmMedia(liveMode) {
-  if (Platform.OS === 'android') {
-    return;
-  }
+async function publishHostWebcam(enableWebcamFn, quality, facingMode) {
   try {
-    const stream = await mediaDevices.getUserMedia({
-      audio: true,
-      video: true,
-    });
-    stream?.getTracks()?.forEach((track) => {
-      try {
-        track.stop();
-      } catch (_) {}
-    });
-  } catch (_) {}
+    const customTrack = await createHostCameraTrack(quality, facingMode);
+    await Promise.resolve(enableWebcamFn?.(customTrack));
+  } catch (_) {
+    await Promise.resolve(enableWebcamFn?.());
+  }
+}
+
+function hostCameraFacingMode(useFrontCamera) {
+  return useFrontCamera ? 'user' : 'environment';
+}
+
+/**
+ * Android: permission APIs only before join.
+ * iOS: never open getUserMedia here — races with expo-camera preview handoff and
+ * VideoSDK publish, which hard-crashes AVFoundation on many devices.
+ */
+async function prewarmMedia() {
+  return;
 }
 
 function normalizeMeetingState(state) {
@@ -170,6 +192,36 @@ function isScreenShareSdkErrorMessage(message) {
   );
 }
 
+function isWithinScreenShareStartupGrace(stableAtRef) {
+  return (
+    stableAtRef.current > 0 &&
+    Date.now() - stableAtRef.current < SCREEN_SHARE_STARTUP_GRACE_MS
+  );
+}
+
+/** Block WebRTC/camera recovery while ReplayKit / MediaProjection is starting. */
+function isScreenShareSessionLocked(refs) {
+  if (refs.liveModeRef.current !== 'screen') {
+    return false;
+  }
+  if (refs.screenSharePendingRef.current) {
+    return true;
+  }
+  if (refs.screenShareStartInFlightRef.current) {
+    return true;
+  }
+  if (Platform.OS === 'ios' && refs.iosReplayKitActiveRef.current) {
+    return true;
+  }
+  if (
+    refs.localScreenShareOnRef.current &&
+    isWithinScreenShareStartupGrace(refs.screenShareStableAtRef)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Tracks local webcam track without calling useParticipant with a fake id (crashes on Android). */
 function HostLocalWebcamProbe({
   participantId,
@@ -180,7 +232,7 @@ function HostLocalWebcamProbe({
   const handleStreamDisabled = useCallback(
     (stream) => {
       if (stream?.kind === 'video') {
-        onWebcamStreamDisabled?.({ forceRefresh: true });
+        onWebcamStreamDisabled?.({ forceRefresh: false });
       }
     },
     [onWebcamStreamDisabled]
@@ -190,7 +242,7 @@ function HostLocalWebcamProbe({
       const kind = String(data?.kind || '').toLowerCase();
       const status = String(data?.newStatus || '').toLowerCase();
       if (kind === 'video' && (status === 'disabled' || status === 'off')) {
-        onWebcamMediaDisabled?.({ forceRefresh: true });
+        onWebcamMediaDisabled?.({ forceRefresh: false });
       }
     },
     [onWebcamMediaDisabled]
@@ -207,25 +259,22 @@ function HostLocalWebcamProbe({
 
 function HostScreenSharePipManager({
   liveMode,
-  localParticipantId,
   localScreenShareOn,
   screenShareTrackReady,
   meetingJoined,
   useFrontCamera,
   onPipModeChanged,
 }) {
-  const { localWebcamOn, localWebcamStream, resumeAllStreams } = useMeeting();
-  const { webcamOn, webcamStream } = useParticipant(localParticipantId || '');
+  const pip = getScreenSharePipModule();
+  const { localWebcamOn, localWebcamStream } = useMeeting();
   const streamUrlRef = useRef(null);
   const appStateRef = useRef(AppState.currentState);
   const pipEnterTimersRef = useRef([]);
-  const pipPreparedRef = useRef(false);
-  const pipPrepareTimerRef = useRef(null);
   const pipKeepaliveTimerRef = useRef(null);
-  const lastPipStreamRef = useRef(null);
   const nativePipActiveRef = useRef(false);
+  const iosPipPreparedRef = useRef(false);
 
-  const streamURL = resolveWebcamStreamUrl(webcamStream, localWebcamStream);
+  const streamURL = resolveWebcamStreamUrl(null, localWebcamStream);
   streamUrlRef.current = streamURL;
 
   const clearPipEnterTimers = useCallback(() => {
@@ -249,26 +298,26 @@ function HostScreenSharePipManager({
     ) {
       return;
     }
-    Promise.resolve(resumeAllStreams?.()).catch(() => {});
+    if (appStateRef.current === 'active' && !nativePipActiveRef.current) {
+      return;
+    }
     if (Platform.OS === 'ios') {
-      refreshHostCameraPip({
+      pip.refreshHostCameraPip({
         streamURL: streamUrlRef.current,
         mirror: Boolean(useFrontCamera),
       }).catch(() => {});
       return;
     }
-    if (appStateRef.current !== 'active' || nativePipActiveRef.current) {
-      enterScreenSharePip({
-        streamURL: streamUrlRef.current,
-        mirror: Boolean(useFrontCamera),
-      }).catch(() => {});
-    }
+    pip.enterScreenSharePip({
+      streamURL: streamUrlRef.current,
+      mirror: Boolean(useFrontCamera),
+    }).catch(() => {});
   }, [
     liveMode,
     localScreenShareOn,
-    resumeAllStreams,
     screenShareTrackReady,
     useFrontCamera,
+    pip,
   ]);
 
   const startPipKeepalive = useCallback(() => {
@@ -291,21 +340,38 @@ function HostScreenSharePipManager({
       return;
     }
     onPipModeChanged?.(true);
+    pip.setScreenSharePipEnabled(true);
+    if (Platform.OS === 'ios') {
+      if (!iosPipPreparedRef.current) {
+        pip.prepareHostCameraPip({
+          streamURL: streamUrlRef.current,
+          mirror: Boolean(useFrontCamera),
+        })
+          .then((ok) => {
+            if (ok) {
+              iosPipPreparedRef.current = true;
+            }
+          })
+          .catch(() => {});
+      }
+    }
     startPipKeepalive();
     refreshPipMedia();
     clearPipEnterTimers();
-    const delays = Platform.OS === 'ios' ? [0, 100, 300, 700] : [0, 50, 200, 500];
-    pipEnterTimersRef.current = delays.map((delay) =>
-      setTimeout(() => {
-        if (Platform.OS === 'android' && appStateRef.current === 'active') {
-          return;
-        }
-        enterScreenSharePip({
-          streamURL: streamUrlRef.current,
-          mirror: Boolean(useFrontCamera),
-        }).catch(() => {});
-      }, delay)
-    );
+    if (Platform.OS !== 'ios') {
+      const delays = [0, 50, 200, 500];
+      pipEnterTimersRef.current = delays.map((delay) =>
+        setTimeout(() => {
+          if (appStateRef.current === 'active') {
+            return;
+          }
+          pip.enterScreenSharePip({
+            streamURL: streamUrlRef.current,
+            mirror: Boolean(useFrontCamera),
+          }).catch(() => {});
+        }, delay)
+      );
+    }
   }, [
     clearPipEnterTimers,
     liveMode,
@@ -320,59 +386,30 @@ function HostScreenSharePipManager({
   const pipReady =
     localScreenShareOn &&
     screenShareTrackReady &&
-    Boolean(localWebcamOn || webcamOn) &&
+    Boolean(localWebcamOn) &&
     Boolean(streamURL);
+
+  // Arm system PiP only once when the manager mounts (host already left the app).
+  useEffect(() => {
+    if (!pipReady) {
+      return undefined;
+    }
+    requestSystemPip();
+    return undefined;
+  }, [pipReady, requestSystemPip]);
 
   useEffect(() => {
     if (liveMode !== 'screen' || !meetingJoined) {
-      pipPreparedRef.current = false;
-      lastPipStreamRef.current = null;
-      if (pipPrepareTimerRef.current) {
-        clearTimeout(pipPrepareTimerRef.current);
-        pipPrepareTimerRef.current = null;
-      }
-      setScreenSharePipEnabled(false);
-      stopHostCameraPip();
+      iosPipPreparedRef.current = false;
+      pip.setScreenSharePipEnabled(false);
+      pip.stopHostCameraPip();
       clearPipKeepalive();
       return undefined;
     }
-    if (pipReady) {
-      setScreenSharePipEnabled(true);
-      startPipKeepalive();
-      if (Platform.OS === 'ios' && streamURL && lastPipStreamRef.current !== streamURL) {
-        if (pipPrepareTimerRef.current) {
-          clearTimeout(pipPrepareTimerRef.current);
-        }
-        const prepareDelay = pipPreparedRef.current
-          ? 600
-          : IOS_HOST_CAMERA_PIP_PREPARE_MS;
-        pipPrepareTimerRef.current = setTimeout(() => {
-          pipPrepareTimerRef.current = null;
-          prepareHostCameraPip({
-            streamURL,
-            mirror: Boolean(useFrontCamera),
-          })
-            .then((ok) => {
-              if (ok) {
-                pipPreparedRef.current = true;
-                lastPipStreamRef.current = streamURL;
-              }
-            })
-            .catch(() => {});
-        }, prepareDelay);
-      }
-      return () => {
-        if (pipPrepareTimerRef.current) {
-          clearTimeout(pipPrepareTimerRef.current);
-          pipPrepareTimerRef.current = null;
-        }
-      };
-    }
     if (!localScreenShareOn) {
-      pipPreparedRef.current = false;
-      lastPipStreamRef.current = null;
-      setScreenSharePipEnabled(false);
-      stopHostCameraPip();
+      iosPipPreparedRef.current = false;
+      pip.setScreenSharePipEnabled(false);
+      pip.stopHostCameraPip();
       clearPipKeepalive();
     }
     return undefined;
@@ -380,11 +417,8 @@ function HostScreenSharePipManager({
     clearPipKeepalive,
     liveMode,
     meetingJoined,
-    pipReady,
     localScreenShareOn,
-    startPipKeepalive,
-    streamURL,
-    useFrontCamera,
+    pip,
   ]);
 
   useEffect(() => {
@@ -395,7 +429,7 @@ function HostScreenSharePipManager({
       const previousState = appStateRef.current;
       appStateRef.current = nextState;
       if (
-        (nextState === 'inactive' || nextState === 'background') &&
+        nextState === 'background' &&
         (previousState === 'active' || previousState === 'inactive')
       ) {
         requestSystemPip();
@@ -420,7 +454,7 @@ function HostScreenSharePipManager({
   ]);
 
   useEffect(() => {
-    return addScreenSharePipModeListener(({ isInPipMode }) => {
+    return pip.addScreenSharePipModeListener(({ isInPipMode }) => {
       nativePipActiveRef.current = isInPipMode;
       if (isInPipMode) {
         onPipModeChanged?.(true);
@@ -437,15 +471,10 @@ function HostScreenSharePipManager({
     () => () => {
       clearPipEnterTimers();
       clearPipKeepalive();
-      pipPreparedRef.current = false;
-      lastPipStreamRef.current = null;
+      iosPipPreparedRef.current = false;
       nativePipActiveRef.current = false;
-      if (pipPrepareTimerRef.current) {
-        clearTimeout(pipPrepareTimerRef.current);
-        pipPrepareTimerRef.current = null;
-      }
-      setScreenSharePipEnabled(false);
-      stopHostCameraPip();
+      pip.setScreenSharePipEnabled(false);
+      pip.stopHostCameraPip();
     },
     [clearPipEnterTimers, clearPipKeepalive]
   );
@@ -491,20 +520,21 @@ function isPublisherParticipantMode(mode) {
 
 function resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream) {
   try {
-    if (participantWebcamStream?.track) {
-      return new MediaStream([participantWebcamStream.track]).toURL();
+    const primary =
+      participantWebcamStream?.track != null
+        ? participantWebcamStream
+        : localWebcamStream?.track != null
+          ? localWebcamStream
+          : participantWebcamStream || localWebcamStream;
+    if (primary && typeof primary.toURL === 'function') {
+      return primary.toURL();
     }
-    if (localWebcamStream?.track) {
-      return new MediaStream([localWebcamStream.track]).toURL();
-    }
-    if (participantWebcamStream && typeof participantWebcamStream.toURL === 'function') {
-      return participantWebcamStream.toURL();
-    }
-    if (localWebcamStream && typeof localWebcamStream.toURL === 'function') {
-      return localWebcamStream.toURL();
+    const track = participantWebcamStream?.track || localWebcamStream?.track;
+    if (track) {
+      return new MediaStream([track]).toURL();
     }
   } catch (_) {
-    return null;
+    /* stream may be torn down during mode switch */
   }
   return null;
 }
@@ -652,19 +682,39 @@ function LocalPreviewInner({
     webcamStream: participantWebcamStream,
   } = useParticipant(participantId);
   const webcamOn = participantWebcamOn ?? localWebcamOn;
+  const [appIsActive, setAppIsActive] = useState(AppState.currentState === 'active');
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      setAppIsActive(nextState === 'active');
+    });
+    return () => subscription.remove();
+  }, []);
 
   if (liveMode === 'screen') {
     const sharing = Boolean(localScreenShareOn || screenShareOn);
     const streamURL = resolveWebcamStreamUrl(participantWebcamStream, localWebcamStream);
-    const showWebcamPip = sharing && Boolean(webcamOn && streamURL);
+    const showWebcamPip = sharing && Boolean(webcamOn && streamURL) && appIsActive;
 
-    if (isInPipMode && showWebcamPip) {
+    if (isInPipMode && showWebcamPip && Platform.OS === 'android') {
       return (
         <ScreenSharePipLayout
           streamURL={streamURL}
           useFrontCamera={useFrontCamera}
           isBlurEnabled={isBlurEnabled}
         />
+      );
+    }
+
+    if (isInPipMode && sharing && Platform.OS === 'ios') {
+      return (
+        <View style={styles.screenShareHostRoot}>
+          <View style={styles.screenShareHostBackdrop}>
+            <Feather name="monitor" size={48} color="#a77df8" />
+            <Text style={styles.screenShareActiveTitle}>{t('liveBroadcast.screenShareActive')}</Text>
+            <Text style={styles.placeholderText}>{t('liveBroadcast.screenShareActiveHint')}</Text>
+          </View>
+        </View>
       );
     }
 
@@ -714,6 +764,7 @@ function LocalPreviewInner({
 
   return (
     <RTCView
+      key={useFrontCamera ? 'host-camera-front' : 'host-camera-back'}
       streamURL={streamURL}
       style={styles.video}
       objectFit="cover"
@@ -808,6 +859,8 @@ function BroadcasterMeetingInner({
   const screenSharePendingRef = useRef(false);
   const screenShareStartInFlightRef = useRef(false);
   const screenShareAttemptStartedAtRef = useRef(0);
+  const screenShareStableAtRef = useRef(0);
+  const iosReplayKitActiveRef = useRef(false);
   const localScreenShareOnRef = useRef(false);
   const localWebcamOnRef = useRef(false);
   const localMicOnRef = useRef(false);
@@ -824,7 +877,19 @@ function BroadcasterMeetingInner({
   const [joinPending, setJoinPending] = useState(false);
   const [screenShareError, setScreenShareError] = useState(null);
   const [screenShareTrackReady, setScreenShareTrackReady] = useState(false);
+  const [hostAppState, setHostAppState] = useState(AppState.currentState);
   const [isInPipMode, setIsInPipMode] = useState(false);
+  const [iosPipMountAllowed, setIosPipMountAllowed] = useState(false);
+
+  const screenShareSessionRefs = useRef(null);
+  screenShareSessionRefs.current = {
+    liveModeRef,
+    screenSharePendingRef,
+    screenShareStartInFlightRef,
+    iosReplayKitActiveRef,
+    localScreenShareOnRef,
+    screenShareStableAtRef,
+  };
 
   useEffect(() => {
     liveModeRef.current = liveMode;
@@ -839,9 +904,11 @@ function BroadcasterMeetingInner({
   }, [useFrontCamera]);
 
   const stopMeeting = useCallback(async () => {
-    setScreenSharePipEnabled(false);
-    stopHostCameraPip();
-    setMediaProjectionConsentInProgress(false);
+    iosReplayKitActiveRef.current = false;
+    if (liveModeRef.current === 'screen') {
+      stopScreenSharePipNative();
+      setAndroidMediaProjectionConsent(false);
+    }
     const act = actionsRef.current;
     if (
       liveModeRef.current === 'screen' &&
@@ -923,9 +990,9 @@ function BroadcasterMeetingInner({
     if (screenShareStartInFlightRef.current) return;
     screenShareStartInFlightRef.current = true;
     setScreenShareError(null);
+    setScreenShareTrackReady(false);
     screenSharePendingRef.current = true;
     screenShareAttemptStartedAtRef.current = Date.now();
-    setScreenShareTrackReady(false);
 
     try {
       startScreenLivePlatformServices();
@@ -934,7 +1001,25 @@ function BroadcasterMeetingInner({
         if (!VideosdkIosScreenShare.isAvailable) {
           throw new Error(t('liveBroadcast.screenShareUnavailable'));
         }
+        const mediaReady = await waitForMeetingReady(
+          () => localWebcamOnRef.current && localMicOnRef.current && !endedRef.current,
+          MEETING_READY_FOR_SCREEN_SHARE_MS
+        );
+        if (!mediaReady) {
+          throw new Error(t('liveBroadcast.screenShareStartFailed'));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        iosReplayKitActiveRef.current = true;
         await VideosdkIosScreenShare.startBroadcast();
+        const shareActive = await waitForMeetingReady(
+          () => localScreenShareOnRef.current,
+          ANDROID_SCREEN_SHARE_USER_WAIT_MS
+        );
+        if (!shareActive && !endedRef.current) {
+          throw new Error(t('liveBroadcast.screenShareDenied'));
+        }
+        iosReplayKitActiveRef.current = false;
+        await ensureScreenShareMicAndSystemAudio();
         return;
       }
 
@@ -965,7 +1050,8 @@ function BroadcasterMeetingInner({
           setTimeout(resolve, ANDROID_PRE_SCREEN_SHARE_SETTLE_MS)
         );
 
-        setMediaProjectionConsentInProgress(true);
+        setAndroidMediaProjectionCaptureActive(true);
+        setAndroidMediaProjectionConsent(true);
         await new Promise((resolve) =>
           setTimeout(resolve, ANDROID_MEDIA_PROJECTION_CONSENT_ARM_MS)
         );
@@ -1032,7 +1118,9 @@ function BroadcasterMeetingInner({
       }
     } catch (err) {
       screenSharePendingRef.current = false;
-      setMediaProjectionConsentInProgress(false);
+      iosReplayKitActiveRef.current = false;
+      setAndroidMediaProjectionConsent(false);
+      setAndroidMediaProjectionCaptureActive(false);
       setScreenShareError(err?.message || t('liveBroadcast.screenShareDenied'));
     } finally {
       screenShareStartInFlightRef.current = false;
@@ -1045,6 +1133,8 @@ function BroadcasterMeetingInner({
     const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
     if (liveModeRef.current === 'screen') {
+      startScreenLivePlatformServices();
+    } else if (Platform.OS === 'ios') {
       startScreenLivePlatformServices();
     }
 
@@ -1062,14 +1152,17 @@ function BroadcasterMeetingInner({
       try {
         // Publish webcam while the app is foreground before MediaProjection / ReplayKit starts.
         await delay(MEDIA_PUBLISH_WEBCAM_MS);
-        const facingMode = useFrontCameraRef.current ? 'user' : 'environment';
-        try {
-          const customTrack = await createHostCameraTrack(qualityRef.current, facingMode);
-          await Promise.resolve(enableWebcamFnRef.current?.(customTrack));
-        } catch (_) {
-          await Promise.resolve(enableWebcamFnRef.current?.());
-        }
+        // Screen-share host bubble should always use the front/selfie camera.
+        const facingMode = 'user';
+        await publishHostWebcam(enableWebcamFnRef.current, qualityRef.current, facingMode);
         await delay(SCREEN_SHARE_AFTER_MIC_MS);
+        const webcamReady = await waitForMeetingReady(
+          () => localWebcamOnRef.current && !endedRef.current,
+          MEETING_READY_FOR_SCREEN_SHARE_MS
+        );
+        if (!webcamReady && !endedRef.current) {
+          throw new Error(t('liveBroadcast.screenShareStartFailed'));
+        }
         await startHostScreenShare();
       } catch (err) {
         screenSharePendingRef.current = false;
@@ -1080,13 +1173,8 @@ function BroadcasterMeetingInner({
 
     try {
       await delay(MEDIA_PUBLISH_WEBCAM_MS);
-      const facingMode = useFrontCameraRef.current ? 'user' : 'environment';
-      try {
-        const customTrack = await createHostCameraTrack(qualityRef.current, facingMode);
-        await Promise.resolve(enableWebcamFnRef.current?.(customTrack));
-      } catch (_) {
-        await Promise.resolve(enableWebcamFnRef.current?.());
-      }
+      const facingMode = hostCameraFacingMode(useFrontCameraRef.current);
+      await publishHostWebcam(enableWebcamFnRef.current, qualityRef.current, facingMode);
     } catch (e) {
     }
   }, [roomDebug, startHostScreenShare, startScreenLivePlatformServices, t]);
@@ -1354,15 +1442,14 @@ function BroadcasterMeetingInner({
       ) {
         const elapsed = Date.now() - screenShareAttemptStartedAtRef.current;
         if (
-          Platform.OS === 'android' &&
           screenSharePendingRef.current &&
           !localScreenShareOnRef.current &&
-          elapsed < ANDROID_SCREEN_SHARE_SDK_ERROR_GRACE_MS
+          elapsed < SCREEN_SHARE_SDK_ERROR_GRACE_MS
         ) {
           return;
         }
         screenSharePendingRef.current = false;
-        setMediaProjectionConsentInProgress(false);
+        setAndroidMediaProjectionConsent(false);
         setScreenShareError(t('liveBroadcast.screenShareStartFailed'));
         return;
       }
@@ -1416,12 +1503,20 @@ function BroadcasterMeetingInner({
 
   const ensureScreenLiveWebcam = useCallback(async (options = {}) => {
     const forceRefresh = Boolean(options.forceRefresh);
+    const sessionRefs = screenShareSessionRefs.current;
     if (
       endedRef.current ||
       liveModeRef.current !== 'screen' ||
       !meetingJoinedRef.current ||
       webcamRecoveryInFlightRef.current
     ) {
+      return;
+    }
+    if (sessionRefs && isScreenShareSessionLocked(sessionRefs)) {
+      return;
+    }
+    const withinStartupGrace = isWithinScreenShareStartupGrace(screenShareStableAtRef);
+    if (withinStartupGrace) {
       return;
     }
     const now = Date.now();
@@ -1435,32 +1530,44 @@ function BroadcasterMeetingInner({
     lastWebcamRecoveryAtRef.current = now;
     try {
       startScreenLivePlatformServices();
-      try {
-        await Promise.resolve(resumeAllStreamsFnRef.current?.());
-      } catch (_) {}
+      const skipResumeForCaptureSession =
+        localScreenShareOnRef.current ||
+        iosReplayKitActiveRef.current ||
+        screenSharePendingRef.current ||
+        screenShareStartInFlightRef.current ||
+        isWithinScreenShareStartupGrace(screenShareStableAtRef);
+      if (!skipResumeForCaptureSession) {
+        try {
+          await Promise.resolve(resumeAllStreamsFnRef.current?.());
+        } catch (_) {}
+      }
 
       const appBackgrounded = appStateRef.current !== 'active';
       const shouldRefreshTrack =
-        !localWebcamOnRef.current || (forceRefresh && !appBackgrounded);
+        !localWebcamOnRef.current ||
+        (forceRefresh && !appBackgrounded && !localScreenShareOnRef.current);
 
       if (shouldRefreshTrack) {
-        if (
+        const mayDisableWebcam =
           localWebcamOnRef.current &&
           typeof disableWebcamFnRef.current === 'function' &&
-          !appBackgrounded
-        ) {
+          !appBackgrounded &&
+          !localScreenShareOnRef.current;
+        if (mayDisableWebcam) {
           try {
             await Promise.resolve(disableWebcamFnRef.current());
             await new Promise((r) => setTimeout(r, 250));
           } catch (_) {}
         }
-        const facingMode = useFrontCameraRef.current ? 'user' : 'environment';
-        try {
-          const customTrack = await createHostCameraTrack(qualityRef.current, facingMode);
-          await Promise.resolve(enableWebcamFnRef.current?.(customTrack));
-        } catch (_) {
-          await Promise.resolve(enableWebcamFnRef.current?.());
-        }
+        const facingMode =
+          liveModeRef.current === 'screen'
+            ? 'user'
+            : hostCameraFacingMode(useFrontCameraRef.current);
+        await publishHostWebcam(
+          enableWebcamFnRef.current,
+          qualityRef.current,
+          facingMode
+        );
         try {
           const lp = localParticipantRef.current;
           if (lp && typeof lp.pin === 'function') {
@@ -1491,8 +1598,15 @@ function BroadcasterMeetingInner({
     if (localScreenShareOn) {
       screenSharePendingRef.current = false;
       screenShareStartInFlightRef.current = false;
+      iosReplayKitActiveRef.current = false;
+      if (screenShareStableAtRef.current === 0) {
+        screenShareStableAtRef.current = Date.now();
+      }
       setScreenShareError(null);
-      setMediaProjectionConsentInProgress(false);
+      setAndroidMediaProjectionConsent(false);
+      if (Platform.OS === 'android') {
+        setAndroidMediaProjectionCaptureActive(true);
+      }
       ensureScreenShareMicAndSystemAudio();
       const lp = localParticipant || localParticipantRef.current;
       if (liveMode === 'screen' && lp && typeof lp.pin === 'function') {
@@ -1511,15 +1625,51 @@ function BroadcasterMeetingInner({
   }, [localScreenShareOn]);
 
   useEffect(() => {
-    if (Platform.OS !== 'android' || liveMode !== 'screen') {
+    if (!localScreenShareOn) {
+      screenShareStableAtRef.current = 0;
+      iosReplayKitActiveRef.current = false;
+      setIosPipMountAllowed(false);
+      if (Platform.OS === 'android') {
+        setAndroidMediaProjectionCaptureActive(false);
+      }
+    }
+  }, [localScreenShareOn]);
+
+  useEffect(() => {
+    if (
+      Platform.OS !== 'ios' ||
+      !localScreenShareOn ||
+      !screenShareTrackReady ||
+      screenShareStableAtRef.current === 0
+    ) {
+      setIosPipMountAllowed(false);
       return undefined;
     }
-    if (localScreenShareOn && screenShareTrackReady) {
-      setMediaProjectionConsentInProgress(false);
-      setScreenSharePipEnabled(true);
+    const elapsed = Date.now() - screenShareStableAtRef.current;
+    const remaining = Math.max(0, SCREEN_SHARE_STARTUP_GRACE_MS - elapsed);
+    if (remaining === 0) {
+      setIosPipMountAllowed(true);
+      return undefined;
     }
-    return undefined;
-  }, [liveMode, localScreenShareOn, screenShareTrackReady]);
+    const timer = setTimeout(() => setIosPipMountAllowed(true), remaining);
+    return () => clearTimeout(timer);
+  }, [localScreenShareOn, screenShareTrackReady]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      setHostAppState(nextState);
+    });
+    return () => subscription.remove();
+  }, []);
+
+  const mountSystemPipManager =
+    Platform.OS === 'ios' &&
+    liveMode === 'screen' &&
+    meetingJoined &&
+    localScreenShareOn &&
+    screenShareTrackReady &&
+    iosPipMountAllowed &&
+    (hostAppState === 'background' || isInPipMode);
 
   useEffect(() => {
     if (liveMode !== 'screen' || Platform.OS !== 'ios') return undefined;
@@ -1545,18 +1695,34 @@ function BroadcasterMeetingInner({
     const subscription = AppState.addEventListener('change', (nextState) => {
       appStateRef.current = nextState;
       if (endedRef.current) return;
+      const sessionRefs = screenShareSessionRefs.current;
+      const sessionLocked = sessionRefs ? isScreenShareSessionLocked(sessionRefs) : false;
       if (nextState === 'active') {
-        ensureScreenLiveWebcamRef.current?.({ forceRefresh: true });
+        if (!sessionLocked) {
+          if (!localScreenShareOnRef.current) {
+            ensureScreenLiveWebcamRef.current?.({ forceRefresh: true });
+          } else if (!localWebcamOnRef.current) {
+            ensureScreenLiveWebcamRef.current?.({ forceRefresh: false });
+          }
+        }
         return;
       }
       if (nextState === 'background' || nextState === 'inactive') {
+        if (localScreenShareOnRef.current) {
+          // Keep capture session alive; resumeAllStreams tears down projection / ReplayKit tracks.
+          startScreenLivePlatformServices();
+          return;
+        }
+        if (sessionLocked) {
+          return;
+        }
         try {
           Promise.resolve(resumeAllStreamsFnRef.current?.()).catch(() => {});
         } catch (_) {}
       }
     });
     return () => subscription.remove();
-  }, [liveMode, meetingJoined]);
+  }, [liveMode, meetingJoined, startScreenLivePlatformServices]);
 
   useEffect(() => {
     if (liveMode !== 'screen' || !meetingJoined || !localScreenShareOn) {
@@ -1620,7 +1786,7 @@ function BroadcasterMeetingInner({
         return;
       }
       screenSharePendingRef.current = false;
-      setMediaProjectionConsentInProgress(false);
+      setAndroidMediaProjectionConsent(false);
       setScreenShareError(t('liveBroadcast.screenShareTimeout'));
     }, SCREEN_SHARE_READY_TIMEOUT_MS);
     return () => clearTimeout(timer);
@@ -1637,15 +1803,18 @@ function BroadcasterMeetingInner({
     if (endedRef.current || liveMode !== 'screen' || screenShareStartInFlightRef.current) return;
     setScreenShareError(null);
     screenSharePendingRef.current = true;
+    screenShareStableAtRef.current = 0;
+    iosReplayKitActiveRef.current = false;
+    setIosPipMountAllowed(false);
     setScreenShareTrackReady(false);
     await startHostScreenShare();
   }, [liveMode, startHostScreenShare]);
 
   const handleStopScreenShare = useCallback(async () => {
     if (endedRef.current || liveMode !== 'screen' || !localScreenShareOnRef.current) return;
-    setScreenSharePipEnabled(false);
-    stopHostCameraPip();
-    setMediaProjectionConsentInProgress(false);
+    iosReplayKitActiveRef.current = false;
+    stopScreenSharePipNative();
+    setAndroidMediaProjectionConsent(false);
     const stopShareFns = [
       disableScreenShareFnRef.current,
       actionsRef.current.disableScreenShare,
@@ -1661,6 +1830,7 @@ function BroadcasterMeetingInner({
       }
     }
     setScreenShareTrackReady(false);
+    setIosPipMountAllowed(false);
     screenSharePendingRef.current = false;
     setScreenShareError(t('liveBroadcast.screenShareStopped'));
   }, [liveMode, t]);
@@ -1810,6 +1980,10 @@ function BroadcasterMeetingInner({
         }
 
         try {
+          if (Platform.OS === 'ios') {
+            await prepareIosLiveMediaSession();
+            if (cancelled) return;
+          }
           if (InCallManager && typeof InCallManager.start === 'function') {
             InCallManager.start({ media: 'video' });
           }
@@ -1917,29 +2091,41 @@ function BroadcasterMeetingInner({
     const now = Date.now();
     if (now - lastFlipAtRef.current < 3500) return;
 
+    const nextFront = !useFrontCamera;
+    const facingMode = hostCameraFacingMode(nextFront);
+
     flipInProgressRef.current = true;
     lastFlipAtRef.current = now;
     try {
       if (!localWebcamOn && enableWebcamFnRef.current) {
-        const facingMode = useFrontCamera ? 'user' : 'environment';
-        try {
-          const customTrack = await createHostCameraTrack(qualityRef.current, facingMode);
-          await Promise.resolve(enableWebcamFnRef.current(customTrack));
-        } catch (_) {
-          await Promise.resolve(enableWebcamFnRef.current());
-        }
+        useFrontCameraRef.current = nextFront;
+        setUseFrontCamera(nextFront);
+        await publishHostWebcam(enableWebcamFnRef.current, qualityRef.current, facingMode);
         await new Promise((r) => setTimeout(r, 400));
+        return;
       }
-      await Promise.resolve(changeWebcamFnRef.current?.());
-      setUseFrontCamera((prev) => !prev);
+
+      if (
+        localWebcamOnRef.current &&
+        typeof disableWebcamFnRef.current === 'function'
+      ) {
+        try {
+          await Promise.resolve(disableWebcamFnRef.current());
+          await new Promise((r) => setTimeout(r, 250));
+        } catch (_) {}
+      }
+
+      useFrontCameraRef.current = nextFront;
+      setUseFrontCamera(nextFront);
+      await publishHostWebcam(enableWebcamFnRef.current, qualityRef.current, facingMode);
     } catch (_) {
-      /* ignore ΓÇö stream may recover without blocking UI */
+      /* ignore — stream may recover without blocking UI */
     } finally {
       setTimeout(() => {
         flipInProgressRef.current = false;
       }, 2000);
     }
-  }, [liveMode, meetingJoined, localWebcamOn]);
+  }, [liveMode, meetingJoined, localWebcamOn, useFrontCamera]);
 
   if (phase === 'error' && errorMessage) {
     return (
@@ -1969,10 +2155,9 @@ function BroadcasterMeetingInner({
               onTrackReady={setScreenShareTrackReady}
             />
           ) : null}
-          {liveMode === 'screen' ? (
+          {mountSystemPipManager ? (
             <HostScreenSharePipManager
               liveMode={liveMode}
-              localParticipantId={localParticipantIdForMedia}
               localScreenShareOn={localScreenShareOn}
               screenShareTrackReady={screenShareTrackReady}
               meetingJoined={meetingJoined}
@@ -2138,6 +2323,7 @@ export default function LiveStreamBroadcasterImpl({
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mediaPermissionsReady, setMediaPermissionsReady] = useState(false);
+  const [meetingMountReady, setMeetingMountReady] = useState(Platform.OS !== 'ios');
   const [mediaPermissionsError, setMediaPermissionsError] = useState(null);
   const [tokenError, setTokenError] = useState(null);
   const [tokenParticipantId, setTokenParticipantId] = useState(null);
@@ -2238,6 +2424,25 @@ export default function LiveStreamBroadcasterImpl({
     };
   }, [token, loading, effectiveRoomId, liveMode]);
 
+  useEffect(() => {
+    if (!mediaPermissionsReady) {
+      setMeetingMountReady(Platform.OS !== 'ios');
+      return undefined;
+    }
+    if (Platform.OS !== 'ios') {
+      setMeetingMountReady(true);
+      return undefined;
+    }
+    const delay =
+      liveMode === 'camera'
+        ? IOS_MEETING_MOUNT_DELAY_CAMERA_MS
+        : IOS_MEETING_MOUNT_DELAY_SCREEN_MS;
+    const timer = setTimeout(() => setMeetingMountReady(true), delay);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [mediaPermissionsReady, liveMode]);
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -2293,7 +2498,7 @@ export default function LiveStreamBroadcasterImpl({
     );
   }
 
-  if (!mediaPermissionsReady) {
+  if (!mediaPermissionsReady || !meetingMountReady) {
     return (
       <View style={styles.container}>
         <ActivityIndicator color="#a77df8" style={{ flex: 1 }} />
@@ -2313,10 +2518,14 @@ export default function LiveStreamBroadcasterImpl({
     webcamEnabled: false,
     name: hostDisplayName || hostUserId || 'Host',
     debugMode: false,
-    notification: {
-      title: 'ASAB Live',
-      message: 'You are live',
-    },
+    ...(Platform.OS === 'android'
+      ? {
+          notification: {
+            title: 'ASAB Live',
+            message: 'You are live',
+          },
+        }
+      : {}),
     ...(meetingParticipantId ? { participantId: meetingParticipantId } : {}),
   };
 

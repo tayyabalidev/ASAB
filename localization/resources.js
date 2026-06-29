@@ -1739,7 +1739,7 @@ export const resources = {
         submitButton: "Submit & Publish",
       },
       home: {
-        welcomeBack: "Welcome Back 10",
+        welcomeBack: "Welcome Back",
         save: "Save",
         saved: "Saved",
         commentsTitle: "Comments",

@@ -42,6 +42,14 @@ class ScreenSharePipModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun setMediaProjectionCaptureActive(active: Boolean) {
+    ScreenSharePipHelper.setMediaProjectionCaptureActive(
+      active,
+      reactApplicationContext.currentActivity
+    )
+  }
+
+  @ReactMethod
   fun enterPip(promise: Promise) {
     val activity: Activity? = reactApplicationContext.currentActivity
     if (activity == null) {

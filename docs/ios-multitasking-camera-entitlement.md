@@ -12,9 +12,15 @@ Host camera Picture-in-Picture during screen share can use Apple's multitasking 
 
 iOS builds work **without** this entitlement. PiP UI compiles and runs; on **iOS 16–17** the system may refuse to show a **live camera** PiP bubble over other apps until Apple approves multitasking camera access. Screen share (ReplayKit) still works.
 
-**Symptom without approval:** Screen share works in ASAB, in-app camera bubble works, but **no system PiP window** appears over games or Home.
+**Symptom without approval:** Screen share works in ASAB, in-app camera bubble works, PiP may work on Home, but **PiP freezes on one frame when a full-screen game or app is open**. Viewers may still receive a live camera feed.
+
+**Symptom after approval + rebuild:** PiP camera preview stays live over games and other apps.
 
 **Important:** Remove `EXPO_IOS_MULTITASKING_CAMERA` from your EAS environment if you added it early. It is no longer used by the config plugin and is safe to delete.
+
+## Why Home works but games freeze PiP
+
+On the **Home screen**, iOS often still delivers camera frames to the app. A **full-screen game or other app** takes exclusive focus and, without multitasking camera access, the PiP preview stops updating (HostCameraPip suspends frame delivery instead of crashing). **Screen share to viewers continues** via ReplayKit.
 
 ## Enable in EAS builds (only after Apple approval)
 

@@ -10,7 +10,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
-  InteractionManager,
   Image,
   ImageBackground,
 } from 'react-native';
@@ -150,34 +149,23 @@ const GoLive = () => {
       // Close preview so expo-camera releases the device before VideoSDK WebRTC opens it.
       setShowPreview(false);
 
-      const navigateToBroadcast = () => {
-        stashLiveHostSession({
+      stashLiveHostSession({
+        streamId: liveStream.$id,
+        roomId: liveStream.videosdkRoomId,
+        hostToken: liveStream.videosdkHostToken,
+        quality: selectedQuality,
+        liveMode: selectedLiveMode,
+      });
+
+      router.push({
+        pathname: '/live-broadcast',
+        params: {
           streamId: liveStream.$id,
           roomId: liveStream.videosdkRoomId,
-          hostToken: liveStream.videosdkHostToken,
           quality: selectedQuality,
           liveMode: selectedLiveMode,
-        });
-
-        router.push({
-          pathname: '/live-broadcast',
-          params: {
-            streamId: liveStream.$id,
-            roomId: liveStream.videosdkRoomId,
-            quality: selectedQuality,
-            liveMode: selectedLiveMode,
-          },
-        });
-      };
-
-      if (selectedLiveMode === 'camera') {
-        await new Promise((resolve) => {
-          InteractionManager.runAfterInteractions(() => {
-            setTimeout(resolve, 300);
-          });
-        });
-      }
-      navigateToBroadcast();
+        },
+      });
     } catch (error) {
       const message = error?.message || t('liveGo.startError');
       Alert.alert(t('common.error'), message);

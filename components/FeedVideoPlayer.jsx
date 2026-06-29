@@ -17,9 +17,9 @@ function configurePlayerForPiP(player, { isLooping, isMuted, enablePiP }) {
   if (enablePiP) {
     player.staysActiveInBackground = true;
     if (Platform.OS === 'ios') {
-      // PiP requires AVAudioSession .playback / .moviePlayback (expo-video VideoManager).
-      player.audioMixingMode = 'doNotMix';
-      player.showNowPlayingNotification = true;
+      // mixWithOthers keeps feed PiP from blocking WebRTC live / calls on go-live.
+      player.audioMixingMode = 'mixWithOthers';
+      player.showNowPlayingNotification = false;
       player.bufferOptions = {
         preferredForwardBufferDuration: 2,
         waitsToMinimizeStalling: false,
@@ -260,6 +260,11 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
   const handlePictureInPictureStart = () => {
     isInPipRef.current = true;
     clearPipRetries();
+    if (Platform.OS === 'ios') {
+      try {
+        player.showNowPlayingNotification = true;
+      } catch (_) {}
+    }
     try {
       player.play();
     } catch (_) {}
@@ -267,6 +272,11 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
 
   const handlePictureInPictureStop = () => {
     isInPipRef.current = false;
+    if (Platform.OS === 'ios') {
+      try {
+        player.showNowPlayingNotification = false;
+      } catch (_) {}
+    }
     if (shouldPlayRef.current) {
       try {
         player.play();

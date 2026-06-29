@@ -2,7 +2,7 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.1.8",
+    "version": "1.1.9",
     "orientation": "portrait",
     "icon": "./assets/images/asabicon.png",
     "userInterfaceStyle": "dark",
@@ -88,7 +88,10 @@
               "pathPrefix": "/forgot-password"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -161,7 +164,7 @@
       "videosdkTokenBaseUrl": "",
       "videosdkRoomBaseUrl": "",
       "eas": {
-        "projectId": "ae0ceb34-c46e-4f8e-9d13-804335663376"
+        "projectId": "17e0c2a3-0ced-4961-91af-b0e225838422"
       }
     }
   }

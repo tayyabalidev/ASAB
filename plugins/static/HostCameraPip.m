@@ -93,6 +93,7 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
 @property(nonatomic, weak) AVSampleBufferDisplayLayer *displayLayer;
 @property(nonatomic, assign) BOOL enabled;
 @property(nonatomic, assign) BOOL mirror;
+@property(nonatomic, assign) BOOL deliverySuspended;
 @property(nonatomic, assign) int64_t pipFrameIndex;
 @end
 
@@ -113,7 +114,7 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
 }
 
 - (void)renderFrame:(RTCVideoFrame *)frame {
-  if (!self.enabled || self.displayLayer == nil || frame == nil) {
+  if (!self.enabled || self.deliverySuspended || self.displayLayer == nil || frame == nil) {
     return;
   }
 
@@ -146,15 +147,15 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
   }
 
   dispatch_async(dispatch_get_main_queue(), ^{
-    if (!self.enabled || self.displayLayer == nil) {
+    if (!self.enabled || self.deliverySuspended || self.displayLayer == nil) {
       CFRelease(sampleBuffer);
       return;
     }
     if (self.displayLayer.status == AVQueuedSampleBufferRenderingStatusFailed) {
+      self.deliverySuspended = YES;
       [self.displayLayer flush];
-    }
-    if (!self.displayLayer.readyForMoreMediaData) {
-      [self.displayLayer flush];
+      CFRelease(sampleBuffer);
+      return;
     }
     if (self.displayLayer.readyForMoreMediaData) {
       [self.displayLayer enqueueSampleBuffer:sampleBuffer];
@@ -172,6 +173,7 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
 @property(nonatomic, strong) AVPictureInPictureController *pipController;
 @property(nonatomic, strong) HostCameraPipFrameRenderer *frameRenderer;
 @property(nonatomic, strong) RTCVideoTrack *videoTrack;
+@property(nonatomic, assign) UIBackgroundTaskIdentifier backgroundTaskId;
 @property(nonatomic, assign) BOOL mirror;
 @property(nonatomic, assign) BOOL enabled;
 @property(nonatomic, copy) void (^modeChangedHandler)(BOOL isActive);
@@ -202,9 +204,83 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
     _frameRenderer = [[HostCameraPipFrameRenderer alloc] init];
     _frameRenderer.displayLayer = _displayLayer;
     _frameRenderer.enabled = NO;
+    _frameRenderer.deliverySuspended = NO;
     _frameRenderer.pipFrameIndex = 0;
+
+    _backgroundTaskId = UIBackgroundTaskInvalid;
+    [self configureDisplayLayerTimebase];
   }
   return self;
+}
+
+- (void)configureDisplayLayerTimebase {
+  if (@available(iOS 15.0, *)) {
+    CMTimebaseRef timebase = NULL;
+    if (CMTimebaseCreateWithMasterClock(kCFAllocatorDefault, CMClockGetHostTimeClock(), &timebase) ==
+        noErr) {
+      CMTimebaseSetTime(timebase, kCMTimeZero);
+      CMTimebaseSetRate(timebase, 1.0);
+      self.displayLayer.controlTimebase = timebase;
+      CFRelease(timebase);
+    }
+  }
+}
+
+- (void)beginPipBackgroundTask {
+  if (self.backgroundTaskId != UIBackgroundTaskInvalid) {
+    return;
+  }
+  __weak typeof(self) weakSelf = self;
+  self.backgroundTaskId = [[UIApplication sharedApplication]
+      beginBackgroundTaskWithName:@"HostCameraPip"
+                expirationHandler:^{
+                  [weakSelf endPipBackgroundTask];
+                }];
+}
+
+- (void)endPipBackgroundTask {
+  if (self.backgroundTaskId == UIBackgroundTaskInvalid) {
+    return;
+  }
+  [[UIApplication sharedApplication] endBackgroundTask:self.backgroundTaskId];
+  self.backgroundTaskId = UIBackgroundTaskInvalid;
+}
+
+- (void)suspendPipFrameDelivery {
+  self.frameRenderer.deliverySuspended = YES;
+  self.frameRenderer.enabled = NO;
+}
+
+- (void)detachRendererFromTrack {
+  if (self.videoTrack == nil) {
+    return;
+  }
+  @try {
+    [self.videoTrack removeRenderer:self.frameRenderer];
+  } @catch (__unused NSException *exception) {
+    /* renderer may already be detached */
+  }
+  self.videoTrack = nil;
+}
+
+- (void)attachRendererToTrack:(RTCVideoTrack *)videoTrack mirror:(BOOL)mirror {
+  if (videoTrack == nil) {
+    return;
+  }
+  if (self.videoTrack != videoTrack) {
+    [self detachRendererFromTrack];
+    self.videoTrack = videoTrack;
+    @try {
+      [self.videoTrack addRenderer:self.frameRenderer];
+    } @catch (__unused NSException *exception) {
+      self.videoTrack = nil;
+      return;
+    }
+  }
+  self.mirror = mirror;
+  self.frameRenderer.mirror = mirror;
+  self.frameRenderer.deliverySuspended = NO;
+  self.frameRenderer.enabled = YES;
 }
 
 - (void)attachSourceViewToWindow {
@@ -265,7 +341,7 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
   if (!self.enabled) {
     return;
   }
-  self.frameRenderer.enabled = YES;
+  [self beginPipBackgroundTask];
   [self layoutDisplayLayer];
   [self enterPictureInPictureWithRetryCount:8];
 }
@@ -300,7 +376,7 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
 
     self.pipController = [[AVPictureInPictureController alloc] initWithContentSource:contentSource];
     self.pipController.delegate = self;
-    self.pipController.canStartPictureInPictureAutomaticallyFromInline = YES;
+    self.pipController.canStartPictureInPictureAutomaticallyFromInline = NO;
 
     if (@available(iOS 14.2, *)) {
       self.pipController.requiresLinearPlayback = YES;
@@ -313,14 +389,10 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
     return NO;
   }
 
-  [self stopRendererOnly];
-
-  self.videoTrack = videoTrack;
-  self.mirror = mirror;
-  self.frameRenderer.mirror = mirror;
-  self.frameRenderer.enabled = YES;
   self.frameRenderer.pipFrameIndex = 0;
-  [videoTrack addRenderer:self.frameRenderer];
+  [self attachRendererToTrack:videoTrack mirror:mirror];
+  [self.displayLayer flush];
+  [self configureDisplayLayerTimebase];
 
   [self ensurePipController];
   [self installBackgroundObservers];
@@ -355,7 +427,10 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
           ^{
             [self enterPictureInPictureWithRetryCount:retryCount - 1];
           });
+      return;
     }
+    // Another full-screen app blocks PiP/camera without multitasking entitlement — stop safely.
+    [self suspendPipFrameDelivery];
   }
 }
 
@@ -363,19 +438,22 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
   if (!self.enabled || videoTrack == nil) {
     return NO;
   }
-  if (self.videoTrack == videoTrack && self.pipController != nil) {
-    self.frameRenderer.enabled = YES;
+  if (self.videoTrack == videoTrack) {
+    self.frameRenderer.mirror = mirror;
     [self layoutDisplayLayer];
+    if (@available(iOS 15.0, *)) {
+      if (self.pipController.isPictureInPictureActive) {
+        self.frameRenderer.deliverySuspended = NO;
+        self.frameRenderer.enabled = YES;
+      }
+    }
     return YES;
   }
   return [self startWithVideoTrack:videoTrack mirror:mirror];
 }
 
 - (void)stopRendererOnly {
-  if (self.videoTrack != nil) {
-    [self.videoTrack removeRenderer:self.frameRenderer];
-    self.videoTrack = nil;
-  }
+  [self detachRendererFromTrack];
   self.frameRenderer.enabled = NO;
   self.frameRenderer.pipFrameIndex = 0;
   [self.displayLayer flush];
@@ -383,6 +461,7 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
 
 - (void)stop {
   [self removeBackgroundObservers];
+  [self endPipBackgroundTask];
   if (@available(iOS 15.0, *)) {
     if (self.pipController != nil && self.pipController.isPictureInPictureActive) {
       [self.pipController stopPictureInPicture];
@@ -400,8 +479,10 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
 
 - (void)pictureInPictureControllerDidStartPictureInPicture:
     (AVPictureInPictureController *)pictureInPictureController {
+  self.frameRenderer.deliverySuspended = NO;
   self.frameRenderer.enabled = YES;
   [self layoutDisplayLayer];
+  [self beginPipBackgroundTask];
   if (self.modeChangedHandler != nil) {
     self.modeChangedHandler(YES);
   }
@@ -409,6 +490,7 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
 
 - (void)pictureInPictureControllerDidStopPictureInPicture:
     (AVPictureInPictureController *)pictureInPictureController {
+  [self endPipBackgroundTask];
   if (self.enabled) {
     self.frameRenderer.enabled = YES;
   }
@@ -419,6 +501,7 @@ static CVPixelBufferRef HostCameraPipCopyPixelBufferFromFrame(RTCVideoFrame *fra
 
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
     failedToStartPictureInPictureWithError:(NSError *)error {
+  [self suspendPipFrameDelivery];
   if (self.modeChangedHandler != nil) {
     self.modeChangedHandler(NO);
   }

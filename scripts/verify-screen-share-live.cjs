@@ -221,8 +221,58 @@ const checks = [
     },
   },
   {
-    name: 'Call module untouched (no screen share bridge import)',
-    pass: () => !read('components/VideoSDKCall.jsx').includes('videosdkIosScreenShare'),
+    name: 'Android: MediaProjection capture blocks Activity PiP',
+    pass: () => {
+      const helper = read('plugins/static/screenpip/ScreenSharePipHelper.kt');
+      const js = read('lib/screenSharePip.js');
+      const broadcaster = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      return (
+        helper.includes('mediaProjectionCaptureActive') &&
+        helper.includes('setMediaProjectionCaptureActive') &&
+        js.includes('setMediaProjectionCaptureActive') &&
+        broadcaster.includes('setAndroidMediaProjectionCaptureActive') &&
+        broadcaster.includes("Platform.OS === 'ios'") &&
+        broadcaster.includes('mountSystemPipManager')
+      );
+    },
+  },
+  {
+    name: 'Android: no resumeAllStreams on background during screen share',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      return (
+        src.includes('skipResumeForCaptureSession') &&
+        src.includes('localScreenShareOnRef.current') &&
+        src.includes('Keep capture session alive') &&
+        src.includes('startScreenLivePlatformServices();')
+      );
+    },
+  },
+  {
+    name: 'iOS: ReplayKit session lock blocks stream recovery at start',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      return (
+        src.includes('iosReplayKitActiveRef') &&
+        src.includes('isScreenShareSessionLocked') &&
+        src.includes('iosPipMountAllowed') &&
+        src.includes("hostAppState === 'background'") &&
+        !src.includes("hostAppState === 'inactive' ||\n      isInPipMode")
+      );
+    },
+  },
+  {
+    name: 'iOS: HostLocalWebcamProbe does not forceRefresh during share start',
+    pass: () => {
+      const src = read('components/LiveStreamBroadcasterImpl.sdk.jsx');
+      const probeStart = src.indexOf('function HostLocalWebcamProbe');
+      const probeEnd = src.indexOf('function HostScreenSharePipManager', probeStart);
+      const block = src.slice(probeStart, probeEnd);
+      return (
+        block.includes("forceRefresh: false") &&
+        !block.includes("forceRefresh: true")
+      );
+    },
   },
   {
     name: 'iOS Obj-C VideosdkRPK + bridging fix plugin',

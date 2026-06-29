@@ -18,6 +18,13 @@ object ScreenSharePipHelper {
   @Volatile
   var mediaProjectionConsentInProgress: Boolean = false
 
+  /**
+   * While MediaProjection is capturing (screen share active), Activity PiP must stay off.
+   * enterPictureInPictureMode during capture invalidates VirtualDisplay / projection on many OEMs.
+   */
+  @Volatile
+  var mediaProjectionCaptureActive: Boolean = false
+
   @Volatile
   private var reactContext: ReactApplicationContext? = null
 
@@ -30,7 +37,12 @@ object ScreenSharePipHelper {
   }
 
   private fun canEnterPip(): Boolean {
-    return pipEnabled && allowHomePipEnter && !mediaProjectionConsentInProgress
+    return (
+      pipEnabled &&
+        allowHomePipEnter &&
+        !mediaProjectionConsentInProgress &&
+        !mediaProjectionCaptureActive
+      )
   }
 
   fun enterPip(activity: Activity): Boolean {
@@ -78,7 +90,17 @@ object ScreenSharePipHelper {
     mediaProjectionConsentInProgress = inProgress
     if (inProgress) {
       allowHomePipEnter = false
-    } else if (pipEnabled) {
+    } else if (pipEnabled && !mediaProjectionCaptureActive) {
+      allowHomePipEnter = true
+    }
+    applyPipParams(activity)
+  }
+
+  fun setMediaProjectionCaptureActive(active: Boolean, activity: Activity?) {
+    mediaProjectionCaptureActive = active
+    if (active) {
+      allowHomePipEnter = false
+    } else if (pipEnabled && !mediaProjectionConsentInProgress) {
       allowHomePipEnter = true
     }
     applyPipParams(activity)
@@ -86,7 +108,8 @@ object ScreenSharePipHelper {
 
   fun setScreenSharePipArmed(activity: Activity?, enabled: Boolean) {
     pipEnabled = enabled
-    allowHomePipEnter = enabled && !mediaProjectionConsentInProgress
+    allowHomePipEnter =
+      enabled && !mediaProjectionConsentInProgress && !mediaProjectionCaptureActive
     applyPipParams(activity)
   }
 
