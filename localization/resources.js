@@ -49,6 +49,10 @@ const profileBase = {
     follow: "Follow",
     unfollow: "Unfollow",
     message: "Message",
+    notificationsOn: "Notifications on",
+    notificationsOff: "Notifications off",
+    notificationsFollowRequiredTitle: "Follow to get notifications",
+    notificationsFollowRequiredMessage: "Follow this creator first, then you can turn notifications on or off.",
     supportCreator: "Support Creator",
     profileOptionsTitle: "Profile Options",
     profileOptionsMessage: "What would you like to do?",
@@ -92,6 +96,7 @@ const profileBase = {
     bookmarkError: "Failed to bookmark video",
     shareError: "Failed to share video",
     followError: "Failed to update follow status",
+    notificationError: "Failed to update notification settings",
     loadProfileError: "Failed to load profile.",
     requestSentTitle: "Request Sent",
     requestSentMessage: "Your request to view this profile has been sent.",
@@ -2000,7 +2005,12 @@ export const resources = {
         notifications: {
           follow: "started following you",
           like: "liked your video",
-          comment: "commented on your video"
+          comment: "commented on your video",
+          live: "is going live",
+          video_post: "posted a new video",
+          photo_post: "posted a new photo",
+          message: "sent you a message",
+          call: "is calling you"
         },
         actions: {
           followBack: "Follow back"
@@ -2008,6 +2018,7 @@ export const resources = {
         sections: {
           newFollowers: "New followers",
           activity: "Activity",
+          subscriptions: "From creators you follow",
           recentMessages: "Recent messages"
         }
       },

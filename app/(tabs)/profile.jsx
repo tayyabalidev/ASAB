@@ -12,7 +12,8 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getNotifications, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri } from "../../lib/appwrite";
+import { useNotifications } from "../../hooks/useNotifications";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../lib/muxPlayback";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar } from "../../components";
@@ -153,7 +154,7 @@ const Profile = () => {
   const { data: photos, refetch: refetchPhotos } = useAppwrite(() => getUserPhotos(user.$id), [user?.$id]);
   const { data: followers } = useAppwrite(() => getFollowers(user?.$id), [user?.$id]);
   const { data: following } = useAppwrite(() => getFollowing(user?.$id), [user?.$id]);
-  
+  const { unreadCount: unreadNotificationCount } = useNotifications();
 
   // Handle Stripe Connect deep link callback
   useEffect(() => {
@@ -341,8 +342,6 @@ const Profile = () => {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [photoIndex, setPhotoIndex] = useState(0);
   
-  // Notification count state
-  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const MINIMUM_PROFILE_AGE = 18;
   
   // Delete handlers
@@ -1342,30 +1341,6 @@ const Profile = () => {
 
   // Track loaded thumbnails to prevent reloading
   const loadedThumbnailsRef = useRef(new Set());
-
-  // Fetch unread notification count
-  useEffect(() => {
-    let isMounted = true;
-
-    const fetchNotificationCount = async () => {
-      if (!user?.$id) return;
-      try {
-        const notifications = await getNotifications(user.$id);
-        if (!isMounted) return;
-        const unreadCount = notifications.filter(n => !n.isRead || n.isRead === false).length;
-        setUnreadNotificationCount(unreadCount);
-      } catch (error) {
-      }
-    };
-
-    fetchNotificationCount();
-    const intervalId = setInterval(fetchNotificationCount, 3000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, [user?.$id]);
 
   // Handle following/followers modal
   const openFollowModal = async (type) => {

@@ -31,6 +31,7 @@ import { captureRef } from "react-native-view-shot";
 
 import { icons, images } from "../../constants";
 import { createVideoPost, createPhotoPost } from "../../lib/appwrite";
+import { scheduleCreatorSubscriberNotifications } from "../../lib/creatorNotificationDelivery";
 import { isMuxUploadEnabled } from "../../lib/muxConfig";
 import { publishVideoWithMux } from "../../lib/muxClient";
 import {
@@ -1628,15 +1629,29 @@ const Create = () => {
 
         try {
           if (isMuxUploadEnabled()) {
-            await publishVideoWithMux(
+            const muxPost = await publishVideoWithMux(
               { ...form, userId: user.$id },
               processedVideo
             );
+            if (muxPost?.$id && !muxPost._muxWaitTimedOut) {
+              scheduleCreatorSubscriberNotifications({
+                creatorId: user.$id,
+                type: 'video_post',
+                postId: muxPost.$id,
+                title: form.title,
+              });
+            }
           } else {
-            await createVideoPost({
+            const videoPost = await createVideoPost({
               ...form,
               video: processedVideo,
               userId: user.$id,
+            });
+            scheduleCreatorSubscriberNotifications({
+              creatorId: user.$id,
+              type: 'video_post',
+              postId: videoPost.$id,
+              title: form.title,
             });
           }
 
@@ -1931,11 +1946,18 @@ const Create = () => {
           }
         }
 
-        await createPhotoPost({
+        const photoPost = await createPhotoPost({
           ...photoForm,
           photo: finalPhoto,
           userId: user.$id,
           edits: finalEdits,
+        });
+
+        scheduleCreatorSubscriberNotifications({
+          creatorId: user.$id,
+          type: 'photo_post',
+          postId: photoPost.$id,
+          title: photoForm.title || photoForm.caption,
         });
 
         // Clean up state before showing alert and navigating

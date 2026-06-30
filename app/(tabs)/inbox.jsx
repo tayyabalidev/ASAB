@@ -5,7 +5,9 @@ import { View, Image, FlatList, TouchableOpacity, Text, Alert, TextInput, Platfo
 import { Query } from 'react-native-appwrite';
 
 import { icons } from "../../constants";
-import { databases, appwriteConfig, getNotifications, toggleFollowUser, markNotificationAsRead } from "../../lib/appwrite";
+import { databases, appwriteConfig, toggleFollowUser, markNotificationAsRead } from "../../lib/appwrite";
+import { refreshNotificationUpdates } from "../../lib/notificationService";
+import { useNotifications } from "../../hooks/useNotifications";
 import { getCallById } from "../../lib/calls";
 import { CallState } from "../../lib/callHelper";
 import { useGlobalContext } from "../../context/GlobalProvider";
@@ -30,8 +32,12 @@ const getAvatarUrl = (avatarField) => {
   return images.profile;
 };
 
-const getNotificationMessage = (item) => {
+const getNotificationMessage = (item, t) => {
   if (!item) return '';
+  const key = `inbox.notifications.${item.type}`;
+  const translated = t(key, { defaultValue: '' });
+  if (translated && translated !== key) return translated;
+
   switch (item.type) {
     case 'follow':
       return 'started following you';
@@ -43,6 +49,10 @@ const getNotificationMessage = (item) => {
       return 'sent you a message';
     case 'live':
       return 'is going live';
+    case 'video_post':
+      return 'posted a new video';
+    case 'photo_post':
+      return 'posted a new photo';
     case 'call':
       return 'is calling you';
     default:
@@ -53,9 +63,9 @@ const getNotificationMessage = (item) => {
 const Inbox = () => {
   const { t } = useTranslation();
   const { user: currentUser, theme, isDarkMode, followStatus, updateFollowStatus } = useGlobalContext();
-  const [notifications, setNotifications] = useState([]);
+  const { notifications, setNotifications, loading: notificationsLoading } = useNotifications();
   const [recentMessages, setRecentMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(true);
   const [followingStates, setFollowingStates] = useState({});
   const [searchActive, setSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -66,14 +76,12 @@ const Inbox = () => {
     [isDarkMode]
   );
 
+  const loading = notificationsLoading || messagesLoading;
+
   useEffect(() => {
     mountedRef.current = true;
-    fetchNotifications();
     fetchRecentMessages();
-    const intervalId = setInterval(() => {
-      fetchNotifications();
-      fetchRecentMessages();
-    }, 2000);
+    const intervalId = setInterval(fetchRecentMessages, 20000);
     return () => {
       mountedRef.current = false;
       clearInterval(intervalId);
@@ -95,45 +103,6 @@ const Inbox = () => {
       setFollowingStates(states);
     }
   }, [notifications, currentUser, followStatus]);
-
-  const fetchNotifications = async () => {
-    if (!currentUser?.$id) return;
-    try {
-      const notificationsData = await getNotifications(currentUser.$id);
-      if (!mountedRef.current) return;
-      setNotifications(notificationsData);
-
-      const unreadNotifications = notificationsData.filter(n => !n.isRead || n.isRead === false);
-      if (unreadNotifications.length > 0) {
-        Promise.all(
-          unreadNotifications.map(async (notification) => {
-            try {
-              await markNotificationAsRead(notification.$id);
-              return notification.$id;
-            } catch (error) {
-              return null;
-            }
-          })
-        ).then((readIds) => {
-          if (!mountedRef.current) return;
-          const successfulIds = readIds.filter(id => id !== null);
-          if (successfulIds.length > 0) {
-            setNotifications(prev =>
-              prev.map(n => successfulIds.includes(n.$id) ? { ...n, isRead: true } : n)
-            );
-          }
-        });
-      }
-    } catch (error) {
-    }
-  };
-
-  const getUnreadCount = (chat) => {
-    if (!chat.messages) return 0;
-    return chat.messages.filter(
-      m => m.receiverId === currentUser.$id && m.is_read === false
-    ).length;
-  };
 
   const fetchRecentMessages = async () => {
     if (!currentUser?.$id) return;
@@ -201,17 +170,23 @@ const Inbox = () => {
       setRecentMessages(chats);
     } catch (error) {
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current) setMessagesLoading(false);
     }
   };
-    
+
+  const getUnreadCount = (chat) => {
+    if (!chat.messages) return 0;
+    return chat.messages.filter(
+      m => m.receiverId === currentUser.$id && m.is_read === false
+    ).length;
+  };
+
   const handleNotificationPress = async (notification) => {
-    // Mark notification as read when user clicks on it
+    // Mark notification as read when user taps on it
     if (!notification.isRead || notification.isRead === false) {
       try {
         await markNotificationAsRead(notification.$id);
-        // Update local state
-        setNotifications(prev => 
+        setNotifications(prev =>
           prev.map(n => n.$id === notification.$id ? { ...n, isRead: true } : n)
         );
       } catch (error) {
@@ -222,7 +197,7 @@ const Inbox = () => {
     if (notification.type === 'follow') {
       // Navigate to user profile
       router.push(`/profile/${notification.fromUserId}`);
-    } else if (notification.type === 'like' || notification.type === 'comment') {
+    } else if (notification.type === 'like' || notification.type === 'comment' || notification.type === 'video_post' || notification.type === 'photo_post') {
       // Navigate to specific post if available
       if (notification.postId) {
         router.push(`/post/${notification.postId}`);
@@ -308,7 +283,7 @@ const Inbox = () => {
     return notifications.filter((item) => {
       const username = item.fromUsername?.toLowerCase() || '';
       const type = item.type?.toLowerCase() || '';
-      const messageText = getNotificationMessage(item).toLowerCase();
+      const messageText = getNotificationMessage(item, t).toLowerCase();
       return (
         username.includes(query) ||
         type.includes(query) ||
@@ -337,12 +312,15 @@ const Inbox = () => {
     () => filteredNotifications.filter((n) => n.type === 'like' || n.type === 'comment'),
     [filteredNotifications]
   );
-  const messageNotifications = useMemo(
-    () => filteredNotifications.filter((n) => n.type === 'message'),
+  const subscriptionNotifications = useMemo(
+    () =>
+      filteredNotifications.filter((n) =>
+        n.type === 'live' || n.type === 'video_post' || n.type === 'photo_post'
+      ),
     [filteredNotifications]
   );
-  const liveNotifications = useMemo(
-    () => filteredNotifications.filter((n) => n.type === 'live'),
+  const messageNotifications = useMemo(
+    () => filteredNotifications.filter((n) => n.type === 'message'),
     [filteredNotifications]
   );
   const callNotifications = useMemo(
@@ -352,8 +330,8 @@ const Inbox = () => {
 
   const followUnreadCount = followNotifications.filter((n) => !n.isRead).length;
   const activityUnreadCount = activityNotifications.filter((n) => !n.isRead).length;
+  const subscriptionUnreadCount = subscriptionNotifications.filter((n) => !n.isRead).length;
   const messageUnreadCount = messageNotifications.filter((n) => !n.isRead).length;
-  const liveUnreadCount = liveNotifications.filter((n) => !n.isRead).length;
   const callUnreadCount = callNotifications.filter((n) => !n.isRead).length;
 
   const toggleSearch = () => {
@@ -369,7 +347,7 @@ const Inbox = () => {
   const renderNotificationItem = ({ item }) => {
     const isFollow = item.type === 'follow';
     const isLive = item.type === 'live';
-    const notificationText = getNotificationMessage(item);
+    const notificationText = getNotificationMessage(item, t);
 
     return (
       <TouchableOpacity
@@ -423,8 +401,7 @@ const Inbox = () => {
                   
                   try {
                     await toggleFollowUser(currentUser.$id, item.fromUserId);
-                    // Refresh notifications to update UI
-                    fetchNotifications();
+                    refreshNotificationUpdates();
                   } catch (error) {
                     // Revert on error
                     setFollowingStates(prev => ({ ...prev, [item.fromUserId]: !newFollowState }));
@@ -675,17 +652,17 @@ const Inbox = () => {
       {/* Content */}
       <FlatList
         data={[
-          { type: 'header', title: 'New Followers', count: followUnreadCount },
+          { type: 'header', title: t('inbox.sections.newFollowers'), count: followUnreadCount },
           ...followNotifications,
-          { type: 'header', title: 'Activity', count: activityUnreadCount },
+          { type: 'header', title: t('inbox.sections.activity'), count: activityUnreadCount },
           ...activityNotifications,
+          { type: 'header', title: t('inbox.sections.subscriptions'), count: subscriptionUnreadCount },
+          ...subscriptionNotifications,
           { type: 'header', title: 'Messages', count: messageUnreadCount },
           ...messageNotifications,
           { type: 'header', title: 'Calls', count: callUnreadCount },
           ...callNotifications,
-          { type: 'header', title: 'Live Streams', count: liveUnreadCount },
-          ...liveNotifications,
-          { type: 'header', title: 'Recent Messages', count: filteredRecentMessages.length },
+          { type: 'header', title: t('inbox.sections.recentMessages'), count: filteredRecentMessages.length },
           ...filteredRecentMessages
         ]}
         keyExtractor={(item, index) => item.type === 'header' ? `header-${index}` : item.$id || `item-${index}`}
@@ -698,7 +675,9 @@ const Inbox = () => {
             item.type === 'comment' ||
             item.type === 'message' ||
             item.type === 'call' ||
-            item.type === 'live'
+            item.type === 'live' ||
+            item.type === 'video_post' ||
+            item.type === 'photo_post'
           ) {
             return renderNotificationItem({ item });
           } else {

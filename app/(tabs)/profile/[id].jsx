@@ -7,6 +7,7 @@ import { Query } from 'react-native-appwrite';
 import { Video, ResizeMode } from "expo-av";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import { useTranslation } from "react-i18next";
 
 import { icons } from "../../../constants";
@@ -16,6 +17,7 @@ import { useGlobalContext } from "../../../context/GlobalProvider";
 import { EmptyState, VideoProgressBar } from "../../../components";
 import CallButton from "../../../components/CallButton";
 import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLike, isPostLiked, getLikeCount } from "../../../lib/appwrite";
+import { toggleCreatorNotificationSubscription, isUserSubscribedToCreator } from "../../../lib/creatorSubscriptions";
 import { images } from "../../../constants";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../../lib/mediaType";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../../lib/muxPlayback";
@@ -30,6 +32,8 @@ const UserProfile = () => {
   const [canView, setCanView] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isNotificationsOn, setIsNotificationsOn] = useState(false);
+  const [togglingNotifications, setTogglingNotifications] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
   const [playingIndex, setPlayingIndex] = useState(null);
@@ -143,6 +147,7 @@ const UserProfile = () => {
           const followers = userResponse.followers || [];
           const isFollowingUser = followers.includes(currentUser.$id);
           setIsFollowing(isFollowingUser);
+          setIsNotificationsOn(isUserSubscribedToCreator(userResponse, currentUser.$id));
           setFollowersCount(followers.length);
           updateFollowStatus(id, isFollowingUser);
         } else {
@@ -273,6 +278,11 @@ const UserProfile = () => {
     const newFollowState = !isFollowing;
     setIsFollowing(newFollowState);
     setFollowersCount((prev) => newFollowState ? prev + 1 : prev - 1);
+    if (newFollowState) {
+      setIsNotificationsOn(true);
+    } else {
+      setIsNotificationsOn(false);
+    }
     updateFollowStatus(id, newFollowState);
     
     try {
@@ -282,10 +292,42 @@ const UserProfile = () => {
       const action = newFollowState ? 'followed' : 'unfollowed';
     } catch (error) {
       // Revert on error
-      setIsFollowing(!newFollowState);
-      setFollowersCount((prev) => !newFollowState ? prev + 1 : prev - 1);
-      updateFollowStatus(id, !newFollowState);
+      const revertedFollow = !newFollowState;
+      setIsFollowing(revertedFollow);
+      setFollowersCount((prev) => (newFollowState ? prev - 1 : prev + 1));
+      setIsNotificationsOn(
+        revertedFollow && profileUser
+          ? isUserSubscribedToCreator(profileUser, currentUser.$id)
+          : false
+      );
+      updateFollowStatus(id, revertedFollow);
       Alert.alert(t('common.error'), error.message || t('profile.alerts.followError'));
+    }
+  };
+
+  const handleNotificationToggle = async () => {
+    if (!currentUser?.$id || !id || togglingNotifications) return;
+
+    if (!isFollowing) {
+      Alert.alert(
+        t('profile.actions.notificationsFollowRequiredTitle'),
+        t('profile.actions.notificationsFollowRequiredMessage')
+      );
+      return;
+    }
+
+    const profileId = Array.isArray(id) ? id[0] : id;
+    const nextState = !isNotificationsOn;
+    setIsNotificationsOn(nextState);
+    setTogglingNotifications(true);
+
+    try {
+      await toggleCreatorNotificationSubscription(profileId, currentUser.$id);
+    } catch (error) {
+      setIsNotificationsOn(!nextState);
+      Alert.alert(t('common.error'), error.message || t('profile.alerts.notificationError'));
+    } finally {
+      setTogglingNotifications(false);
     }
   };
 
@@ -897,12 +939,42 @@ const UserProfile = () => {
                   paddingVertical: 24,
                   borderRadius: 24,
                   overflow: 'hidden',
+                  position: 'relative',
                 }}
                 imageStyle={{
                   borderRadius: 24,
                   opacity: isDarkMode ? 0.45 : 0.85,
                 }}
               >
+                {currentUser?.$id && currentUser.$id !== id ? (
+                  <TouchableOpacity
+                    onPress={handleNotificationToggle}
+                    disabled={togglingNotifications}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      isNotificationsOn
+                        ? t('profile.actions.notificationsOn')
+                        : t('profile.actions.notificationsOff')
+                    }
+                    style={{
+                      position: 'absolute',
+                      top: 14,
+                      right: 14,
+                      zIndex: 2,
+                      width: 40,
+                      height: 40,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: togglingNotifications ? 0.5 : 1,
+                    }}
+                  >
+                    <Feather
+                      name={isNotificationsOn ? 'bell' : 'bell-off'}
+                      size={24}
+                      color={isNotificationsOn ? '#FFA500' : '#A78BFA'}
+                    />
+                  </TouchableOpacity>
+                ) : null}
                 {/* Profile Picture */}
                 <View className="w-20 h-20 border border-secondary items-center justify-center mb-4 rounded-lg">
                   <Image
