@@ -440,10 +440,18 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
     setTokenLoading(true);
     (async () => {
       try {
-        const t = await getVideoSDKToken(effectiveRoomId, user.$id, { purpose: 'live' });
+        const tokenOptions = { purpose: 'live' };
+
+        const meetingToken = await getVideoSDKToken(
+          effectiveRoomId,
+          user.$id,
+          tokenOptions
+        );
         if (cancelled) return;
-        if (t) {
-          const validation = validateMeetingToken(t, effectiveRoomId, { requireMod: false });
+        if (meetingToken) {
+          const validation = validateMeetingToken(meetingToken, effectiveRoomId, {
+            requireMod: false,
+          });
           if (!validation.ok) {
             if (!cancelled) setTokenError(validation.error);
             return;
@@ -452,7 +460,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
             if (validation.participantId) {
               setMeetingParticipantId(validation.participantId);
             }
-            setToken(t);
+            setToken(meetingToken);
           }
           return;
         }
@@ -466,7 +474,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
     return () => {
       cancelled = true;
     };
-  }, [effectiveRoomId, user?.$id]);
+  }, [effectiveRoomId, user?.$id, stream]);
 
   const handleFollowToggle = async () => {
     if (!user?.$id || !stream?.hostId) {

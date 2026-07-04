@@ -1633,9 +1633,10 @@ const Create = () => {
               { ...form, userId: user.$id },
               processedVideo
             );
-            if (muxPost?.$id && !muxPost._muxWaitTimedOut) {
+            if (muxPost?.$id) {
               scheduleCreatorSubscriberNotifications({
                 creatorId: user.$id,
+                creatorAccount: user,
                 type: 'video_post',
                 postId: muxPost.$id,
                 title: form.title,
@@ -1649,6 +1650,7 @@ const Create = () => {
             });
             scheduleCreatorSubscriberNotifications({
               creatorId: user.$id,
+              creatorAccount: user,
               type: 'video_post',
               postId: videoPost.$id,
               title: form.title,
@@ -1955,6 +1957,7 @@ const Create = () => {
 
         scheduleCreatorSubscriberNotifications({
           creatorId: user.$id,
+          creatorAccount: user,
           type: 'photo_post',
           postId: photoPost.$id,
           title: photoForm.title || photoForm.caption,

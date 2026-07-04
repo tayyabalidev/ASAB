@@ -4,10 +4,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View, Modal as RNModal, Pressable } from "react-native";
-import { Query } from 'react-native-appwrite';
+import { Query, ID } from 'react-native-appwrite';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { account, appwriteConfig, databases, getCurrentUser, storage, uploadFile, createNotification } from '../../lib/appwrite';
 import { sendMessagePushNotification } from '../../lib/pushNotificationService';
+import { useUserMessages } from '../../hooks/useUserMessages';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import { Audio } from 'expo-av';
@@ -143,6 +144,19 @@ const Chat = () => {
     groups: t('chat.tabs.groups'),
     users: t('chat.tabs.users'),
   }), [t]);
+
+  const groupIds = useMemo(() => groups.map((g) => g.$id), [groups]);
+  const { messages: subscribedMessages } = useUserMessages(groupIds);
+
+  useEffect(() => {
+    if (!subscribedMessages) return;
+    setAllMessages((prev) => {
+      if (!subscribedMessages.length) {
+        return prev.filter((m) => m.optimistic);
+      }
+      return mergeMessageLists(prev, subscribedMessages);
+    });
+  }, [subscribedMessages]);
 
   // Add this function at the top level of the component
   // Update fetchMessagesForChat to only append new messages
@@ -314,97 +328,55 @@ const Chat = () => {
     }       
   }, [selectedUser, messages.length, sending]);
 
-  // 1. Robust polling for allMessages every 2 seconds
+  // Sync open chat + mark unread as read when messages update (realtime)
   useEffect(() => {
-    if (!currentUser) return;
-    let isMounted = true;
-    let intervalId = null;
-    const pollAllMessages = async () => {
-      try {
-        const groupIds = groups.map(g => g.$id);
-        const res = await databases.listDocuments(
-          appwriteConfig.databaseId,
-          appwriteConfig.messagesCollectionId,
-          [
-            ...buildUserMessagesQuery(currentUser.$id, groupIds),
-            Query.orderDesc('$createdAt'),
-            Query.limit(MESSAGE_PAGE_SIZE),
-          ]
-        );
-        if (!isMounted) return;
-        setAllMessages(prev => mergeMessageLists(prev, res.documents));
-      } catch (e) {}
-    };
-    pollAllMessages();
-    intervalId = setInterval(pollAllMessages, 2000);
-    return () => {
-      isMounted = false;
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [currentUser, groups]);
+    if (!selectedUser?.$id || !currentUser || !selectedUser.type) return;
 
-  // Replace polling for open chat with logic that fetches and sets only that chat's messages, and marks unread as read
-  useEffect(() => {
-    if (!selectedUser || !selectedUser.$id || !currentUser || !selectedUser.type) return;
     let isMounted = true;
-    let intervalId = null;
-    const fetchAndMarkRead = async () => {
+
+    const syncOpenChat = async () => {
       let newMessages = [];
-      try {
-        if (selectedUser.type === 'group') {
-          newMessages = await fetchAllDocuments(
+      if (selectedUser.type === 'group') {
+        newMessages = allMessages
+          .filter((m) => m.chatId === selectedUser.$id)
+          .sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
+      } else {
+        newMessages = allMessages
+          .filter(
+            (m) =>
+              (m.senderId === currentUser.$id && m.receiverId === selectedUser.$id) ||
+              (m.senderId === selectedUser.$id && m.receiverId === currentUser.$id)
+          )
+          .sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
+      }
+
+      if (!isMounted) return;
+      setMessages(newMessages);
+
+      const unread = newMessages.filter(
+        (m) => m.receiverId === currentUser.$id && m.is_read === false
+      );
+      for (const msg of unread) {
+        try {
+          await databases.updateDocument(
+            appwriteConfig.databaseId,
             appwriteConfig.messagesCollectionId,
-            [Query.equal('chatId', [selectedUser.$id]), Query.orderDesc('$createdAt')]
+            msg.$id,
+            { is_read: true }
           );
-          newMessages = newMessages.reverse();
-        } else {
-          newMessages = await fetchAllDocuments(
-            appwriteConfig.messagesCollectionId,
-            [
-              Query.or([
-                Query.and([
-                  Query.equal('senderId', [currentUser.$id]),
-                  Query.equal('receiverId', [selectedUser.$id])
-                ]),
-                Query.and([
-                  Query.equal('senderId', [selectedUser.$id]),
-                  Query.equal('receiverId', [currentUser.$id])
-                ])
-              ]),
-              Query.orderDesc('$createdAt')
-            ]
+          if (!isMounted) return;
+          setAllMessages((prev) =>
+            prev.map((m) => (m.$id === msg.$id ? { ...m, is_read: true } : m))
           );
-          newMessages = newMessages.reverse();
-        }
-        if (!isMounted) return;
-        setMessages(newMessages);
-        setAllMessages(prev => mergeMessageLists(prev, newMessages));
-        const unread = newMessages.filter(m => m.receiverId === currentUser.$id && m.is_read === false);
-        for (const msg of unread) {
-          try {
-            await databases.updateDocument(
-              appwriteConfig.databaseId,
-              appwriteConfig.messagesCollectionId,
-              msg.$id,
-              { is_read: true }
-            );
-            if (!isMounted) return;
-            setAllMessages(prev =>
-              prev.map(m =>
-                m.$id === msg.$id ? { ...m, is_read: true } : m
-              )
-            );
-          } catch (e) {}
-        }
-      } catch (e) {}
+        } catch (_) {}
+      }
     };
-    fetchAndMarkRead();
-    intervalId = setInterval(fetchAndMarkRead, 3000);
+
+    syncOpenChat();
     return () => {
       isMounted = false;
-      if (intervalId) clearInterval(intervalId);
     };
-  }, [selectedUser, currentUser]);
+  }, [selectedUser, currentUser, allMessages]);
 
   // Centralized sendMessage function
   const sendMessage = async ({ type, content = '', fileUrl = '', optimistic = true }) => {
@@ -451,7 +423,7 @@ const Chat = () => {
       const savedMessage = await databases.createDocument(
         appwriteConfig.databaseId,
         appwriteConfig.messagesCollectionId,
-        "unique()",
+        ID.unique(),
         {
           ...messageData,
           // For backward compatibility, store fileUrl in content if fileUrl is not present
@@ -1032,7 +1004,7 @@ const Chat = () => {
         const newRead = await databases.createDocument(
           appwriteConfig.databaseId,
           appwriteConfig.chatReadsCollectionId,
-               "unique()",
+          ID.unique(),
 
           {
             userId: currentUser.$id,
@@ -1078,7 +1050,7 @@ const Chat = () => {
           chatDoc = await databases.createDocument(
             appwriteConfig.databaseId,
             appwriteConfig.chatsCollectionId,
-                 "unique()",
+            ID.unique(),
 
             {
               type: 'private',
@@ -2448,7 +2420,7 @@ const Chat = () => {
                       const newGroup = await databases.createDocument(
                         appwriteConfig.databaseId,
                         appwriteConfig.chatsCollectionId,
-                        "unique()",
+                        ID.unique(),
                         {
                           name: groupName.trim(),
                           type: 'group',

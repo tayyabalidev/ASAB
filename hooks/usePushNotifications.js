@@ -9,6 +9,8 @@ import {
   navigateFromPushPayload,
   registerForPushNotifications,
 } from '../lib/pushNotificationService';
+import { refreshNotificationsFromPush } from '../lib/notificationService';
+import { refreshMessagesFromPush } from '../lib/messageService';
 
 /**
  * Registers the device push token and routes notification taps (live streams, messages).
@@ -66,6 +68,20 @@ export function usePushNotifications() {
       responseSub.remove();
     };
   }, [tryNavigate]);
+
+  // Foreground push — refresh inbox/messages immediately
+  useEffect(() => {
+    if (!isPushAvailable()) return undefined;
+
+    const receivedSub = Notifications.addNotificationReceivedListener(() => {
+      refreshNotificationsFromPush();
+      refreshMessagesFromPush();
+    });
+
+    return () => {
+      receivedSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isPushAvailable() || !isLogged || !user?.$id) return;

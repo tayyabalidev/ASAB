@@ -11,6 +11,8 @@ import { getCurrentUser, account, databases, ID, Query, getOrCreateFacebookUser,
 import { isPasswordRecoveryDeepLink, parseRecoveryDeepLink } from '../lib/passwordRecovery';
 import { useBadgeNotifications } from '../hooks/useBadgeNotifications';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { NotificationProvider } from '../context/NotificationProvider';
+import { MessageProvider } from '../context/MessageProvider';
 import IncomingCallHandler from '../components/IncomingCallHandler';
 import { canLoadVideoSdkNative } from '../lib/videosdkNativeGate';
 
@@ -407,6 +409,8 @@ export default function RootLayout() {
   return (
     <StripeProvider publishableKey={stripePublishableKey || 'pk_test_placeholder_key_that_will_fail_but_allow_app_to_load'}>
       <GlobalProvider>
+        <NotificationProvider>
+        <MessageProvider>
         <OAuthHandler />
         <BadgeNotificationHandler />
         <PushNotificationHandler />
@@ -453,6 +457,8 @@ export default function RootLayout() {
             }} 
           />
         </Stack>
+        </MessageProvider>
+        </NotificationProvider>
       </GlobalProvider>
     </StripeProvider>
   );

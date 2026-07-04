@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useGlobalContext } from '../../context/GlobalProvider';
 import { getActiveLiveStreams, endLiveStream, forceEndUserStreams, resolveLiveStreamThumbnailUrl } from '../../lib/livestream';
+import { isPaidLiveStream, getStreamAccessPrice } from '../../lib/streamAccess';
 import { EmptyState } from '../../components';
 
 const LiveStreamCard = ({ stream, onPress, onEndStream, currentUserId, t, isRTL }) => {
@@ -45,6 +46,17 @@ const LiveStreamCard = ({ stream, onPress, onEndStream, currentUserId, t, isRTL 
         {stream.liveMode === 'screen' ? (
           <View style={[styles.modeBadge, styles.modeBadgeScreen]}>
             <Text style={styles.modeBadgeText}>{t('live.modeScreen')}</Text>
+          </View>
+        ) : null}
+
+        {isPaidLiveStream(stream) ? (
+          <View style={[styles.modeBadge, styles.paidBadge]}>
+            <Text style={styles.paidBadgeText}>
+              {t('paidStream.listBadge', {
+                currency: String(stream.currency || 'USD').toUpperCase(),
+                amount: getStreamAccessPrice(stream).toFixed(2),
+              })}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -343,6 +355,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '700',
+  },
+  paidBadge: {
+    bottom: 10,
+    right: 10,
+    left: undefined,
+    backgroundColor: 'rgba(167, 125, 248, 0.92)',
+  },
+  paidBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
   },
   cardInfo: {
     padding: 15,

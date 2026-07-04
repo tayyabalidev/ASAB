@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Image, ImageBackground, FlatList, TouchableOpacity, Text, Alert, Linking, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, FlatList as RNFlatList, Share } from "react-native";
+import { View, Image, ImageBackground, FlatList, TouchableOpacity, Text, Alert, Linking, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, FlatList as RNFlatList, Share, ScrollView } from "react-native";
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { Query } from 'react-native-appwrite';
 import { Video, ResizeMode } from "expo-av";
@@ -16,7 +16,7 @@ import { getUserPosts, getCurrentUser, databases, appwriteConfig, getVideoPoster
 import { useGlobalContext } from "../../../context/GlobalProvider";
 import { EmptyState, VideoProgressBar } from "../../../components";
 import CallButton from "../../../components/CallButton";
-import { toggleFollowUser, getFollowers, getUserLikesCount, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLike, isPostLiked, getLikeCount } from "../../../lib/appwrite";
+import { toggleFollowUser, getFollowers, getUserLikesCount, getProfileLikers, toggleProfileLike, isProfileLiked, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLike, isPostLiked, getLikeCount } from "../../../lib/appwrite";
 import { toggleCreatorNotificationSubscription, isUserSubscribedToCreator } from "../../../lib/creatorSubscriptions";
 import { images } from "../../../constants";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../../lib/mediaType";
@@ -36,6 +36,10 @@ const UserProfile = () => {
   const [togglingNotifications, setTogglingNotifications] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
+  const [likesModalVisible, setLikesModalVisible] = useState(false);
+  const [likesModalData, setLikesModalData] = useState([]);
+  const [isProfileLikedByMe, setIsProfileLikedByMe] = useState(false);
+  const [togglingProfileLike, setTogglingProfileLike] = useState(false);
   const [playingIndex, setPlayingIndex] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalVideo, setModalVideo] = useState(null);
@@ -156,6 +160,13 @@ const UserProfile = () => {
 
         const totalLikes = await getUserLikesCount(id);
         if (isMounted) setLikesCount(totalLikes);
+
+        if (currentUser && currentUser.$id !== id) {
+          const liked = await isProfileLiked(currentUser.$id, id);
+          if (isMounted) setIsProfileLikedByMe(liked);
+        } else if (isMounted) {
+          setIsProfileLikedByMe(false);
+        }
       } catch (error) {
         if (isMounted) {
           Alert.alert(t('common.error'), error.message || t('profile.alerts.loadProfileError'));
@@ -270,6 +281,55 @@ const UserProfile = () => {
       Alert.alert(t('profile.alerts.requestSentTitle'), t('profile.alerts.requestSentMessage'));
     } catch (error) {
       Alert.alert(t('common.error'), t('profile.alerts.requestError'));
+    }
+  };
+
+  const openLikesModal = async () => {
+    if (currentUser?.$id !== id) return;
+    setLikesModalVisible(true);
+    setLikesModalData([]);
+    try {
+      const likers = await getProfileLikers(id);
+      setLikesModalData(likers || []);
+    } catch (error) {
+      Alert.alert(t('common.error'), t('profile.alerts.loadProfileError'));
+    }
+  };
+
+  const closeLikesModal = () => {
+    setLikesModalVisible(false);
+    setLikesModalData([]);
+  };
+
+  const handleProfileLikeToggle = async () => {
+    if (!currentUser?.$id) {
+      Alert.alert(t('common.error'), t('profile.alerts.profileLikeLogin'));
+      return;
+    }
+    if (!id || currentUser.$id === id || togglingProfileLike) return;
+
+    const nextLiked = !isProfileLikedByMe;
+    setIsProfileLikedByMe(nextLiked);
+    setLikesCount((prev) => (nextLiked ? prev + 1 : Math.max(0, prev - 1)));
+    setTogglingProfileLike(true);
+
+    try {
+      const result = await toggleProfileLike(currentUser.$id, id);
+      setIsProfileLikedByMe(result.isLiked);
+      setLikesCount(result.profileLikes?.length || 0);
+      setProfileUser((prev) => (prev ? { ...prev, profileLikes: result.profileLikes } : prev));
+    } catch (error) {
+      setIsProfileLikedByMe(!nextLiked);
+      setLikesCount((prev) => (nextLiked ? Math.max(0, prev - 1) : prev + 1));
+      const message = error?.message || t('profile.alerts.profileLikeError');
+      Alert.alert(
+        t('common.error'),
+        message.includes('profileLikes') || message.includes('Unknown attribute')
+          ? 'Profile likes are not set up yet. Add a profileLikes string array on the users collection in Appwrite.'
+          : message
+      );
+    } finally {
+      setTogglingProfileLike(false);
     }
   };
 
@@ -947,33 +1007,60 @@ const UserProfile = () => {
                 }}
               >
                 {currentUser?.$id && currentUser.$id !== id ? (
-                  <TouchableOpacity
-                    onPress={handleNotificationToggle}
-                    disabled={togglingNotifications}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      isNotificationsOn
-                        ? t('profile.actions.notificationsOn')
-                        : t('profile.actions.notificationsOff')
-                    }
-                    style={{
-                      position: 'absolute',
-                      top: 14,
-                      right: 14,
-                      zIndex: 2,
-                      width: 40,
-                      height: 40,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      opacity: togglingNotifications ? 0.5 : 1,
-                    }}
-                  >
-                    <Feather
-                      name={isNotificationsOn ? 'bell' : 'bell-off'}
-                      size={24}
-                      color={isNotificationsOn ? '#FFA500' : '#A78BFA'}
-                    />
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity
+                      onPress={handleProfileLikeToggle}
+                      disabled={togglingProfileLike}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        isProfileLikedByMe ? t('profile.actions.unlike') : t('profile.actions.like')
+                      }
+                      style={{
+                        position: 'absolute',
+                        top: 14,
+                        left: 14,
+                        zIndex: 2,
+                        width: 40,
+                        height: 40,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: togglingProfileLike ? 0.5 : 1,
+                      }}
+                    >
+                      <Feather
+                        name="heart"
+                        size={24}
+                        color={isProfileLikedByMe ? '#FF4D6D' : '#aaa'}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={handleNotificationToggle}
+                      disabled={togglingNotifications}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        isNotificationsOn
+                          ? t('profile.actions.notificationsOn')
+                          : t('profile.actions.notificationsOff')
+                      }
+                      style={{
+                        position: 'absolute',
+                        top: 14,
+                        right: 14,
+                        zIndex: 2,
+                        width: 40,
+                        height: 40,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: togglingNotifications ? 0.5 : 1,
+                      }}
+                    >
+                      <Feather
+                        name={isNotificationsOn ? 'bell' : 'bell-off'}
+                        size={24}
+                        color={isNotificationsOn ? '#FFA500' : '#A78BFA'}
+                      />
+                    </TouchableOpacity>
+                  </>
                 ) : null}
                 {/* Profile Picture */}
                 <View className="w-20 h-20 border border-secondary items-center justify-center mb-4 rounded-lg">
@@ -997,8 +1084,17 @@ const UserProfile = () => {
                     <Text style={{ color: '#aaa', fontSize: 13 }}>{t('profile.stats.followers')}</Text>
                   </View>
                   <View style={{ alignItems: 'center', marginHorizontal: 18 }}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>{likesCount}</Text>
-                    <Text style={{ color: '#aaa', fontSize: 13 }}>{t('profile.stats.likes')}</Text>
+                    {currentUser?.$id === id ? (
+                      <TouchableOpacity onPress={openLikesModal} activeOpacity={0.85}>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>{likesCount}</Text>
+                        <Text style={{ color: '#aaa', fontSize: 13 }}>{t('profile.stats.likes')}</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <>
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17 }}>{likesCount}</Text>
+                        <Text style={{ color: '#aaa', fontSize: 13 }}>{t('profile.stats.likes')}</Text>
+                      </>
+                    )}
                   </View>
                 </View>
                 
@@ -1887,6 +1983,101 @@ const UserProfile = () => {
            </PanGestureHandler>
          </GestureHandlerRootView>
        )}
+     </Modal>
+
+     <Modal
+       visible={likesModalVisible}
+       animationType="slide"
+       transparent={true}
+       onRequestClose={closeLikesModal}
+     >
+       <View
+         style={{
+           flex: 1,
+           backgroundColor: 'rgba(0,0,0,0.55)',
+           justifyContent: 'center',
+           alignItems: 'center',
+           paddingHorizontal: 20,
+         }}
+       >
+         <View
+           style={{
+             backgroundColor: '#1a1a2e',
+             padding: 24,
+             borderRadius: 12,
+             width: '100%',
+             maxWidth: 350,
+             maxHeight: 500,
+             borderWidth: 1,
+             borderColor: '#333',
+           }}
+         >
+           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+             <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>
+               {t('profile.modals.likesTitle')}
+             </Text>
+             <TouchableOpacity onPress={closeLikesModal}>
+               <Text style={{ color: '#fff', fontSize: 20 }}>✕</Text>
+             </TouchableOpacity>
+           </View>
+
+           <ScrollView style={{ maxHeight: 400 }}>
+             {likesModalData.length > 0 ? (
+               likesModalData.map((liker) => (
+                 <TouchableOpacity
+                   key={liker.$id}
+                   onPress={() => {
+                     closeLikesModal();
+                     router.push(`/profile/${liker.$id}`);
+                   }}
+                   style={{
+                     flexDirection: 'row',
+                     alignItems: 'center',
+                     paddingVertical: 12,
+                     borderBottomWidth: 1,
+                     borderBottomColor: '#333',
+                   }}
+                 >
+                   <View
+                     style={{
+                       width: 40,
+                       height: 40,
+                       borderRadius: 20,
+                       backgroundColor: '#333',
+                       alignItems: 'center',
+                       justifyContent: 'center',
+                       marginRight: 12,
+                       overflow: 'hidden',
+                     }}
+                   >
+                     {liker.avatar ? (
+                       <Image
+                         source={{ uri: liker.avatar }}
+                         style={{ width: 40, height: 40, borderRadius: 20 }}
+                         resizeMode="cover"
+                       />
+                     ) : (
+                       <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
+                         {liker.username ? liker.username.charAt(0).toUpperCase() : 'U'}
+                       </Text>
+                     )}
+                   </View>
+                   <View style={{ flex: 1 }}>
+                     <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
+                       {liker.username || t('profile.general.unknownUser')}
+                     </Text>
+                     <Text style={{ color: '#aaa', fontSize: 14 }}>@{liker.username || 'unknown'}</Text>
+                   </View>
+                 </TouchableOpacity>
+               ))
+             ) : (
+               <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                 <Text style={{ color: '#aaa', fontSize: 16 }}>{t('profile.modals.noProfileLikes')}</Text>
+               </View>
+             )}
+           </ScrollView>
+         </View>
+       </View>
      </Modal>
    </SafeAreaView>
  </>

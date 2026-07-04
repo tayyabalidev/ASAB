@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getProfileLikers, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri, getCurrentUser } from "../../lib/appwrite";
 import { useNotifications } from "../../hooks/useNotifications";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../lib/muxPlayback";
 import { useGlobalContext } from "../../context/GlobalProvider";
@@ -230,6 +230,17 @@ const Profile = () => {
       if (refetchPhotos) {
         refetchPhotos();
       }
+
+      if (user?.$id) {
+        getCurrentUser()
+          .then((freshUser) => {
+            if (freshUser) {
+              setUser(freshUser);
+            }
+          })
+          .catch(() => {});
+      }
+      
       // Bookmarks will be refreshed automatically by useEffect when activeSection is 'bookmarks'
       
       // Check if user returned from Stripe onboarding
@@ -242,7 +253,7 @@ const Profile = () => {
           .catch(err => {
           });
       }
-    }, [refetchPosts, refetchPhotos, user?.stripeAccountId, showEarningsDashboard])
+    }, [refetchPosts, refetchPhotos, user?.$id, user?.stripeAccountId, showEarningsDashboard, setUser])
   );
 
   // Stop videos when profile loses focus
@@ -549,8 +560,8 @@ const Profile = () => {
     fetchEarningsData();
   }, [user?.$id, user?.stripeAccountId]);
 
-  // Calculate total likes from all posts
-  const totalLikes = posts?.reduce((total, post) => total + (post.likes?.length || 0), 0) || 0;
+  // Profile page likes — people who liked your profile
+  const profileLikesCount = user?.profileLikes?.length || 0;
 
   // Helper functions for earnings
   const formatCurrency = (amount) => {
@@ -1234,6 +1245,9 @@ const Profile = () => {
         } else if (followModalType === 'following') {
           const updatedFollowing = await getFollowing(user.$id);
           setFollowModalData(updatedFollowing || []);
+        } else if (followModalType === 'likes') {
+          const updatedLikers = await getProfileLikers(user.$id);
+          setFollowModalData(updatedLikers || []);
         }
       }
       
@@ -1344,17 +1358,23 @@ const Profile = () => {
 
   // Handle following/followers modal
   const openFollowModal = async (type) => {
+    if (!user?.$id) return;
+
+    setFollowModalType(type);
+    setFollowModalVisible(true);
+
     try {
-      setFollowModalType(type);
-      setFollowModalVisible(true);
-      
       if (type === 'following') {
         setFollowModalData(following || []);
       } else if (type === 'followers') {
         setFollowModalData(followers || []);
+      } else if (type === 'likes') {
+        setFollowModalData([]);
+        const likers = await getProfileLikers(user.$id);
+        setFollowModalData(likers || []);
       }
     } catch (error) {
-      
+      Alert.alert(t('common.error'), t('profile.alerts.loadProfileError'));
     }
   };
 
@@ -1362,6 +1382,12 @@ const Profile = () => {
     setFollowModalVisible(false);
     setFollowModalType('');
     setFollowModalData([]);
+  };
+
+  const handleModalUserPress = (userId) => {
+    if (!userId) return;
+    closeFollowModal();
+    router.push(`/profile/${userId}`);
   };
 
   const themedColor = useCallback(
@@ -1676,12 +1702,16 @@ const Profile = () => {
                   </Text>
                 </TouchableOpacity>
                 <View style={{ width: 1, height: 40, backgroundColor: theme.divider }} />
-                <View style={{ flex: 1, alignItems: "center" }}>
-                  <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: "800" }}>{totalLikes}</Text>
+                <TouchableOpacity
+                  style={{ flex: 1, alignItems: "center" }}
+                  onPress={() => openFollowModal("likes")}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: "800" }}>{profileLikesCount}</Text>
                   <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "600", marginTop: 4 }}>
                     {t("profile.stats.likes")}
                   </Text>
-                </View>
+                </TouchableOpacity>
               </View>
 
               {user?.bio || user?.birthday ? (
@@ -3408,7 +3438,11 @@ const Profile = () => {
             >
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                 <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: "bold" }}>
-                  {followModalType === 'following' ? t('profile.modals.followingTitle') : t('profile.modals.followersTitle')}
+                  {followModalType === 'following'
+                    ? t('profile.modals.followingTitle')
+                    : followModalType === 'followers'
+                      ? t('profile.modals.followersTitle')
+                      : t('profile.modals.likesTitle')}
                 </Text>
                 <TouchableOpacity onPress={closeFollowModal}>
                   <Text style={{ color: theme.textPrimary, fontSize: 20 }}>✕</Text>
@@ -3431,40 +3465,46 @@ const Profile = () => {
                           borderBottomColor: theme.divider,
                         }}
                       >
-                        <View
-                          style={{
-                            width: 40,
-                            height: 40,
-                            borderRadius: 20,
-                            backgroundColor: theme.accentSoft,
-                            alignItems: "center",
-                            justifyContent: "center",
-                            marginRight: 12,
-                            overflow: "hidden",
-                            borderWidth: 1,
-                            borderColor: theme.border,
-                          }}
+                        <TouchableOpacity
+                          onPress={() => handleModalUserPress(modalUser.$id)}
+                          activeOpacity={0.7}
+                          style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
                         >
-                          {modalUser.avatar ? (
-                            <Image
-                              source={{ uri: modalUser.avatar }}
-                              style={{ width: 40, height: 40, borderRadius: 20 }}
-                              resizeMode="cover"
-                            />
-                          ) : (
+                          <View
+                            style={{
+                              width: 40,
+                              height: 40,
+                              borderRadius: 20,
+                              backgroundColor: theme.accentSoft,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              marginRight: 12,
+                              overflow: "hidden",
+                              borderWidth: 1,
+                              borderColor: theme.border,
+                            }}
+                          >
+                            {modalUser.avatar ? (
+                              <Image
+                                source={{ uri: modalUser.avatar }}
+                                style={{ width: 40, height: 40, borderRadius: 20 }}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "bold" }}>
+                                {modalUser.username ? modalUser.username.charAt(0).toUpperCase() : 'U'}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={{ flex: 1 }}>
                             <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "bold" }}>
-                              {modalUser.username ? modalUser.username.charAt(0).toUpperCase() : 'U'}
+                              {modalUser.username || t('profile.general.unknownUser')}
                             </Text>
-                          )}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: "bold" }}>
-                            {modalUser.username || t('profile.general.unknownUser')}
-                          </Text>
-                          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
-                            @{modalUser.username || 'unknown'}
-                          </Text>
-                        </View>
+                            <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+                              @{modalUser.username || 'unknown'}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
                         {modalUser.$id !== user?.$id && (
                           <TouchableOpacity
                             onPress={() => handleFollowToggle(modalUser.$id)}
@@ -3486,7 +3526,11 @@ const Profile = () => {
                 ) : (
                   <View style={{ alignItems: "center", paddingVertical: 40 }}>
                     <Text style={{ color: theme.textSecondary, fontSize: 16 }}>
-                      {followModalType === 'following' ? t('profile.modals.notFollowing') : t('profile.modals.noFollowers')}
+                      {followModalType === 'following'
+                        ? t('profile.modals.notFollowing')
+                        : followModalType === 'followers'
+                          ? t('profile.modals.noFollowers')
+                          : t('profile.modals.noProfileLikes')}
                     </Text>
                   </View>
                 )}

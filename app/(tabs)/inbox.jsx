@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { View, Image, FlatList, TouchableOpacity, Text, Alert, TextInput, Platform } from "react-native";
-import { Query } from 'react-native-appwrite';
 
 import { icons } from "../../constants";
 import { databases, appwriteConfig, toggleFollowUser, markNotificationAsRead } from "../../lib/appwrite";
 import { refreshNotificationUpdates } from "../../lib/notificationService";
 import { useNotifications } from "../../hooks/useNotifications";
+import { useUserMessages } from "../../hooks/useUserMessages";
 import { getCallById } from "../../lib/calls";
 import { CallState } from "../../lib/callHelper";
 import { useGlobalContext } from "../../context/GlobalProvider";
@@ -41,6 +41,8 @@ const getNotificationMessage = (item, t) => {
   switch (item.type) {
     case 'follow':
       return 'started following you';
+    case 'profile_like':
+      return 'liked your profile';
     case 'like':
       return 'liked your post';
     case 'comment':
@@ -64,12 +66,79 @@ const Inbox = () => {
   const { t } = useTranslation();
   const { user: currentUser, theme, isDarkMode, followStatus, updateFollowStatus } = useGlobalContext();
   const { notifications, setNotifications, loading: notificationsLoading } = useNotifications();
-  const [recentMessages, setRecentMessages] = useState([]);
-  const [messagesLoading, setMessagesLoading] = useState(true);
+  const { messages: allUserMessages, loading: messagesLoading } = useUserMessages();
   const [followingStates, setFollowingStates] = useState({});
   const [searchActive, setSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const mountedRef = useRef(true);
+
+  const recentMessages = useMemo(() => {
+    if (!currentUser?.$id || !allUserMessages.length) return [];
+
+    const partnerMap = new Map();
+    allUserMessages.forEach((msg) => {
+      const otherUserId = msg.senderId === currentUser.$id ? msg.receiverId : msg.senderId;
+      if (!otherUserId || otherUserId === currentUser.$id) return;
+      if (!partnerMap.has(otherUserId)) partnerMap.set(otherUserId, []);
+      partnerMap.get(otherUserId).push(msg);
+    });
+
+    return [...partnerMap.entries()]
+      .map(([otherUserId, messages]) => ({
+        $id: otherUserId,
+        otherUserId,
+        otherUsername: 'User',
+        otherUserAvatar: images.profile,
+        messages,
+        _needsProfile: true,
+      }))
+      .sort((a, b) => {
+        const aLast = Math.max(...a.messages.map((m) => new Date(m.$createdAt).getTime()));
+        const bLast = Math.max(...b.messages.map((m) => new Date(m.$createdAt).getTime()));
+        return bLast - aLast;
+      });
+  }, [allUserMessages, currentUser?.$id]);
+
+  const [recentMessagesEnriched, setRecentMessagesEnriched] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const enrich = async () => {
+      if (!recentMessages.length) {
+        if (!cancelled) setRecentMessagesEnriched([]);
+        return;
+      }
+
+      const enriched = await Promise.all(
+        recentMessages.map(async (chat) => {
+          let otherUsername = 'User';
+          let otherUserAvatar = images.profile;
+          try {
+            const user = await databases.getDocument(
+              appwriteConfig.databaseId,
+              appwriteConfig.userCollectionId,
+              chat.otherUserId
+            );
+            otherUsername = user.username || user.email || 'User';
+            otherUserAvatar = getAvatarUrl(user.avatar);
+          } catch (_) {}
+          return { ...chat, otherUsername, otherUserAvatar };
+        })
+      );
+
+      if (!cancelled) setRecentMessagesEnriched(enriched);
+    };
+
+    enrich();
+    return () => {
+      cancelled = true;
+    };
+  }, [recentMessages]);
+
+  const displayRecentMessages = recentMessagesEnriched.length
+    ? recentMessagesEnriched
+    : recentMessages;
 
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -80,11 +149,8 @@ const Inbox = () => {
 
   useEffect(() => {
     mountedRef.current = true;
-    fetchRecentMessages();
-    const intervalId = setInterval(fetchRecentMessages, 20000);
     return () => {
       mountedRef.current = false;
-      clearInterval(intervalId);
     };
   }, [currentUser]);
 
@@ -103,76 +169,6 @@ const Inbox = () => {
       setFollowingStates(states);
     }
   }, [notifications, currentUser, followStatus]);
-
-  const fetchRecentMessages = async () => {
-    if (!currentUser?.$id) return;
-    try {
-      const PAGE_SIZE = 100;
-      const allMsgs = [];
-      let offset = 0;
-      while (true) {
-        const page = await databases.listDocuments(
-          appwriteConfig.databaseId,
-          appwriteConfig.messagesCollectionId,
-          [
-            Query.or([
-              Query.equal('senderId', [currentUser.$id]),
-              Query.equal('receiverId', [currentUser.$id]),
-            ]),
-            Query.orderDesc('$createdAt'),
-            Query.limit(PAGE_SIZE),
-            Query.offset(offset),
-          ]
-        );
-        allMsgs.push(...page.documents);
-        if (page.documents.length < PAGE_SIZE) break;
-        offset += PAGE_SIZE;
-      }
-
-      const partnerMap = new Map();
-      allMsgs.forEach(msg => {
-        const otherUserId = msg.senderId === currentUser.$id ? msg.receiverId : msg.senderId;
-        if (!otherUserId || otherUserId === currentUser.$id) return;
-        if (!partnerMap.has(otherUserId)) partnerMap.set(otherUserId, []);
-        partnerMap.get(otherUserId).push(msg);
-      });
-
-      const chats = await Promise.all(
-        [...partnerMap.entries()].map(async ([otherUserId, messages]) => {
-          let otherUsername = 'User';
-          let otherUserAvatar = images.profile;
-          try {
-            const user = await databases.getDocument(
-              appwriteConfig.databaseId,
-              appwriteConfig.userCollectionId,
-              otherUserId
-            );
-            otherUsername = user.username || user.email || 'User';
-            otherUserAvatar = getAvatarUrl(user.avatar);
-          } catch (_) {}
-          return {
-            $id: otherUserId,
-            otherUserId,
-            otherUsername,
-            otherUserAvatar,
-            messages,
-          };
-        })
-      );
-
-      chats.sort((a, b) => {
-        const aLast = Math.max(...a.messages.map(m => new Date(m.$createdAt).getTime()));
-        const bLast = Math.max(...b.messages.map(m => new Date(m.$createdAt).getTime()));
-        return bLast - aLast;
-      });
-
-      if (!mountedRef.current) return;
-      setRecentMessages(chats);
-    } catch (error) {
-    } finally {
-      if (mountedRef.current) setMessagesLoading(false);
-    }
-  };
 
   const getUnreadCount = (chat) => {
     if (!chat.messages) return 0;
@@ -194,7 +190,7 @@ const Inbox = () => {
       }
     }
 
-    if (notification.type === 'follow') {
+    if (notification.type === 'follow' || notification.type === 'profile_like') {
       // Navigate to user profile
       router.push(`/profile/${notification.fromUserId}`);
     } else if (notification.type === 'like' || notification.type === 'comment' || notification.type === 'video_post' || notification.type === 'photo_post') {
@@ -293,16 +289,16 @@ const Inbox = () => {
   }, [notifications, searchQuery]);
 
   const filteredRecentMessages = useMemo(() => {
-    if (!searchQuery.trim()) return recentMessages;
+    if (!searchQuery.trim()) return displayRecentMessages;
     const query = searchQuery.toLowerCase();
-    return recentMessages.filter((chat) => {
+    return displayRecentMessages.filter((chat) => {
       const username = chat.otherUsername?.toLowerCase() || '';
       const messageMatch = chat.messages?.some((msg) =>
         (msg.content || '').toLowerCase().includes(query)
       );
       return username.includes(query) || messageMatch;
     });
-  }, [recentMessages, searchQuery]);
+  }, [displayRecentMessages, searchQuery]);
 
   const followNotifications = useMemo(
     () => filteredNotifications.filter((n) => n.type === 'follow'),

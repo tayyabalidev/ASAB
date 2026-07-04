@@ -46,17 +46,20 @@ function parseQuery(req) {
     roomId: params.get('roomId') || '',
     participantId: params.get('participantId') || '',
     purpose: (params.get('purpose') || '').trim().toLowerCase(),
+    streamId: params.get('streamId') || '',
   });
 
   if (req.query && typeof req.query === 'object' && !Array.isArray(req.query)) {
     const r = req.query.roomId ?? req.query['roomId'];
     const p = req.query.participantId ?? req.query['participantId'];
     const purpose = req.query.purpose ?? req.query['purpose'];
-    if (r != null && r !== '' || p != null && p !== '' || purpose != null && purpose !== '') {
+    const streamId = req.query.streamId ?? req.query['streamId'];
+    if (r != null && r !== '' || p != null && p !== '' || purpose != null && purpose !== '' || streamId != null && streamId !== '') {
       return {
         roomId: r != null && r !== '' ? String(r) : '',
         participantId: p != null && p !== '' ? String(p) : '',
         purpose: purpose != null && String(purpose).trim() ? String(purpose).trim().toLowerCase() : '',
+        streamId: streamId != null && String(streamId).trim() ? String(streamId).trim() : '',
       };
     }
   }
@@ -150,6 +153,92 @@ async function createRoom(apiKey, secretKey) {
   return String(roomId);
 }
 
+function appwriteConfigPresent() {
+  return Boolean(
+    process.env.APPWRITE_ENDPOINT &&
+      process.env.APPWRITE_PROJECT_ID &&
+      process.env.APPWRITE_API_KEY &&
+      process.env.APPWRITE_DATABASE_ID &&
+      process.env.APPWRITE_LIVE_STREAMS_COLLECTION_ID &&
+      process.env.APPWRITE_STREAM_PURCHASES_COLLECTION_ID
+  );
+}
+
+function appwriteHeaders() {
+  return {
+    'X-Appwrite-Project': process.env.APPWRITE_PROJECT_ID,
+    'X-Appwrite-Key': process.env.APPWRITE_API_KEY,
+    'Content-Type': 'application/json',
+  };
+}
+
+async function appwriteGetDocument(collectionId, documentId) {
+  const base = String(process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
+  const db = process.env.APPWRITE_DATABASE_ID;
+  const url = `${base}/databases/${db}/collections/${collectionId}/documents/${documentId}`;
+  const response = await fetch(url, { headers: appwriteHeaders() });
+  if (!response.ok) {
+    const err = new Error('appwrite_get_failed');
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}
+
+async function appwriteListDocuments(collectionId, queries) {
+  const base = String(process.env.APPWRITE_ENDPOINT || '').replace(/\/$/, '');
+  const db = process.env.APPWRITE_DATABASE_ID;
+  const params = new URLSearchParams();
+  queries.forEach((q) => params.append('queries[]', q));
+  const url = `${base}/databases/${db}/collections/${collectionId}/documents?${params.toString()}`;
+  const response = await fetch(url, { headers: appwriteHeaders() });
+  if (!response.ok) {
+    const err = new Error('appwrite_list_failed');
+    err.status = response.status;
+    throw err;
+  }
+  const data = await response.json();
+  return data?.documents || [];
+}
+
+function isPaidStream(stream) {
+  if (!stream) return false;
+  const price = parseFloat(stream.price);
+  const hasPrice = Number.isFinite(price) && price > 0;
+  if (!hasPrice) return false;
+  if (stream.isPaid === true || stream.isPaid === 'true' || stream.isPaid === 1) {
+    return true;
+  }
+  return hasPrice;
+}
+
+async function checkStreamAccess(streamId, userId) {
+  if (!streamId || !userId) return { allowed: false, reason: 'missing_ids' };
+  if (!appwriteConfigPresent()) return { allowed: true, reason: 'appwrite_not_configured' };
+
+  try {
+    const stream = await appwriteGetDocument(
+      process.env.APPWRITE_LIVE_STREAMS_COLLECTION_ID,
+      streamId
+    );
+    if (!isPaidStream(stream)) return { allowed: true };
+    if (stream.hostId === userId) return { allowed: true };
+
+    const purchases = await appwriteListDocuments(process.env.APPWRITE_STREAM_PURCHASES_COLLECTION_ID, [
+      JSON.stringify({ method: 'equal', attribute: 'streamId', values: [streamId] }),
+      JSON.stringify({ method: 'equal', attribute: 'buyerId', values: [userId] }),
+      JSON.stringify({ method: 'equal', attribute: 'status', values: ['completed'] }),
+      JSON.stringify({ method: 'limit', values: [1] }),
+    ]);
+    return purchases.length > 0
+      ? { allowed: true }
+      : { allowed: false, reason: 'payment_required' };
+  } catch (e) {
+    if (e?.status === 404) return { allowed: false, reason: 'stream_not_found' };
+    return { allowed: false, reason: e?.message || 'access_check_failed' };
+  }
+}
+
 module.exports = async ({ req, res, log }) => {
   try {
     const method = String(req.method || 'GET').toUpperCase();
@@ -162,7 +251,7 @@ module.exports = async ({ req, res, log }) => {
     const apiKey = String(process.env.VIDEOSDK_API_KEY || '').trim();
     const secretKey = String(process.env.VIDEOSDK_SECRET_KEY || '').trim();
 
-    const { roomId, participantId, purpose } = parseQuery(req);
+    const { roomId, participantId, purpose, streamId } = parseQuery(req);
     const qs =
       typeof req.queryString === 'string' && req.queryString
         ? req.queryString
@@ -205,6 +294,23 @@ module.exports = async ({ req, res, log }) => {
 
     if (method === 'GET') {
       if (!roomId) return res.json({ error: 'roomId is required' }, 400, cors);
+
+      const isLiveViewer = purpose === 'viewer' || purpose === 'live';
+      if (isLiveViewer && streamId && participantId) {
+        const access = await checkStreamAccess(streamId, participantId);
+        if (!access.allowed) {
+          return res.json(
+            {
+              error: 'Payment required',
+              message: 'Purchase stream access before joining this live stream.',
+              reason: access.reason || 'payment_required',
+            },
+            403,
+            cors
+          );
+        }
+      }
+
       const getPermissions = permissionsForGetToken(purpose);
       const token = buildMeetingToken({
         apiKey,

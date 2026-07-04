@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -11,9 +11,14 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { LiveStreamPlayer } from '../components';
+import LiveStreamPaywall from '../components/LiveStreamPaywall';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/livestream';
+import {
+  getStreamAccessPrice,
+  hasStreamAccess,
+  isPaidLiveStream,
+} from '../lib/streamAccess';
 import { useTranslation } from 'react-i18next';
 
 function firstRouteParam(value) {
@@ -28,9 +33,58 @@ const LiveViewer = () => {
   const { user } = useGlobalContext();
   const [stream, setStream] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [accessGranted, setAccessGranted] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [fatalError, setFatalError] = useState(null);
   const [showChat, setShowChat] = useState(true);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+
+  const LiveStreamPlayer = useMemo(() => {
+    try {
+      return require('../components/LiveStreamPlayer').default;
+    } catch (_) {
+      return null;
+    }
+  }, []);
+
+  const verifyAccess = useCallback(async (streamData) => {
+    if (!streamData) {
+      setAccessGranted(false);
+      setCheckingAccess(false);
+      return false;
+    }
+
+    if (!isPaidLiveStream(streamData)) {
+      setAccessGranted(true);
+      setCheckingAccess(false);
+      return true;
+    }
+
+    if (!user?.$id) {
+      setAccessGranted(false);
+      setCheckingAccess(false);
+      return false;
+    }
+
+    if (String(streamData.hostId) === String(user.$id)) {
+      setAccessGranted(true);
+      setCheckingAccess(false);
+      return true;
+    }
+
+    setCheckingAccess(true);
+    try {
+      const allowed = await hasStreamAccess(streamData, user.$id);
+      setAccessGranted(allowed);
+      return allowed;
+    } catch (_) {
+      setAccessGranted(false);
+      return false;
+    } finally {
+      setCheckingAccess(false);
+    }
+  }, [user?.$id]);
 
   useEffect(() => {
     if (!streamId) {
@@ -38,9 +92,14 @@ const LiveViewer = () => {
       return;
     }
 
+    let cancelled = false;
+
     const loadStream = async () => {
+      setLoading(true);
+      setFatalError(null);
       try {
         const streamData = await getLiveStreamById(streamId);
+        if (cancelled) return;
 
         if (!streamData.isLive) {
           Alert.alert(t('liveViewer.streamEndedTitle'), t('liveViewer.streamEndedMessage'));
@@ -49,33 +108,87 @@ const LiveViewer = () => {
         }
 
         setStream(streamData);
-      } catch (_) {
-        Alert.alert(t('common.error'), t('liveViewer.loadError'));
-        router.replace('/live-streams');
+        await verifyAccess(streamData);
+      } catch (error) {
+        if (!cancelled) {
+          setFatalError(error?.message || t('liveViewer.loadError'));
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     loadStream();
-  }, [streamId, t]);
+    return () => {
+      cancelled = true;
+    };
+  }, [streamId, t, verifyAccess]);
 
   useEffect(() => {
-    if (!streamId || !user?.$id) return undefined;
+    if (!streamId || !user?.$id || !accessGranted) return undefined;
     joinLiveStream(streamId, user.$id).catch(() => {});
     return () => {
       leaveLiveStream(streamId, user.$id).catch(() => {});
     };
-  }, [streamId, user?.$id]);
+  }, [streamId, user?.$id, accessGranted]);
 
   const handleClose = () => {
     router.replace('/home');
   };
 
-  if (loading || !stream) {
+  const handleAccessGranted = async () => {
+    if (!stream) return;
+    await verifyAccess(stream);
+  };
+
+  if (loading || checkingAccess) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>{t('liveViewer.loading')}</Text>
+      </View>
+    );
+  }
+
+  if (fatalError || !stream) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.errorText}>{fatalError || t('liveViewer.loadError')}</Text>
+        <TouchableOpacity style={styles.backButton} onPress={handleClose}>
+          <Text style={styles.backButtonText}>{t('common.close')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const paid = isPaidLiveStream(stream);
+  const hasValidPrice = getStreamAccessPrice(stream) > 0;
+
+  if (paid && !hasValidPrice) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.errorText}>{t('paidStream.invalidPrice')}</Text>
+        <TouchableOpacity style={styles.backButton} onPress={handleClose}>
+          <Text style={styles.backButtonText}>{t('common.close')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (paid && !accessGranted) {
+    return (
+      <LiveStreamPaywall
+        stream={stream}
+        user={user}
+        onAccessGranted={handleAccessGranted}
+        onClose={handleClose}
+      />
+    );
+  }
+
+  if (!LiveStreamPlayer) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.errorText}>{t('liveViewer.loadError')}</Text>
       </View>
     );
   }
@@ -128,10 +241,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 24,
   },
   loadingText: {
     color: '#fff',
     fontSize: 16,
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  backButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(167, 125, 248, 0.25)',
+  },
+  backButtonText: {
+    color: '#fff',
+    fontWeight: '700',
   },
   liveModePill: {
     position: 'absolute',

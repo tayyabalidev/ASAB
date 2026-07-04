@@ -16,6 +16,8 @@ const stripe = stripeSecretKey ? require('stripe')(stripeSecretKey) : null;
 const app = express();
 const PORT = process.env.PORT || 3001;
 const muxHandlers = require('./mux');
+const streamAccess = require('./streamAccess');
+const adminBroadcast = require('./adminBroadcast');
 
 // Mux webhook must see raw body for signature verification (before express.json)
 app.post(
@@ -849,6 +851,11 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Video/Photo Processing Service is running' });
 });
 
+// Admin / CEO — broadcast in-app + mobile push to all users when posting content
+app.post('/api/admin/broadcast-content', (req, res) =>
+  adminBroadcast.handleBroadcastContentRequest(req, res)
+);
+
 // ==================== VideoSDK (calls) — JWT must be minted server-side ====================
 const jwt = require('jsonwebtoken');
 const VIDEOSDK_ROOMS_URL = 'https://api.videosdk.live/v2/rooms';
@@ -925,12 +932,16 @@ app.post('/create-room', async (req, res) => {
  * Returns { token } for @videosdk.live/react-native-sdk MeetingProvider.
  * Set VIDEOSDK_API_KEY and VIDEOSDK_SECRET_KEY in server/.env (same values as VideoSDK dashboard).
  */
-app.get('/get-token', (req, res) => {
+app.get('/get-token', async (req, res) => {
   const apiKey = (process.env.VIDEOSDK_API_KEY || '').trim();
   const secretKey = (process.env.VIDEOSDK_SECRET_KEY || '').trim();
   const roomId = typeof req.query.roomId === 'string' ? req.query.roomId.trim() : '';
   const participantId =
     typeof req.query.participantId === 'string' ? req.query.participantId : '';
+  const purpose =
+    typeof req.query.purpose === 'string' ? req.query.purpose.trim().toLowerCase() : '';
+  const streamId =
+    typeof req.query.streamId === 'string' ? req.query.streamId.trim() : '';
 
   if (!apiKey || !secretKey) {
     return res.status(503).json({
@@ -943,6 +954,18 @@ app.get('/get-token', (req, res) => {
       error: 'roomId is required',
       message: 'Pass VideoSDK roomId from /v2/rooms as ?roomId=...',
     });
+  }
+
+  const isLiveViewer = purpose === 'viewer' || purpose === 'live';
+  if (isLiveViewer && streamId && participantId) {
+    const access = await streamAccess.checkStreamAccess(streamId, participantId);
+    if (!access.allowed) {
+      return res.status(403).json({
+        error: 'Payment required',
+        message: 'Purchase stream access before joining this live stream.',
+        reason: access.reason || 'payment_required',
+      });
+    }
   }
 
   // Match Appwrite videosdk-token (version:2 + roomId; no roles — rtc breaks RN SDK join).
@@ -1128,6 +1151,78 @@ app.post('/api/create-advertising-payment-intent', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message || 'Failed to create advertising payment intent' });
+  }
+});
+
+// Create Payment Intent for Paid Live Stream Access
+app.post('/api/create-stream-access-payment-intent', async (req, res) => {
+  try {
+    const { amount, currency = 'usd', buyerId, hostId, streamId } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+    if (!buyerId || !hostId || !streamId) {
+      return res.status(400).json({ error: 'buyerId, hostId, and streamId are required' });
+    }
+
+    if (!stripe || !process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({
+        error: 'Stripe not configured. Please set STRIPE_SECRET_KEY in environment variables.',
+      });
+    }
+
+    if (streamAccess.isConfigured()) {
+      const access = await streamAccess.checkStreamAccess(streamId, buyerId);
+      if (access.allowed) {
+        return res.status(400).json({ error: 'You already have access to this stream' });
+      }
+    }
+
+    const amountInCents = Math.round(parseFloat(amount) * 100);
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amountInCents,
+      currency: currency.toLowerCase(),
+      metadata: {
+        buyerId: buyerId || '',
+        hostId: hostId || '',
+        streamId: streamId || '',
+        type: 'stream_access',
+      },
+      automatic_payment_methods: {
+        enabled: true,
+      },
+    });
+
+    res.json({
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Failed to create stream access payment intent' });
+  }
+});
+
+// Verify paid live stream access (client paywall + pre-token check)
+app.get('/api/check-stream-access', async (req, res) => {
+  try {
+    const streamId =
+      typeof req.query.streamId === 'string' ? req.query.streamId.trim() : '';
+    const userId =
+      typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+
+    if (!streamId || !userId) {
+      return res.status(400).json({ error: 'streamId and userId are required' });
+    }
+
+    const access = await streamAccess.checkStreamAccess(streamId, userId);
+    return res.json({
+      allowed: access.allowed,
+      reason: access.reason || null,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Failed to check stream access' });
   }
 });
 
@@ -1350,6 +1445,9 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
       // Check if it's an advertising payment or donation
       if (paymentIntent.metadata?.type === 'advertising') {
       } else if (paymentIntent.metadata?.type === 'donation') {
+      } else if (paymentIntent.metadata?.type === 'stream_access') {
+        // Client creates streamPurchases record after Payment Sheet success.
+        // Webhook can be extended to reconcile purchases server-side.
       }
       break;
     case 'payment_intent.payment_failed':
