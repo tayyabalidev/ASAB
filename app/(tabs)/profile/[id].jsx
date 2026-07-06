@@ -21,9 +21,11 @@ import { toggleCreatorNotificationSubscription, isUserSubscribedToCreator } from
 import { images } from "../../../constants";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../../lib/mediaType";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../../lib/muxPlayback";
+import { normalizeRouteParam } from "../../../lib/notificationNavigation";
 
 const UserProfile = () => {
-  const { id } = useLocalSearchParams();
+  const { id: idParam } = useLocalSearchParams();
+  const id = normalizeRouteParam(idParam);
   const { t } = useTranslation();
   const { user: currentUser, followStatus, updateFollowStatus, theme, isDarkMode } = useGlobalContext();
   const [profileUser, setProfileUser] = useState(null);

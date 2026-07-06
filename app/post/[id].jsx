@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { Video, ResizeMode } from "expo-av";
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import { normalizeRouteParam } from "../../lib/notificationNavigation";
 
 import { useGlobalContext } from "../../context/GlobalProvider";
 import {
@@ -35,7 +36,8 @@ import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
 import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 
 const PostDetails = () => {
-  const { id } = useLocalSearchParams();
+  const { id: idParam } = useLocalSearchParams();
+  const id = normalizeRouteParam(idParam);
   const { theme, isDarkMode, user } = useGlobalContext();
   const videoRef = useRef(null);
   const [playbackPosition, setPlaybackPosition] = useState(0);

@@ -6,6 +6,7 @@ import { View, Image, FlatList, TouchableOpacity, Text, Alert, TextInput, Platfo
 import { icons } from "../../constants";
 import { databases, appwriteConfig, toggleFollowUser, markNotificationAsRead } from "../../lib/appwrite";
 import { refreshNotificationUpdates } from "../../lib/notificationService";
+import { navigateFromInboxNotification } from "../../lib/notificationNavigation";
 import { useNotifications } from "../../hooks/useNotifications";
 import { useUserMessages } from "../../hooks/useUserMessages";
 import { getCallById } from "../../lib/calls";
@@ -190,28 +191,7 @@ const Inbox = () => {
       }
     }
 
-    if (notification.type === 'follow' || notification.type === 'profile_like') {
-      // Navigate to user profile
-      router.push(`/profile/${notification.fromUserId}`);
-    } else if (notification.type === 'like' || notification.type === 'comment' || notification.type === 'video_post' || notification.type === 'photo_post') {
-      // Navigate to specific post if available
-      if (notification.postId) {
-        router.push(`/post/${notification.postId}`);
-      } else {
-        Alert.alert('Post unavailable', 'This notification is missing post details.');
-      }
-    } else if (notification.type === 'message') {
-      // Navigate to chat with the sender
-      router.push({ pathname: '/chat', params: { userId: notification.fromUserId } });
-    } else if (notification.type === 'live') {
-      // Navigate to live stream viewer
-      if (notification.postId) {
-        router.push({
-          pathname: '/live-viewer',
-          params: { streamId: notification.postId }
-        });
-      }
-    } else if (notification.type === 'call') {
+    if (notification.type === 'call') {
       const callId = notification.postId;
       if (!callId) {
         Alert.alert('Call unavailable', 'This notification is missing call details.');
@@ -224,19 +204,43 @@ const Inbox = () => {
           call.status === CallState.CONNECTING ||
           call.status === CallState.CONNECTED
         ) {
-          router.push({ pathname: '/call', params: { callId } });
+          navigateFromInboxNotification(router, { type: 'call', postId: callId });
         } else {
           Alert.alert('Call ended', 'This call is no longer active.');
         }
       } catch (_) {
         Alert.alert('Call unavailable', 'Could not open this call.');
       }
+      return;
     }
+
+    if (
+      (notification.type === 'like' ||
+        notification.type === 'comment' ||
+        notification.type === 'video_post' ||
+        notification.type === 'photo_post') &&
+      !notification.postId
+    ) {
+      Alert.alert('Post unavailable', 'This notification is missing post details.');
+      return;
+    }
+
+    if (
+      (notification.type === 'follow' || notification.type === 'profile_like' || notification.type === 'message') &&
+      !notification.fromUserId
+    ) {
+      Alert.alert('Unavailable', 'This notification is missing user details.');
+      return;
+    }
+
+    navigateFromInboxNotification(router, notification);
   };
 
   const handleMessagePress = (message) => {
-    // Navigate to chat
-    router.push({ pathname: '/chat', params: { userId: message.otherUserId } });
+    navigateFromInboxNotification(router, {
+      type: 'message',
+      fromUserId: message.otherUserId,
+    });
   };
 
   const formatTime = (timestamp) => {

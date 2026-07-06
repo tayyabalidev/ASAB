@@ -1,14 +1,17 @@
 import { useEffect, useRef, useCallback } from 'react';
 import * as Notifications from 'expo-notifications';
-import { useRouter } from 'expo-router';
+import { useRouter, useRootNavigationState } from 'expo-router';
 import { useGlobalContext } from '../context/GlobalProvider';
 import {
   configurePushNotificationHandler,
   extractPushData,
   isPushAvailable,
-  navigateFromPushPayload,
   registerForPushNotifications,
 } from '../lib/pushNotificationService';
+import {
+  navigateFromPushData,
+  shouldHandlePushResponse,
+} from '../lib/notificationNavigation';
 import { refreshNotificationsFromPush } from '../lib/notificationService';
 import { refreshMessagesFromPush } from '../lib/messageService';
 
@@ -18,6 +21,9 @@ import { refreshMessagesFromPush } from '../lib/messageService';
 export function usePushNotifications() {
   const { user, isLogged, loading } = useGlobalContext();
   const router = useRouter();
+  const rootNavigationState = useRootNavigationState();
+  const navigationReady = Boolean(rootNavigationState?.key);
+
   const handledResponseIdsRef = useRef(new Set());
   const pendingPayloadRef = useRef(null);
 
@@ -28,39 +34,47 @@ export function usePushNotifications() {
   const tryNavigate = useCallback(
     (data) => {
       if (!data) return;
-      if (!isLogged || loading) {
+      if (!navigationReady || !isLogged || loading) {
         pendingPayloadRef.current = data;
         return;
       }
-      navigateFromPushPayload(router, data);
+      navigateFromPushData(router, data);
     },
-    [isLogged, loading, router]
+    [isLogged, loading, navigationReady, router]
   );
 
   useEffect(() => {
-    if (!isLogged || loading || !pendingPayloadRef.current) return;
+    if (!navigationReady || !isLogged || loading || !pendingPayloadRef.current) return;
     const data = pendingPayloadRef.current;
     pendingPayloadRef.current = null;
-    navigateFromPushPayload(router, data);
-  }, [isLogged, loading, router]);
+    navigateFromPushData(router, data);
+  }, [isLogged, loading, navigationReady, router]);
 
   useEffect(() => {
     if (!isPushAvailable()) return undefined;
 
-    const handleResponse = (response) => {
+    const handleResponse = async (response) => {
+      if (!response) return;
+
       const responseId = response?.notification?.request?.identifier;
       if (responseId && handledResponseIdsRef.current.has(responseId)) return;
+
+      const shouldHandle = await shouldHandlePushResponse(response);
+      if (!shouldHandle) return;
+
       if (responseId) handledResponseIdsRef.current.add(responseId);
 
       const data = extractPushData(response?.notification);
       tryNavigate(data);
     };
 
-    const responseSub = Notifications.addNotificationResponseReceivedListener(handleResponse);
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      handleResponse(response).catch(() => {});
+    });
 
     Notifications.getLastNotificationResponseAsync()
       .then((response) => {
-        if (response) handleResponse(response);
+        if (response) handleResponse(response).catch(() => {});
       })
       .catch(() => {});
 
