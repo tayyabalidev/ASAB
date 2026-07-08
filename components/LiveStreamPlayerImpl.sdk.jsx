@@ -45,11 +45,12 @@ import {
 import { images } from '../constants';
 
 const { height } = Dimensions.get('window');
+const OVERLAY_MOUNT_DELAY_MS = Platform.OS === 'ios' ? 800 : 450;
 const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'missing'}${
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
 
-function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeetingReady }) {
+function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlaysReady }) {
   const [hlsUrl, setHlsUrl] = useState(null);
   const [hlsStateText, setHlsStateText] = useState('CONNECTING');
   const [playbackError, setPlaybackError] = useState(null);
@@ -61,13 +62,34 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
   const hlsPayloadRef = useRef(null);
   const hlsUrlAttemptRef = useRef(0);
   const playbackRetryTimerRef = useRef(null);
+  const overlayReadyFiredRef = useRef(false);
+  const overlayReadyTimerRef = useRef(null);
+  const hlsUrlRef = useRef(null);
   const actionsRef = useRef({});
-  const onMeetingReadyRef = useRef(onMeetingReady);
+  const onOverlaysReadyRef = useRef(onOverlaysReady);
   const isCameraLive = liveMode !== 'screen';
 
   useEffect(() => {
-    onMeetingReadyRef.current = onMeetingReady;
-  }, [onMeetingReady]);
+    onOverlaysReadyRef.current = onOverlaysReady;
+  }, [onOverlaysReady]);
+
+  useEffect(() => {
+    hlsUrlRef.current = hlsUrl;
+  }, [hlsUrl]);
+
+  const scheduleOverlayReady = useCallback(() => {
+    if (overlayReadyFiredRef.current) return;
+    if (!meetingJoinedRef.current || !hlsUrlRef.current) return;
+
+    overlayReadyFiredRef.current = true;
+    if (overlayReadyTimerRef.current) {
+      clearTimeout(overlayReadyTimerRef.current);
+    }
+    overlayReadyTimerRef.current = setTimeout(() => {
+      onOverlaysReadyRef.current?.();
+      overlayReadyTimerRef.current = null;
+    }, OVERLAY_MOUNT_DELAY_MS);
+  }, []);
 
   const player = useVideoPlayer(null, (p) => {
     p.loop = false;
@@ -104,7 +126,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
     onMeetingJoined: () => {
       meetingJoinedRef.current = true;
       setHlsStateText('MEETING_JOINED');
-      onMeetingReadyRef.current?.();
+      scheduleOverlayReady();
     },
     onHlsStarted: (payload = {}) => {
       setHlsStateText('HLS_STARTED');
@@ -133,6 +155,13 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
     if (!hlsUrls) return;
     applyHlsPayload(hlsUrls);
   }, [hlsUrls, applyHlsPayload]);
+
+  // Mount chat/reactions only after meeting join + HLS URL (avoids PubSub vs player native crash).
+  useEffect(() => {
+    if (!hlsUrl || !meetingJoinedRef.current) return undefined;
+    scheduleOverlayReady();
+    return undefined;
+  }, [hlsUrl, scheduleOverlayReady]);
 
   useEffect(() => {
     if (!hlsUrl) return undefined;
@@ -188,6 +217,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
         if (status === 'playing') {
           setPlaybackError(null);
           seekHlsNearLiveEdge(player);
+          scheduleOverlayReady();
         }
         if (status === 'error' || status === 'failed') {
           scheduleRetry();
@@ -253,6 +283,10 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onMeeting
       if (playbackRetryTimerRef.current) {
         clearTimeout(playbackRetryTimerRef.current);
         playbackRetryTimerRef.current = null;
+      }
+      if (overlayReadyTimerRef.current) {
+        clearTimeout(overlayReadyTimerRef.current);
+        overlayReadyTimerRef.current = null;
       }
       if (!meetingJoinedRef.current) return;
       try {
@@ -365,7 +399,7 @@ function LiveViewerInMeeting({
   showChat = true,
   displayName = 'Viewer',
 }) {
-  const [meetingReady, setMeetingReady] = useState(false);
+  const [overlaysReady, setOverlaysReady] = useState(false);
 
   return (
     <View style={styles.viewerMeetingRoot}>
@@ -373,9 +407,9 @@ function LiveViewerInMeeting({
         liveMode={liveMode}
         thumbnailUri={thumbnailUri}
         onPlaybackEnded={onPlaybackEnded}
-        onMeetingReady={() => setMeetingReady(true)}
+        onOverlaysReady={() => setOverlaysReady(true)}
       />
-      {meetingReady ? (
+      {overlaysReady ? (
         <LiveViewerJoinedLayers
           streamId={streamId}
           showChat={showChat}
