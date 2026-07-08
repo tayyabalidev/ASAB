@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { useNotificationContext } from '../context/NotificationProvider';
 
 /**

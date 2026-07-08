@@ -47,6 +47,7 @@ function parseQuery(req) {
     participantId: params.get('participantId') || '',
     purpose: (params.get('purpose') || '').trim().toLowerCase(),
     streamId: params.get('streamId') || '',
+    userId: params.get('userId') || '',
   });
 
   if (req.query && typeof req.query === 'object' && !Array.isArray(req.query)) {
@@ -54,12 +55,14 @@ function parseQuery(req) {
     const p = req.query.participantId ?? req.query['participantId'];
     const purpose = req.query.purpose ?? req.query['purpose'];
     const streamId = req.query.streamId ?? req.query['streamId'];
-    if (r != null && r !== '' || p != null && p !== '' || purpose != null && purpose !== '' || streamId != null && streamId !== '') {
+    const userId = req.query.userId ?? req.query['userId'];
+    if (r != null && r !== '' || p != null && p !== '' || purpose != null && purpose !== '' || streamId != null && streamId !== '' || userId != null && userId !== '') {
       return {
         roomId: r != null && r !== '' ? String(r) : '',
         participantId: p != null && p !== '' ? String(p) : '',
         purpose: purpose != null && String(purpose).trim() ? String(purpose).trim().toLowerCase() : '',
         streamId: streamId != null && String(streamId).trim() ? String(streamId).trim() : '',
+        userId: userId != null && String(userId).trim() ? String(userId).trim() : '',
       };
     }
   }
@@ -251,7 +254,8 @@ module.exports = async ({ req, res, log }) => {
     const apiKey = String(process.env.VIDEOSDK_API_KEY || '').trim();
     const secretKey = String(process.env.VIDEOSDK_SECRET_KEY || '').trim();
 
-    const { roomId, participantId, purpose, streamId } = parseQuery(req);
+    const { roomId, participantId, purpose, streamId, userId } = parseQuery(req);
+    const accessUserId = userId || participantId;
     const qs =
       typeof req.queryString === 'string' && req.queryString
         ? req.queryString
@@ -296,8 +300,8 @@ module.exports = async ({ req, res, log }) => {
       if (!roomId) return res.json({ error: 'roomId is required' }, 400, cors);
 
       const isLiveViewer = purpose === 'viewer' || purpose === 'live';
-      if (isLiveViewer && streamId && participantId) {
-        const access = await checkStreamAccess(streamId, participantId);
+      if (isLiveViewer && streamId && accessUserId) {
+        const access = await checkStreamAccess(streamId, accessUserId);
         if (!access.allowed) {
           return res.json(
             {

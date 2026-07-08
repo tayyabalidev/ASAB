@@ -1,18 +1,19 @@
+import { useFocusEffect } from "expo-router";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { View, Image, FlatList, TouchableOpacity, Text, Alert, TextInput, Platform } from "react-native";
 
-import { icons } from "../../constants";
+import { icons, images } from "../../constants";
 import { databases, appwriteConfig, toggleFollowUser, markNotificationAsRead } from "../../lib/appwrite";
 import { refreshNotificationUpdates } from "../../lib/notificationService";
+import { refreshMessageUpdates } from "../../lib/messageService";
 import { navigateFromInboxNotification } from "../../lib/notificationNavigation";
 import { useNotifications } from "../../hooks/useNotifications";
 import { useUserMessages } from "../../hooks/useUserMessages";
 import { getCallById } from "../../lib/calls";
 import { CallState } from "../../lib/callHelper";
 import { useGlobalContext } from "../../context/GlobalProvider";
-import { images } from "../../constants/images";
 import { useTranslation } from "react-i18next";
 
 // Helper function to get proper avatar URL
@@ -147,6 +148,14 @@ const Inbox = () => {
   );
 
   const loading = notificationsLoading || messagesLoading;
+
+  // Pull latest notifications + messages as soon as Inbox is opened
+  useFocusEffect(
+    useCallback(() => {
+      refreshNotificationUpdates();
+      refreshMessageUpdates();
+    }, [])
+  );
 
   useEffect(() => {
     mountedRef.current = true;

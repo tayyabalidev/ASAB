@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  InteractionManager,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +38,7 @@ const LiveViewer = () => {
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [fatalError, setFatalError] = useState(null);
   const [showChat, setShowChat] = useState(true);
+  const [playerReady, setPlayerReady] = useState(false);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
@@ -47,6 +49,23 @@ const LiveViewer = () => {
       return null;
     }
   }, []);
+
+  useEffect(() => {
+    if (loading || checkingAccess || !accessGranted || !stream) {
+      setPlayerReady(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) setPlayerReady(true);
+    });
+
+    return () => {
+      cancelled = true;
+      task?.cancel?.();
+    };
+  }, [loading, checkingAccess, accessGranted, stream?.$id]);
 
   const verifyAccess = useCallback(async (streamData) => {
     if (!streamData) {
@@ -138,7 +157,14 @@ const LiveViewer = () => {
 
   const handleAccessGranted = async () => {
     if (!stream) return;
-    await verifyAccess(stream);
+    setCheckingAccess(true);
+    try {
+      // Allow Appwrite purchase write to become visible before re-checking access.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await verifyAccess(stream);
+    } finally {
+      setCheckingAccess(false);
+    }
   };
 
   if (loading || checkingAccess) {
@@ -185,10 +211,14 @@ const LiveViewer = () => {
     );
   }
 
-  if (!LiveStreamPlayer) {
+  if (!LiveStreamPlayer || !playerReady) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.errorText}>{t('liveViewer.loadError')}</Text>
+        <Text style={styles.loadingText}>
+          {playerReady === false && LiveStreamPlayer
+            ? t('liveViewer.loading')
+            : t('liveViewer.loadError')}
+        </Text>
       </View>
     );
   }

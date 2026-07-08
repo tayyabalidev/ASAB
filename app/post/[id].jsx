@@ -18,6 +18,7 @@ import {
 import { Video, ResizeMode } from "expo-av";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { normalizeRouteParam } from "../../lib/notificationNavigation";
+import { safeRouterBack } from "../../lib/routerHelpers";
 
 import { useGlobalContext } from "../../context/GlobalProvider";
 import {
@@ -242,11 +243,7 @@ const PostDetails = () => {
   };
 
   const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/home");
-    }
+    safeRouterBack();
   };
 
   const postLink = useMemo(() => {

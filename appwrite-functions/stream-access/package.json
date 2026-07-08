@@ -1,0 +1,7 @@
+{
+  "name": "stream-access",
+  "version": "1.0.1",
+  "description": "Paid live stream access check + Stripe payment intent (no npm dependencies)",
+  "main": "streamAccess.js",
+  "dependencies": {}
+}

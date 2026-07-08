@@ -18,6 +18,7 @@ const PORT = process.env.PORT || 3001;
 const muxHandlers = require('./mux');
 const streamAccess = require('./streamAccess');
 const adminBroadcast = require('./adminBroadcast');
+const pushRelay = require('./pushRelay');
 
 // Mux webhook must see raw body for signature verification (before express.json)
 app.post(
@@ -856,6 +857,9 @@ app.post('/api/admin/broadcast-content', (req, res) =>
   adminBroadcast.handleBroadcastContentRequest(req, res)
 );
 
+// Push relay — send Expo push to specific users (API key reads tokens server-side)
+app.post('/api/push/send', (req, res) => pushRelay.handlePushSendRequest(req, res));
+
 // ==================== VideoSDK (calls) — JWT must be minted server-side ====================
 const jwt = require('jsonwebtoken');
 const VIDEOSDK_ROOMS_URL = 'https://api.videosdk.live/v2/rooms';
@@ -938,6 +942,10 @@ app.get('/get-token', async (req, res) => {
   const roomId = typeof req.query.roomId === 'string' ? req.query.roomId.trim() : '';
   const participantId =
     typeof req.query.participantId === 'string' ? req.query.participantId : '';
+  const accessUserId =
+    typeof req.query.userId === 'string' && req.query.userId.trim()
+      ? req.query.userId.trim()
+      : participantId;
   const purpose =
     typeof req.query.purpose === 'string' ? req.query.purpose.trim().toLowerCase() : '';
   const streamId =
@@ -957,8 +965,8 @@ app.get('/get-token', async (req, res) => {
   }
 
   const isLiveViewer = purpose === 'viewer' || purpose === 'live';
-  if (isLiveViewer && streamId && participantId) {
-    const access = await streamAccess.checkStreamAccess(streamId, participantId);
+  if (isLiveViewer && streamId && accessUserId) {
+    const access = await streamAccess.checkStreamAccess(streamId, accessUserId);
     if (!access.allowed) {
       return res.status(403).json({
         error: 'Payment required',

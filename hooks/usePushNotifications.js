@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useRouter, useRootNavigationState } from 'expo-router';
 import { useGlobalContext } from '../context/GlobalProvider';
@@ -100,5 +101,18 @@ export function usePushNotifications() {
   useEffect(() => {
     if (!isPushAvailable() || !isLogged || !user?.$id) return;
     registerForPushNotifications(user.$id).catch(() => {});
+  }, [isLogged, user?.$id]);
+
+  // Re-register push token when app returns to foreground (token can rotate).
+  useEffect(() => {
+    if (!isPushAvailable() || !isLogged || !user?.$id) return undefined;
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        registerForPushNotifications(user.$id).catch(() => {});
+      }
+    });
+
+    return () => sub.remove();
   }, [isLogged, user?.$id]);
 }

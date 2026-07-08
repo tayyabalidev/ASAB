@@ -22,6 +22,7 @@ import { images } from "../../../constants";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../../lib/mediaType";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../../lib/muxPlayback";
 import { normalizeRouteParam } from "../../../lib/notificationNavigation";
+import { safeRouterBack } from "../../../lib/routerHelpers";
 
 const UserProfile = () => {
   const { id: idParam } = useLocalSearchParams();
@@ -119,7 +120,7 @@ const UserProfile = () => {
 
         if (!id) {
           Alert.alert(t('common.error'), 'User ID is required');
-          router.back();
+          safeRouterBack();
           return;
         }
 
@@ -132,7 +133,7 @@ const UserProfile = () => {
         if (!isMounted) return;
         if (!userResponse) {
           Alert.alert(t('common.error'), 'User not found');
-          router.back();
+          safeRouterBack();
           return;
         }
 
@@ -172,7 +173,7 @@ const UserProfile = () => {
       } catch (error) {
         if (isMounted) {
           Alert.alert(t('common.error'), error.message || t('profile.alerts.loadProfileError'));
-          router.back();
+          safeRouterBack();
         }
       } finally {
         if (isMounted) setLoading(false);
@@ -182,7 +183,7 @@ const UserProfile = () => {
     if (id) {
       fetchProfileUser();
     } else {
-      router.back();
+      safeRouterBack();
     }
 
     return () => { isMounted = false; };
@@ -264,7 +265,7 @@ const UserProfile = () => {
 
 
   const handleBack = () => {
-    router.back(); // Go back to previous screen instead of redirecting to home
+    safeRouterBack();
   };
 
   // Re-enable request access function
