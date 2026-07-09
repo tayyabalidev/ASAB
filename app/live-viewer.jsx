@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -17,8 +17,8 @@ import { useGlobalContext } from '../context/GlobalProvider';
 import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/livestream';
 import {
   getStreamAccessPrice,
-  hasStreamAccess,
   isPaidLiveStream,
+  verifyReturningPurchaseAccess,
 } from '../lib/streamAccess';
 import { useTranslation } from 'react-i18next';
 
@@ -28,6 +28,34 @@ function firstRouteParam(value) {
   return typeof v === 'string' ? v : v != null ? String(v) : undefined;
 }
 
+class LivePlayerErrorBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    if (__DEV__) {
+      console.warn('[live-viewer] LiveStreamPlayer crashed:', error?.message || error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>Could not start live video on this device.</Text>
+          <TouchableOpacity style={styles.backButton} onPress={this.props.onClose}>
+            <Text style={styles.backButtonText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const LiveViewer = () => {
   const params = useLocalSearchParams();
   const streamId = firstRouteParam(params.streamId);
@@ -35,23 +63,36 @@ const LiveViewer = () => {
   const [stream, setStream] = useState(null);
   const [loading, setLoading] = useState(true);
   const [accessGranted, setAccessGranted] = useState(false);
-  const [checkingAccess, setCheckingAccess] = useState(true);
   const [fatalError, setFatalError] = useState(null);
   const [showChat, setShowChat] = useState(true);
   const [playerReady, setPlayerReady] = useState(false);
+  const [LiveStreamPlayer, setLiveStreamPlayer] = useState(null);
+  const loadStreamRunRef = useRef(0);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
-  const LiveStreamPlayer = useMemo(() => {
-    try {
-      return require('../components/LiveStreamPlayer').default;
-    } catch (_) {
-      return null;
+  // Load VideoSDK player only after access is granted — never on paywall.
+  useEffect(() => {
+    if (!accessGranted || loading) {
+      setLiveStreamPlayer(null);
+      return undefined;
     }
-  }, []);
+
+    let cancelled = false;
+    try {
+      const Player = require('../components/LiveStreamPlayer').default;
+      if (!cancelled) setLiveStreamPlayer(() => Player);
+    } catch (_) {
+      if (!cancelled) setLiveStreamPlayer(null);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessGranted, loading]);
 
   useEffect(() => {
-    if (loading || checkingAccess || !accessGranted || !stream) {
+    if (loading || !accessGranted || !stream) {
       setPlayerReady(false);
       return undefined;
     }
@@ -65,45 +106,7 @@ const LiveViewer = () => {
       cancelled = true;
       task?.cancel?.();
     };
-  }, [loading, checkingAccess, accessGranted, stream?.$id]);
-
-  const verifyAccess = useCallback(async (streamData) => {
-    if (!streamData) {
-      setAccessGranted(false);
-      setCheckingAccess(false);
-      return false;
-    }
-
-    if (!isPaidLiveStream(streamData)) {
-      setAccessGranted(true);
-      setCheckingAccess(false);
-      return true;
-    }
-
-    if (!user?.$id) {
-      setAccessGranted(false);
-      setCheckingAccess(false);
-      return false;
-    }
-
-    if (String(streamData.hostId) === String(user.$id)) {
-      setAccessGranted(true);
-      setCheckingAccess(false);
-      return true;
-    }
-
-    setCheckingAccess(true);
-    try {
-      const allowed = await hasStreamAccess(streamData, user.$id);
-      setAccessGranted(allowed);
-      return allowed;
-    } catch (_) {
-      setAccessGranted(false);
-      return false;
-    } finally {
-      setCheckingAccess(false);
-    }
-  }, [user?.$id]);
+  }, [loading, accessGranted, stream?.$id]);
 
   useEffect(() => {
     if (!streamId) {
@@ -111,14 +114,18 @@ const LiveViewer = () => {
       return;
     }
 
+    const runId = loadStreamRunRef.current + 1;
+    loadStreamRunRef.current = runId;
     let cancelled = false;
 
     const loadStream = async () => {
       setLoading(true);
       setFatalError(null);
+      setAccessGranted(false);
+
       try {
         const streamData = await getLiveStreamById(streamId);
-        if (cancelled) return;
+        if (cancelled || loadStreamRunRef.current !== runId) return;
 
         if (!streamData.isLive) {
           Alert.alert(t('liveViewer.streamEndedTitle'), t('liveViewer.streamEndedMessage'));
@@ -127,13 +134,41 @@ const LiveViewer = () => {
         }
 
         setStream(streamData);
-        await verifyAccess(streamData);
+
+        if (!isPaidLiveStream(streamData)) {
+          setAccessGranted(true);
+          return;
+        }
+
+        if (!user?.$id) {
+          setAccessGranted(false);
+          return;
+        }
+
+        if (String(streamData.hostId) === String(user.$id)) {
+          setAccessGranted(true);
+          return;
+        }
+
+        // Paid viewer: show paywall immediately — do not block on server access check.
+        setAccessGranted(false);
+
+        // Returning purchaser: verify in background (server-only, no Appwrite listDocuments).
+        verifyReturningPurchaseAccess(streamData, user.$id)
+          .then((allowed) => {
+            if (!cancelled && loadStreamRunRef.current === runId && allowed) {
+              setAccessGranted(true);
+            }
+          })
+          .catch(() => {});
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && loadStreamRunRef.current === runId) {
           setFatalError(error?.message || t('liveViewer.loadError'));
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && loadStreamRunRef.current === runId) {
+          setLoading(false);
+        }
       }
     };
 
@@ -141,7 +176,7 @@ const LiveViewer = () => {
     return () => {
       cancelled = true;
     };
-  }, [streamId, t, verifyAccess]);
+  }, [streamId, user?.$id, t]);
 
   useEffect(() => {
     if (!streamId || !user?.$id || !accessGranted) return undefined;
@@ -151,23 +186,15 @@ const LiveViewer = () => {
     };
   }, [streamId, user?.$id, accessGranted]);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     router.replace('/home');
-  };
+  }, []);
 
-  const handleAccessGranted = async () => {
-    if (!stream) return;
-    setCheckingAccess(true);
-    try {
-      // Allow Appwrite purchase write to become visible before re-checking access.
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      await verifyAccess(stream);
-    } finally {
-      setCheckingAccess(false);
-    }
-  };
+  const handleAccessGranted = useCallback(() => {
+    setAccessGranted(true);
+  }, []);
 
-  if (loading || checkingAccess) {
+  if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>{t('liveViewer.loading')}</Text>
@@ -230,7 +257,9 @@ const LiveViewer = () => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.container}>
-          <LiveStreamPlayer stream={stream} onClose={handleClose} showChat={showChat} />
+          <LivePlayerErrorBoundary onClose={handleClose}>
+            <LiveStreamPlayer stream={stream} onClose={handleClose} showChat={showChat} />
+          </LivePlayerErrorBoundary>
 
           {stream.liveMode === 'screen' ? (
             <View
