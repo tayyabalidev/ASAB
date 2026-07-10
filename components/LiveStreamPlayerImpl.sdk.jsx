@@ -29,7 +29,6 @@ import {
   resolveLiveStreamThumbnailUrl,
   buildLiveViewerParticipantId,
 } from '../lib/livestream';
-import { isPaidLiveStream } from '../lib/streamAccess';
 import { VIDEOSDK_CONFIG, VIDEOSDK_TOKEN_SETUP_MESSAGE } from '../lib/config';
 import { getVideoSDKToken, waitForMeetingJoinFn } from '../lib/videosdkHelper';
 import { validateMeetingToken } from '../lib/videosdkTokenValidate';
@@ -434,9 +433,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
   const [tokenLoading, setTokenLoading] = useState(true);
   const [tokenError, setTokenError] = useState(null);
   const playbackEndedRef = useRef(false);
-  const streamDocId = stream?.$id || null;
-  const paidStream = isPaidLiveStream(stream);
-  const viewerParticipantId = buildLiveViewerParticipantId(streamDocId, user?.$id);
+  const viewerParticipantId = buildLiveViewerParticipantId(stream?.$id, user?.$id);
 
   useEffect(() => {
     playbackEndedRef.current = false;
@@ -477,16 +474,10 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
     setTokenLoading(true);
     (async () => {
       try {
-        const tokenOptions = { purpose: 'live' };
-        if (paidStream && streamDocId) {
-          tokenOptions.streamId = streamDocId;
-          tokenOptions.accessUserId = user.$id;
-        }
-
         const meetingToken = await getVideoSDKToken(
           effectiveRoomId,
           viewerParticipantId,
-          tokenOptions
+          { purpose: 'live' }
         );
         if (cancelled) return;
         if (meetingToken) {
@@ -512,7 +503,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
     return () => {
       cancelled = true;
     };
-  }, [effectiveRoomId, user?.$id, streamDocId, viewerParticipantId, paidStream]);
+  }, [effectiveRoomId, user?.$id, viewerParticipantId]);
 
   const handleFollowToggle = async () => {
     if (!user?.$id || !stream?.hostId) {

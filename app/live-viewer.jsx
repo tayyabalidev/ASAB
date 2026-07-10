@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -12,14 +12,8 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import LiveStreamPaywall from '../components/LiveStreamPaywall';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/livestream';
-import {
-  getStreamAccessPrice,
-  isPaidLiveStream,
-  verifyReturningPurchaseAccess,
-} from '../lib/streamAccess';
 import { useTranslation } from 'react-i18next';
 
 function firstRouteParam(value) {
@@ -38,6 +32,12 @@ class LivePlayerErrorBoundary extends React.Component {
   componentDidCatch(error) {
     if (__DEV__) {
       console.warn('[live-viewer] LiveStreamPlayer crashed:', error?.message || error);
+    }
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
     }
   }
 
@@ -62,7 +62,6 @@ const LiveViewer = () => {
   const { user } = useGlobalContext();
   const [stream, setStream] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [accessGranted, setAccessGranted] = useState(false);
   const [fatalError, setFatalError] = useState(null);
   const [showChat, setShowChat] = useState(true);
   const [playerReady, setPlayerReady] = useState(false);
@@ -71,9 +70,17 @@ const LiveViewer = () => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
-  // Load VideoSDK player only after access is granted — never on paywall.
+  useLayoutEffect(() => {
+    if (!streamId) return;
+    setStream(null);
+    setLoading(true);
+    setFatalError(null);
+    setPlayerReady(false);
+    setLiveStreamPlayer(null);
+  }, [streamId]);
+
   useEffect(() => {
-    if (!accessGranted || loading) {
+    if (loading || !stream) {
       setLiveStreamPlayer(null);
       return undefined;
     }
@@ -89,10 +96,10 @@ const LiveViewer = () => {
     return () => {
       cancelled = true;
     };
-  }, [accessGranted, loading]);
+  }, [loading, stream?.$id]);
 
   useEffect(() => {
-    if (loading || !accessGranted || !stream) {
+    if (loading || !stream) {
       setPlayerReady(false);
       return undefined;
     }
@@ -106,7 +113,7 @@ const LiveViewer = () => {
       cancelled = true;
       task?.cancel?.();
     };
-  }, [loading, accessGranted, stream?.$id]);
+  }, [loading, stream?.$id]);
 
   useEffect(() => {
     if (!streamId) {
@@ -121,7 +128,6 @@ const LiveViewer = () => {
     const loadStream = async () => {
       setLoading(true);
       setFatalError(null);
-      setAccessGranted(false);
 
       try {
         const streamData = await getLiveStreamById(streamId);
@@ -134,33 +140,6 @@ const LiveViewer = () => {
         }
 
         setStream(streamData);
-
-        if (!isPaidLiveStream(streamData)) {
-          setAccessGranted(true);
-          return;
-        }
-
-        if (!user?.$id) {
-          setAccessGranted(false);
-          return;
-        }
-
-        if (String(streamData.hostId) === String(user.$id)) {
-          setAccessGranted(true);
-          return;
-        }
-
-        // Paid viewer: show paywall immediately — do not block on server access check.
-        setAccessGranted(false);
-
-        // Returning purchaser: verify in background (server-only, no Appwrite listDocuments).
-        verifyReturningPurchaseAccess(streamData, user.$id)
-          .then((allowed) => {
-            if (!cancelled && loadStreamRunRef.current === runId && allowed) {
-              setAccessGranted(true);
-            }
-          })
-          .catch(() => {});
       } catch (error) {
         if (!cancelled && loadStreamRunRef.current === runId) {
           setFatalError(error?.message || t('liveViewer.loadError'));
@@ -176,23 +155,26 @@ const LiveViewer = () => {
     return () => {
       cancelled = true;
     };
-  }, [streamId, user?.$id, t]);
+  }, [streamId, t]);
 
   useEffect(() => {
-    if (!streamId || !user?.$id || !accessGranted) return undefined;
+    if (!streamId || !user?.$id || loading || !stream) return undefined;
     joinLiveStream(streamId, user.$id).catch(() => {});
     return () => {
       leaveLiveStream(streamId, user.$id).catch(() => {});
     };
-  }, [streamId, user?.$id, accessGranted]);
+  }, [streamId, user?.$id, loading, stream?.$id]);
 
   const handleClose = useCallback(() => {
     router.replace('/home');
   }, []);
 
-  const handleAccessGranted = useCallback(() => {
-    setAccessGranted(true);
-  }, []);
+  const streamMatchesRoute =
+    Boolean(stream?.$id) && Boolean(streamId) && String(stream.$id) === String(streamId);
+
+  if (!streamId) {
+    return null;
+  }
 
   if (loading) {
     return (
@@ -202,7 +184,7 @@ const LiveViewer = () => {
     );
   }
 
-  if (fatalError || !stream) {
+  if (fatalError || !stream || !streamMatchesRoute) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.errorText}>{fatalError || t('liveViewer.loadError')}</Text>
@@ -210,31 +192,6 @@ const LiveViewer = () => {
           <Text style={styles.backButtonText}>{t('common.close')}</Text>
         </TouchableOpacity>
       </View>
-    );
-  }
-
-  const paid = isPaidLiveStream(stream);
-  const hasValidPrice = getStreamAccessPrice(stream) > 0;
-
-  if (paid && !hasValidPrice) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.errorText}>{t('paidStream.invalidPrice')}</Text>
-        <TouchableOpacity style={styles.backButton} onPress={handleClose}>
-          <Text style={styles.backButtonText}>{t('common.close')}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  if (paid && !accessGranted) {
-    return (
-      <LiveStreamPaywall
-        stream={stream}
-        user={user}
-        onAccessGranted={handleAccessGranted}
-        onClose={handleClose}
-      />
     );
   }
 
@@ -257,8 +214,13 @@ const LiveViewer = () => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.container}>
-          <LivePlayerErrorBoundary onClose={handleClose}>
-            <LiveStreamPlayer stream={stream} onClose={handleClose} showChat={showChat} />
+          <LivePlayerErrorBoundary onClose={handleClose} resetKey={stream.$id}>
+            <LiveStreamPlayer
+              key={`player-${stream.$id}`}
+              stream={stream}
+              onClose={handleClose}
+              showChat={showChat}
+            />
           </LivePlayerErrorBoundary>
 
           {stream.liveMode === 'screen' ? (

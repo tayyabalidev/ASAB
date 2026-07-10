@@ -53,8 +53,6 @@ const GoLive = () => {
   const [selectedLiveMode, setSelectedLiveMode] = useState('camera');
   const [loading, setLoading] = useState(false);
   const [thumbnailAsset, setThumbnailAsset] = useState(null);
-  const [isPaidStream, setIsPaidStream] = useState(false);
-  const [streamPrice, setStreamPrice] = useState('');
 
   const liveModeOptions = [
     {
@@ -138,25 +136,13 @@ const GoLive = () => {
   const handleGoLive = async () => {
     setLoading(true);
     try {
-      let paidOptions = {};
-      if (isPaidStream) {
-        const price = parseFloat(streamPrice);
-        if (!Number.isFinite(price) || price < 1) {
-          Alert.alert(t('common.error'), t('liveGo.paidPriceInvalid'));
-          setLoading(false);
-          return;
-        }
-        paidOptions = { isPaid: true, price, currency: 'USD' };
-      }
-
-      // Create live stream in database
       const liveStream = await createLiveStream(
         user.$id,
         title.trim(),
         description.trim(),
         selectedCategory,
         selectedLiveMode,
-        { thumbnailAsset, ...paidOptions }
+        { thumbnailAsset }
       );
 
       // Close preview so expo-camera releases the device before VideoSDK WebRTC opens it.
@@ -414,47 +400,6 @@ const GoLive = () => {
                 </TouchableOpacity>
               ))}
             </View>
-          </View>
-
-          {/* Paid Stream */}
-          <View style={styles.inputSection}>
-            <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
-              {t('liveGo.paidStreamLabel')}
-            </Text>
-            <TouchableOpacity
-              style={[
-                styles.paidToggle,
-                isPaidStream && styles.paidToggleActive,
-              ]}
-              onPress={() => setIsPaidStream((prev) => !prev)}
-              activeOpacity={0.85}
-            >
-              <View style={styles.paidToggleRow}>
-                <Text style={styles.paidToggleTitle}>{t('liveGo.paidStreamTitle')}</Text>
-                <View style={[styles.paidSwitch, isPaidStream && styles.paidSwitchOn]}>
-                  <View style={[styles.paidSwitchKnob, isPaidStream && styles.paidSwitchKnobOn]} />
-                </View>
-              </View>
-              <Text style={[styles.paidToggleHint, { textAlign: isRTL ? 'right' : 'left' }]}>
-                {t('liveGo.paidStreamHint')}
-              </Text>
-            </TouchableOpacity>
-            {isPaidStream ? (
-              <View style={styles.paidPriceSection}>
-                <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
-                  {t('liveGo.paidPriceLabel')}
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder={t('liveGo.paidPricePlaceholder')}
-                  placeholderTextColor="#888"
-                  value={streamPrice}
-                  onChangeText={setStreamPrice}
-                  keyboardType="decimal-pad"
-                  textAlign={isRTL ? 'right' : 'left'}
-                />
-              </View>
-            ) : null}
           </View>
 
           {/* Tips Card */}
@@ -832,58 +777,6 @@ const styles = StyleSheet.create({
   },
   liveModeSubtitleSelected: {
     color: '#cfc2f5',
-  },
-  paidToggle: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
-  paidToggleActive: {
-    borderColor: '#a77df8',
-    backgroundColor: 'rgba(167, 125, 248, 0.12)',
-  },
-  paidToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  paidToggleTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-    marginRight: 12,
-  },
-  paidToggleHint: {
-    color: '#aaa',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  paidSwitch: {
-    width: 48,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    padding: 2,
-    justifyContent: 'center',
-  },
-  paidSwitchOn: {
-    backgroundColor: '#a77df8',
-  },
-  paidSwitchKnob: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-  },
-  paidSwitchKnobOn: {
-    alignSelf: 'flex-end',
-  },
-  paidPriceSection: {
-    marginTop: 16,
   },
   previewModal: {
     flex: 1,

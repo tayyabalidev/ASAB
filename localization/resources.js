@@ -1868,33 +1868,6 @@ export const resources = {
             description: "Full HD"
           }
         },
-        paidStreamLabel: "Monetization",
-        paidStreamTitle: "Paid live stream",
-        paidStreamHint: "Viewers must purchase access before watching. You receive 90% of each ticket.",
-        paidPriceLabel: "Access price (USD)",
-        paidPricePlaceholder: "e.g. 4.99",
-        paidPriceInvalid: "Enter a valid price of at least $1.00 for paid streams.",
-      },
-      paidStream: {
-        title: "Premium Live Stream",
-        subtitle: "Purchase access to watch this exclusive live stream",
-        accessPrice: "One-time access",
-        priceFormat: "{{currency}} ${{amount}}",
-        feeNote: "Platform fee: ${{fee}} · Host receives: ${{host}}",
-        features: [
-          "Instant access after payment",
-          "Watch for the full live session",
-          "Secure payment via Stripe",
-        ],
-        purchaseButton: "Unlock for {{currency}} ${{amount}}",
-        successTitle: "Access granted",
-        successMessage: "Payment successful! Enjoy the stream.",
-        purchaseError: "Could not complete purchase. Please try again.",
-        stripeNotReady: "Payments are not configured. Check your Stripe keys and restart the app.",
-        invalidPrice: "This paid stream has an invalid price. Contact the host or try again later.",
-        feeNotePlain: "Platform fee: {{fee}} · Host receives: {{host}}",
-        purchaseButtonPlain: "Unlock for ${{amount}}",
-        listBadge: "{{currency}} ${{amount}}",
       },
       donation: {
         headerTitle: "Support Creator",
