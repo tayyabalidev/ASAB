@@ -477,7 +477,11 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
         const meetingToken = await getVideoSDKToken(
           effectiveRoomId,
           viewerParticipantId,
-          { purpose: 'live' }
+          {
+            purpose: 'live',
+            streamId: stream?.$id,
+            userId: user.$id,
+          }
         );
         if (cancelled) return;
         if (meetingToken) {
@@ -503,7 +507,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
     return () => {
       cancelled = true;
     };
-  }, [effectiveRoomId, user?.$id, viewerParticipantId]);
+  }, [effectiveRoomId, user?.$id, viewerParticipantId, stream?.$id]);
 
   const handleFollowToggle = async () => {
     if (!user?.$id || !stream?.hostId) {

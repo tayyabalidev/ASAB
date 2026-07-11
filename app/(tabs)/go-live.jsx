@@ -12,6 +12,7 @@ import {
   Modal,
   Image,
   ImageBackground,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -20,6 +21,7 @@ import { router } from 'expo-router';
 import { useGlobalContext } from '../../context/GlobalProvider';
 import { createLiveStream } from '../../lib/livestream';
 import { stashLiveHostSession } from '../../lib/pendingLiveBroadcast';
+import { calculateStreamAccessFees, validateStreamAccessPrice } from '../../lib/streamAccess';
 import { CustomButton } from '../../components';
 import { useTranslation } from 'react-i18next';
 
@@ -53,6 +55,8 @@ const GoLive = () => {
   const [selectedLiveMode, setSelectedLiveMode] = useState('camera');
   const [loading, setLoading] = useState(false);
   const [thumbnailAsset, setThumbnailAsset] = useState(null);
+  const [isPaidStream, setIsPaidStream] = useState(false);
+  const [ticketPrice, setTicketPrice] = useState('');
 
   const liveModeOptions = [
     {
@@ -134,6 +138,14 @@ const GoLive = () => {
   };
 
   const handleGoLive = async () => {
+    if (isPaidStream) {
+      const priceCheck = validateStreamAccessPrice(ticketPrice);
+      if (!priceCheck.ok) {
+        Alert.alert(t('common.error'), priceCheck.error);
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const liveStream = await createLiveStream(
@@ -142,7 +154,12 @@ const GoLive = () => {
         description.trim(),
         selectedCategory,
         selectedLiveMode,
-        { thumbnailAsset }
+        {
+          thumbnailAsset,
+          isPaid: isPaidStream,
+          price: isPaidStream ? ticketPrice : undefined,
+          currency: 'USD',
+        }
       );
 
       // Close preview so expo-camera releases the device before VideoSDK WebRTC opens it.
@@ -176,6 +193,10 @@ const GoLive = () => {
   const toggleCameraFacing = () => {
     setFacing(current => (current === 'back' ? 'front' : 'back'));
   };
+
+  const paidFees = isPaidStream && ticketPrice
+    ? calculateStreamAccessFees(ticketPrice)
+    : null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -402,6 +423,57 @@ const GoLive = () => {
             </View>
           </View>
 
+          {/* Paid stream toggle */}
+          <View style={styles.inputSection}>
+            <View style={[styles.paidRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+              <View style={styles.paidRowText}>
+                <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left', marginBottom: 4 }]}>
+                  {t('liveGo.paidStreamLabel')}
+                </Text>
+                <Text style={[styles.paidHint, { textAlign: isRTL ? 'right' : 'left' }]}>
+                  {t('liveGo.paidStreamHint')}
+                </Text>
+              </View>
+              <Switch
+                value={isPaidStream}
+                onValueChange={(value) => {
+                  setIsPaidStream(value);
+                  if (!value) setTicketPrice('');
+                }}
+                trackColor={{ false: '#3e3e55', true: '#7c5fd4' }}
+                thumbColor={isPaidStream ? '#a77df8' : '#f4f3f4'}
+              />
+            </View>
+
+            {isPaidStream ? (
+              <View style={styles.paidPriceSection}>
+                <Text style={[styles.label, { textAlign: isRTL ? 'right' : 'left' }]}>
+                  {t('liveGo.ticketPriceLabel')}
+                </Text>
+                <View style={[styles.priceInputRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                  <Text style={styles.pricePrefix}>$</Text>
+                  <TextInput
+                    style={[styles.priceInput, { textAlign: isRTL ? 'right' : 'left' }]}
+                    placeholder={t('liveGo.ticketPricePlaceholder')}
+                    placeholderTextColor="#888"
+                    value={ticketPrice}
+                    onChangeText={setTicketPrice}
+                    keyboardType="decimal-pad"
+                    maxLength={8}
+                  />
+                </View>
+                {paidFees?.amount > 0 ? (
+                  <Text style={[styles.paidFeeNote, { textAlign: isRTL ? 'right' : 'left' }]}>
+                    {t('liveGo.hostEarningsNote', {
+                      amount: paidFees.hostReceives.toFixed(2),
+                      fee: paidFees.platformFee.toFixed(2),
+                    })}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+
           {/* Tips Card */}
           <View style={styles.tipsCard}>
             <Text style={[styles.tipsTitle, { textAlign: isRTL ? 'right' : 'left' }]}>
@@ -461,6 +533,11 @@ const GoLive = () => {
                         ? t('liveGo.liveModeScreenTitle')
                         : t('liveGo.liveModeCameraTitle')}
                     </Text>
+                    {isPaidStream && ticketPrice ? (
+                      <Text style={styles.previewPaidText}>
+                        {t('liveGo.paidPreview', { price: Number(ticketPrice).toFixed(2) })}
+                      </Text>
+                    ) : null}
                   </View>
 
                   {selectedLiveMode !== 'screen' ? (
@@ -777,6 +854,55 @@ const styles = StyleSheet.create({
   },
   liveModeSubtitleSelected: {
     color: '#cfc2f5',
+  },
+  paidRow: {
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  paidRowText: {
+    flex: 1,
+  },
+  paidHint: {
+    color: '#888',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  paidPriceSection: {
+    marginTop: 16,
+  },
+  priceInputRow: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(167,125,248,0.35)',
+    paddingHorizontal: 14,
+  },
+  pricePrefix: {
+    color: '#a77df8',
+    fontSize: 20,
+    fontWeight: '700',
+    marginRight: 4,
+  },
+  priceInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    paddingVertical: 12,
+  },
+  paidFeeNote: {
+    color: '#aaa',
+    fontSize: 13,
+    marginTop: 10,
+    lineHeight: 18,
+  },
+  previewPaidText: {
+    color: '#fbbf24',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
   },
   previewModal: {
     flex: 1,

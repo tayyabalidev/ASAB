@@ -14,6 +14,7 @@
  *   purpose=viewer|live: ['allow_join','allow_mod'] — interactive live (HLS + chat + guest stage).
  *
  * Required env vars: VIDEOSDK_API_KEY, VIDEOSDK_SECRET_KEY
+ * Paid live viewers (purpose=live|viewer): APPWRITE_* + APPWRITE_STREAM_PURCHASES_COLLECTION_ID
  *
  * Notes:
  * - Room creation uses crawler JWT (version 2 + roles:['crawler']) — server-side only.
@@ -23,6 +24,7 @@
 'use strict';
 
 const jwt = require('jsonwebtoken');
+const { checkLiveViewerTokenAccess } = require('./streamAccessCheck');
 const VIDEOSDK_ROOMS_URL = 'https://api.videosdk.live/v2/rooms';
 
 const cors = {
@@ -212,6 +214,29 @@ module.exports = async ({ req, res, log }) => {
 
     if (method === 'GET') {
       if (!roomId) return res.json({ error: 'roomId is required' }, 400, cors);
+
+      const isLiveViewer = purpose === 'viewer' || purpose === 'live';
+      if (isLiveViewer) {
+        const access = await checkLiveViewerTokenAccess({
+          streamId,
+          roomId: String(roomId),
+          userId: accessUserId,
+        });
+        if (!access.allowed) {
+          if (debugRequested) {
+            log(`videosdk-token access denied ${JSON.stringify(access)}`);
+          }
+          return res.json(
+            {
+              error: 'Payment required',
+              reason: access.reason || 'payment_required',
+              streamId: access.streamId || streamId || null,
+            },
+            403,
+            cors
+          );
+        }
+      }
 
       const getPermissions = permissionsForGetToken(purpose);
       const token = buildMeetingToken({

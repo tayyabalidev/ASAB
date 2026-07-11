@@ -14,6 +14,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, router } from 'expo-router';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/livestream';
+import { getStreamAccessStatus, isPaidLiveStream } from '../lib/streamAccess';
+import LiveStreamPaywall from '../components/LiveStreamPaywall';
 import { useTranslation } from 'react-i18next';
 
 function firstRouteParam(value) {
@@ -21,6 +23,8 @@ function firstRouteParam(value) {
   const v = Array.isArray(value) ? value[0] : value;
   return typeof v === 'string' ? v : v != null ? String(v) : undefined;
 }
+
+/** @typedef {'idle' | 'checking' | 'granted' | 'paywall' | 'denied'} AccessState */
 
 class LivePlayerErrorBoundary extends React.Component {
   state = { hasError: false };
@@ -66,9 +70,15 @@ const LiveViewer = () => {
   const [showChat, setShowChat] = useState(true);
   const [playerReady, setPlayerReady] = useState(false);
   const [LiveStreamPlayer, setLiveStreamPlayer] = useState(null);
+  /** @type {[AccessState, Function]} */
+  const [accessState, setAccessState] = useState('idle');
+  const [accessInfo, setAccessInfo] = useState(null);
   const loadStreamRunRef = useRef(0);
+  const accessCheckRunRef = useRef(0);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+
+  const accessGranted = accessState === 'granted';
 
   useLayoutEffect(() => {
     if (!streamId) return;
@@ -77,10 +87,12 @@ const LiveViewer = () => {
     setFatalError(null);
     setPlayerReady(false);
     setLiveStreamPlayer(null);
+    setAccessState('idle');
+    setAccessInfo(null);
   }, [streamId]);
 
   useEffect(() => {
-    if (loading || !stream) {
+    if (!accessGranted || !stream) {
       setLiveStreamPlayer(null);
       return undefined;
     }
@@ -96,10 +108,10 @@ const LiveViewer = () => {
     return () => {
       cancelled = true;
     };
-  }, [loading, stream?.$id]);
+  }, [accessGranted, stream?.$id]);
 
   useEffect(() => {
-    if (loading || !stream) {
+    if (!accessGranted || !stream) {
       setPlayerReady(false);
       return undefined;
     }
@@ -113,7 +125,7 @@ const LiveViewer = () => {
       cancelled = true;
       task?.cancel?.();
     };
-  }, [loading, stream?.$id]);
+  }, [accessGranted, stream?.$id]);
 
   useEffect(() => {
     if (!streamId) {
@@ -157,17 +169,66 @@ const LiveViewer = () => {
     };
   }, [streamId, t]);
 
+  const runAccessCheck = useCallback(async () => {
+    if (!stream?.$id) return null;
+
+    const runId = accessCheckRunRef.current + 1;
+    accessCheckRunRef.current = runId;
+    setAccessState('checking');
+
+    const viewerId = user?.$id;
+    if (isPaidLiveStream(stream) && !viewerId) {
+      if (accessCheckRunRef.current !== runId) return null;
+      setAccessInfo({ needsPaywall: true, reason: 'login_required' });
+      setAccessState('paywall');
+      return null;
+    }
+
+    const status = await getStreamAccessStatus(stream, viewerId);
+    if (accessCheckRunRef.current !== runId) return status;
+
+    setAccessInfo(status);
+    if (status.allowed) {
+      setAccessState('granted');
+    } else if (status.needsPaywall) {
+      setAccessState('paywall');
+    } else {
+      setAccessState('denied');
+    }
+    return status;
+  }, [stream, user?.$id]);
+
   useEffect(() => {
-    if (!streamId || !user?.$id || loading || !stream) return undefined;
+    if (loading || !stream) return undefined;
+    runAccessCheck();
+    return undefined;
+  }, [loading, stream?.$id, user?.$id, runAccessCheck]);
+
+  useEffect(() => {
+    if (!accessGranted || !streamId || !user?.$id || !stream) return undefined;
     joinLiveStream(streamId, user.$id).catch(() => {});
     return () => {
       leaveLiveStream(streamId, user.$id).catch(() => {});
     };
-  }, [streamId, user?.$id, loading, stream?.$id]);
+  }, [accessGranted, streamId, user?.$id, stream?.$id]);
 
   const handleClose = useCallback(() => {
     router.replace('/home');
   }, []);
+
+  const handleAccessGranted = useCallback(async () => {
+    const status = await getStreamAccessStatus(stream, user?.$id);
+    if (status?.allowed) {
+      setAccessInfo(status);
+      setAccessState('granted');
+      return;
+    }
+    Alert.alert(t('common.error'), t('paidStream.purchaseFailed'));
+  }, [stream, user?.$id, t]);
+
+  const handleRetryAccess = useCallback(async () => {
+    await runAccessCheck();
+  }, [runAccessCheck]);
 
   const streamMatchesRoute =
     Boolean(stream?.$id) && Boolean(streamId) && String(stream.$id) === String(streamId);
@@ -176,10 +237,12 @@ const LiveViewer = () => {
     return null;
   }
 
-  if (loading) {
+  if (loading || accessState === 'idle' || accessState === 'checking') {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>{t('liveViewer.loading')}</Text>
+        <Text style={styles.loadingText}>
+          {loading ? t('liveViewer.loading') : t('paidStream.checkingAccess')}
+        </Text>
       </View>
     );
   }
@@ -188,6 +251,32 @@ const LiveViewer = () => {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.errorText}>{fatalError || t('liveViewer.loadError')}</Text>
+        <TouchableOpacity style={styles.backButton} onPress={handleClose}>
+          <Text style={styles.backButtonText}>{t('common.close')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (accessState === 'paywall') {
+    return (
+      <LiveStreamPaywall
+        stream={stream}
+        user={user}
+        accessInfo={accessInfo}
+        onAccessGranted={handleAccessGranted}
+        onClose={handleClose}
+        onRetryAccess={handleRetryAccess}
+      />
+    );
+  }
+
+  if (accessState === 'denied') {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.errorText}>
+          {accessInfo?.message || t('paidStream.accessDenied')}
+        </Text>
         <TouchableOpacity style={styles.backButton} onPress={handleClose}>
           <Text style={styles.backButtonText}>{t('common.close')}</Text>
         </TouchableOpacity>

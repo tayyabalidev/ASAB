@@ -18,6 +18,8 @@ const PORT = process.env.PORT || 3001;
 const muxHandlers = require('./mux');
 const adminBroadcast = require('./adminBroadcast');
 const pushRelay = require('./pushRelay');
+const { registerStreamAccessRoutes, handleStripeStreamAccessWebhook } = require('./streamAccess');
+const { checkLiveViewerTokenAccess } = require('../appwrite-functions/videosdk-token/streamAccessCheck');
 
 // Mux webhook must see raw body for signature verification (before express.json)
 app.post(
@@ -25,6 +27,25 @@ app.post(
   express.raw({ type: 'application/json' }),
   (req, res) => muxHandlers.handleMuxWebhook(req, res)
 );
+
+// Stripe webhook — raw body required (before express.json)
+app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripe) {
+    return res.status(503).send('Stripe not configured');
+  }
+  try {
+    const outcome = await handleStripeStreamAccessWebhook(stripe, {
+      rawBody: req.body,
+      signature: req.headers['stripe-signature'],
+    });
+    if (typeof outcome.body === 'string') {
+      return res.status(outcome.status).send(outcome.body);
+    }
+    return res.status(outcome.status).json(outcome.body);
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Webhook handler failed' });
+  }
+});
 
 // Middleware
 app.use(cors());
@@ -848,8 +869,16 @@ app.post('/api/process-photo', upload.single('photo'), async (req, res) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Video/Photo Processing Service is running' });
+  res.json({
+    status: 'ok',
+    message: 'Video/Photo Processing Service is running',
+    streamAccess: true,
+    stripe: Boolean(stripe),
+  });
 });
+
+// Paid live streaming — access check + Stripe ticket payments
+registerStreamAccessRoutes(app, stripe);
 
 // Admin / CEO — broadcast in-app + mobile push to all users when posting content
 app.post('/api/admin/broadcast-content', (req, res) =>
@@ -943,6 +972,12 @@ app.get('/get-token', async (req, res) => {
     typeof req.query.participantId === 'string' ? req.query.participantId : '';
   const purpose =
     typeof req.query.purpose === 'string' ? req.query.purpose.trim().toLowerCase() : '';
+  const streamId =
+    typeof req.query.streamId === 'string' ? req.query.streamId.trim() : '';
+  const userId =
+    typeof req.query.userId === 'string' && req.query.userId.trim()
+      ? req.query.userId.trim()
+      : participantId;
 
   if (!apiKey || !secretKey) {
     return res.status(503).json({
@@ -955,6 +990,25 @@ app.get('/get-token', async (req, res) => {
       error: 'roomId is required',
       message: 'Pass VideoSDK roomId from /v2/rooms as ?roomId=...',
     });
+  }
+
+  const isLiveViewer = purpose === 'viewer' || purpose === 'live';
+  if (isLiveViewer) {
+    try {
+      const access = await checkLiveViewerTokenAccess({ streamId, roomId, userId });
+      if (!access.allowed) {
+        return res.status(403).json({
+          error: 'Payment required',
+          reason: access.reason || 'payment_required',
+          streamId: access.streamId || streamId || null,
+        });
+      }
+    } catch (e) {
+      return res.status(500).json({
+        error: 'Access check failed',
+        message: e.message || 'unknown',
+      });
+    }
   }
 
   // Match Appwrite videosdk-token (version:2 + roomId; no roles — rtc breaks RN SDK join).
@@ -1335,60 +1389,6 @@ app.post('/api/process-payout', async (req, res) => {
       details: error.type || 'Unknown error'
     });
   }
-});
-
-// Webhook endpoint for Stripe events (for production)
-app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!webhookSecret) {
-    return res.status(400).send('Webhook secret not configured');
-  }
-
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-  } catch (err) { 
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  // Handle the event
-  switch (event.type) {
-    case 'payment_intent.succeeded':
-      const paymentIntent = event.data.object;
-      // Here you can update your database, send notifications, etc.
-      // Check if it's an advertising payment or donation
-      if (paymentIntent.metadata?.type === 'advertising') {
-      } else if (paymentIntent.metadata?.type === 'donation') {
-      }
-      break;
-    case 'payment_intent.payment_failed':
-      const failedPayment = event.data.object;
-      break;
-    case 'transfer.created':
-      const transferCreated = event.data.object;
-      if (transferCreated.metadata?.payoutId) {
-      }
-      break;
-    case 'transfer.paid':
-      const transferPaid = event.data.object;
-      if (transferPaid.metadata?.payoutId) {
-        // Here you could update the payout status to confirmed
-        // Note: You'll need to import your Appwrite functions or make an API call
-      }
-      break;
-    case 'transfer.failed':
-      const transferFailed = event.data.object;
-      if (transferFailed.metadata?.payoutId) {
-        // Here you could update the payout status to failed
-      }
-      break;
-    default:
-  }
-
-  res.json({ received: true });
 });
 
 app.listen(PORT, () => {
