@@ -48,6 +48,7 @@ import LiveStreamChatOverlay from './LiveStreamChatOverlay';
 import LiveStreamHeartReactions from './LiveStreamHeartReactions';
 import LiveHostGuestControls from './LiveHostGuestControls';
 import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
+import { getBroadcasterLiveChatLayout } from '../lib/liveChatLayout';
 
 /** Minimal settle delays ΓÇö long waits add perceived lag before HLS is available to viewers. */
 const IOS_PRE_JOIN_DELAY_MS = 80;
@@ -817,6 +818,9 @@ function BroadcasterMeetingInner({
 }) {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
+  const broadcasterChatLayout = getBroadcasterLiveChatLayout(insets, {
+    compact: liveMode === 'screen',
+  });
   const [showChat, setShowChat] = useState(true);
   const [showGuests, setShowGuests] = useState(false);
   const [isBlurEnabled, setIsBlurEnabled] = useState(false);
@@ -2280,13 +2284,14 @@ function BroadcasterMeetingInner({
         streamId={streamId}
         displayName={hostDisplayName || 'Host'}
         visible={showChat}
-        bottomOffset={Math.max(insets.bottom, 16) + 72}
+        bottomOffset={broadcasterChatLayout.chatBottomOffset}
+        messageMaxHeight={broadcasterChatLayout.messageMaxHeight}
         compact={liveMode === 'screen'}
       />
       <LiveStreamHeartReactions
         streamId={streamId}
         isHost
-        bottomOffset={Math.max(insets.bottom, 16) + 88}
+        bottomOffset={broadcasterChatLayout.chatBottomOffset + 16}
       />
       <TouchableOpacity
         style={[styles.sideFab, styles.sideFabRight, { bottom: Math.max(insets.bottom, 16) + 152 }]}

@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import {
   MeetingProvider,
@@ -42,6 +43,7 @@ import {
   HLS_IOS_RETRY_DELAY_MS,
 } from '../lib/videosdkLiveHls';
 import { images } from '../constants';
+import { getViewerLiveChatLayout } from '../lib/liveChatLayout';
 
 const { height } = Dimensions.get('window');
 const OVERLAY_MOUNT_DELAY_MS = Platform.OS === 'ios' ? 800 : 450;
@@ -360,6 +362,7 @@ function LiveViewerJoinedLayers({
   displayName,
   liveMode,
 }) {
+  const insets = useSafeAreaInsets();
   const { localParticipant } = useMeeting();
   const localMode = String(localParticipant?.mode || '').toUpperCase();
   const localIsSpeaker =
@@ -367,8 +370,7 @@ function LiveViewerJoinedLayers({
     localMode === 'SEND_RECV' ||
     localMode === 'CONFERENCE';
   const isScreenLive = liveMode === 'screen';
-  // Keep chat above the host info card (~80px) + bottom padding (~100px).
-  const chatBottomOffset = isScreenLive ? 128 : 188;
+  const chatLayout = getViewerLiveChatLayout(insets, { compact: isScreenLive });
 
   return (
     <>
@@ -378,13 +380,14 @@ function LiveViewerJoinedLayers({
         streamId={streamId}
         displayName={displayName}
         visible={showChat}
-        bottomOffset={chatBottomOffset}
+        bottomOffset={chatLayout.chatBottomOffset}
+        messageMaxHeight={chatLayout.messageMaxHeight}
         compact={isScreenLive}
       />
       <LiveStreamHeartReactions
         streamId={streamId}
         isHost={false}
-        bottomOffset={chatBottomOffset - 8}
+        bottomOffset={chatLayout.chatBottomOffset - 8}
       />
     </>
   );
@@ -422,9 +425,12 @@ function LiveViewerInMeeting({
 
 export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true }) {
   const { user } = useGlobalContext();
+  const insets = useSafeAreaInsets();
   const effectiveRoomId = stream?.videosdkRoomId || null;
   const liveMode = stream?.liveMode === 'screen' ? 'screen' : 'camera';
-  const chatBottomInset = liveMode === 'screen' ? 128 : 188;
+  const viewerChatLayout = getViewerLiveChatLayout(insets, {
+    compact: liveMode === 'screen',
+  });
   const streamThumbnailUri = resolveLiveStreamThumbnailUrl(stream);
   const [viewerCount, setViewerCount] = useState(stream?.viewerCount || 0);
   const [isFollowingUser, setIsFollowingUser] = useState(false);
@@ -651,7 +657,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
         )}
       </View>
 
-      <View style={[styles.bottomOverlay, { paddingBottom: chatBottomInset }]}>
+      <View style={[styles.bottomOverlay, { paddingBottom: viewerChatLayout.hostOverlayPadding }]}>
         <View style={styles.hostInfoContainer}>
           <View style={styles.hostInfo}>
             <Image

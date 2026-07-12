@@ -109,7 +109,11 @@ const checks = [
     name: 'Viewer chat clears host info card (bottom offset)',
     pass: () => {
       const src = read('components/LiveStreamPlayerImpl.sdk.jsx');
-      return src.includes('chatBottomOffset') && src.includes('chatBottomInset');
+      return (
+        src.includes('getViewerLiveChatLayout') &&
+        src.includes('hostOverlayPadding') &&
+        src.includes('chatBottomOffset')
+      );
     },
   },
   {

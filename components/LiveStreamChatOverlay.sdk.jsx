@@ -37,6 +37,7 @@ export default function LiveStreamChatOverlay({
   displayName = 'Viewer',
   visible = true,
   bottomOffset = 110,
+  messageMaxHeight,
   compact = false,
 }) {
   const { user } = useGlobalContext();
@@ -148,6 +149,9 @@ export default function LiveStreamChatOverlay({
 
   if (!visible) return null;
 
+  const resolvedMessageMaxHeight =
+    messageMaxHeight ?? (compact ? 140 : 180);
+
   return (
     <View
       style={[styles.root, { bottom: bottomOffset }, compact && styles.rootCompact]}
@@ -155,7 +159,7 @@ export default function LiveStreamChatOverlay({
     >
       <ScrollView
         ref={scrollRef}
-        style={[styles.messageList, compact && styles.messageListCompact]}
+        style={[styles.messageList, { maxHeight: resolvedMessageMaxHeight }]}
         contentContainerStyle={styles.messageListContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -212,11 +216,7 @@ const styles = StyleSheet.create({
     right: 68,
   },
   messageList: {
-    maxHeight: 220,
     marginBottom: 8,
-  },
-  messageListCompact: {
-    maxHeight: 150,
   },
   messageListContent: {
     paddingTop: 4,

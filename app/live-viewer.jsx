@@ -324,7 +324,7 @@ const LiveViewer = () => {
           <TouchableOpacity
             style={[
               styles.chatToggle,
-              { bottom: showChat ? 252 : Math.max(insets.bottom + 16, 24) },
+              { top: insets.top + (stream.liveMode === 'screen' ? 52 : 12) },
             ]}
             onPress={() => setShowChat((prev) => !prev)}
             accessibilityLabel={showChat ? 'Hide chat' : 'Show chat'}
