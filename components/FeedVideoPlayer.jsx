@@ -14,16 +14,18 @@ function configurePlayerForPiP(player, { isLooping, isMuted, enablePiP }) {
   player.loop = isLooping;
   player.muted = isMuted;
   player.timeUpdateEventInterval = 0.5;
+  if (Platform.OS === 'ios') {
+    player.bufferOptions = {
+      preferredForwardBufferDuration: 2,
+      waitsToMinimizeStalling: false,
+    };
+  }
   if (enablePiP) {
     player.staysActiveInBackground = true;
     if (Platform.OS === 'ios') {
       // mixWithOthers keeps feed PiP from blocking WebRTC live / calls on go-live.
       player.audioMixingMode = 'mixWithOthers';
       player.showNowPlayingNotification = false;
-      player.bufferOptions = {
-        preferredForwardBufferDuration: 2,
-        waitsToMinimizeStalling: false,
-      };
     }
   } else {
     player.staysActiveInBackground = false;
@@ -40,6 +42,7 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     videoUrl,
     posterUri,
     shouldPlay = false,
+    loadSource = true,
     isLooping = true,
     isMuted = false,
     enablePiP = true,
@@ -175,13 +178,20 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     [player]
   );
 
+  const tryPlay = useCallback(() => {
+    if (!shouldPlayRef.current && !isInPipRef.current) return;
+    try {
+      player.play();
+    } catch (_) {}
+  }, [player]);
+
   useEffect(() => {
-    if (!videoUrl) return;
+    if (!videoUrl || !loadSource) return;
     setShowPoster(Boolean(posterUri));
     try {
       player.replace(buildFeedVideoSource(videoUrl));
     } catch (_) {}
-  }, [videoUrl, player, posterUri]);
+  }, [videoUrl, player, posterUri, loadSource]);
 
   useEffect(() => {
     configurePlayerForPiP(player, { isLooping, isMuted, enablePiP });
@@ -191,9 +201,7 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     if (!player) return undefined;
 
     if (shouldPlay || isInPipRef.current) {
-      try {
-        player.play();
-      } catch (_) {}
+      tryPlay();
       return undefined;
     }
 
@@ -209,7 +217,7 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
       }
     } catch (_) {}
     return undefined;
-  }, [shouldPlay, player, enablePiP]);
+  }, [shouldPlay, player, enablePiP, tryPlay]);
 
   const handlePlaybackUpdate = useCallback(
     (payload) => {
@@ -244,9 +252,19 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
       handleReady({
         durationMillis: Math.round((event.duration || player.duration || 0) * 1000),
       });
+      tryPlay();
     });
     return () => subscription.remove();
-  }, [player, handleReady]);
+  }, [player, handleReady, tryPlay]);
+
+  useEffect(() => {
+    const subscription = player.addListener('statusChange', (event) => {
+      if (event.status === 'readyToPlay') {
+        tryPlay();
+      }
+    });
+    return () => subscription.remove();
+  }, [player, tryPlay]);
 
   useEffect(() => {
     const subscription = player.addListener('statusChange', (event) => {

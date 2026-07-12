@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getProfileLikers, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri, getCurrentUser } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getProfileLikers, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri, getVideoPlaybackUrls, getCurrentUser } from "../../lib/appwrite";
 import { useNotifications } from "../../hooks/useNotifications";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../lib/muxPlayback";
 import { useGlobalContext } from "../../context/GlobalProvider";
@@ -22,6 +22,7 @@ import { useTranslation } from "react-i18next";
 import { isAdminUser } from "../../lib/admin";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
 import { getFilterCSS } from "../../lib/filterCss";
+import { prefetchAdjacentProfileVideos } from "../../lib/prefetchVideoSource";
 
 // Component to display pending request with user details
 const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
@@ -301,6 +302,14 @@ const Profile = () => {
   const [showProgressBar, setShowProgressBar] = useState(false);
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [modalStreamUri, setModalStreamUri] = useState(null);
+  const [modalVideoSourceIndex, setModalVideoSourceIndex] = useState(0);
+
+  const modalPlaybackCandidates = useMemo(
+    () => getVideoPlaybackUrls(modalStreamUri || ""),
+    [modalStreamUri]
+  );
+  const activeModalStreamUri =
+    modalPlaybackCandidates[modalVideoSourceIndex] || modalStreamUri;
 
   const resolveProfileStreamUri = useCallback((post) => {
     if (!post) return null;
@@ -1072,6 +1081,7 @@ const Profile = () => {
     setModalVideo(videoData);
     setModalIndex(index);
     setModalStreamUri(resolveProfileStreamUri(videoData));
+    setModalVideoSourceIndex(0);
     setModalVisible(true);
     setIsVideoPlaying(true);
     setShowProgressBar(false);
@@ -1089,7 +1099,17 @@ const Profile = () => {
   }, [modalVisible, modalVideo, resolveProfileStreamUri]);
 
   useEffect(() => {
-    if (!modalVisible || !isVideoPlaying || !modalStreamUri) return undefined;
+    setModalVideoSourceIndex(0);
+    setIsVideoReady(false);
+  }, [modalVideo?.$id, modalStreamUri]);
+
+  useEffect(() => {
+    if (!modalVisible || modalIndex == null || !posts?.length) return;
+    prefetchAdjacentProfileVideos(posts, modalIndex, resolveProfileStreamUri);
+  }, [modalVisible, modalIndex, posts, resolveProfileStreamUri]);
+
+  useEffect(() => {
+    if (!modalVisible || !isVideoPlaying || !activeModalStreamUri) return undefined;
     let cancelled = false;
     const ensurePlaying = async () => {
       for (let attempt = 0; attempt < 10 && !cancelled; attempt += 1) {
@@ -1114,7 +1134,7 @@ const Profile = () => {
     return () => {
       cancelled = true;
     };
-  }, [modalVisible, isVideoPlaying, modalStreamUri, modalVideo?.$id, isVideoReady]);
+  }, [modalVisible, isVideoPlaying, activeModalStreamUri, modalVideo?.$id, isVideoReady]);
 
   const navigateToNextVideo = () => {
     if (modalIndex < posts.length - 1) {
@@ -1122,6 +1142,7 @@ const Profile = () => {
       setModalVideo(nextVideo);
       setModalIndex(modalIndex + 1);
       setModalStreamUri(resolveProfileStreamUri(nextVideo));
+      setModalVideoSourceIndex(0);
       setIsVideoPlaying(true);
       setIsVideoReady(false);
       setShowProgressBar(false);
@@ -1139,6 +1160,7 @@ const Profile = () => {
       setModalVideo(prevVideo);
       setModalIndex(modalIndex - 1);
       setModalStreamUri(resolveProfileStreamUri(prevVideo));
+      setModalVideoSourceIndex(0);
       setIsVideoPlaying(true);
       setIsVideoReady(false);
       setShowProgressBar(false);
@@ -2968,7 +2990,7 @@ const Profile = () => {
                           modalVideo.thumbnail && !String(modalVideo.thumbnail).includes("placeholder")
                             ? getVideoPosterUri(modalVideo.thumbnail, modalVideo.video)
                             : undefined;
-                        const profileStreamUri = modalStreamUri;
+                        const profileStreamUri = activeModalStreamUri;
                         if (!profileStreamUri) {
                           return (
                             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
@@ -2980,7 +3002,7 @@ const Profile = () => {
                         return (
                       <>
                         <Video
-                          key={modalStreamUri || modalVideo.$id}
+                          key={profileStreamUri || modalVideo.$id}
                           ref={modalVideoRef}
                           source={{ uri: profileStreamUri }}
                           style={{ flex: 1, width: '100%', height: '100%' }}
@@ -3009,8 +3031,11 @@ const Profile = () => {
                               }
                             }
                           }}
-                          onError={(error) => {
+                          onError={() => {
                             setIsVideoReady(false);
+                            if (modalVideoSourceIndex < modalPlaybackCandidates.length - 1) {
+                              setModalVideoSourceIndex((prev) => prev + 1);
+                            }
                           }}
                           onLoadStart={() => {
                            
@@ -3025,7 +3050,7 @@ const Profile = () => {
                             playInSilentModeIOS: true,
                             ignoreSilentSwitch: 'ignore',
                             automaticallyWaitsToMinimizeStalling: false,
-                            preferredForwardBufferDuration: 0,
+                            preferredForwardBufferDuration: 3,
                           })}
                         />
                         

@@ -158,6 +158,38 @@ function reportMissing(label, expected, found) {
   return false;
 }
 
+async function probePurchaseAmount(amount) {
+  const id = `schema_probe_${Date.now().toString(36)}`;
+  const res = await fetch(`${endpoint}/databases/${databaseId}/collections/${streamPurchasesId}/documents`, {
+    method: 'POST',
+    headers: appwriteHeaders(),
+    body: JSON.stringify({
+      documentId: id,
+      data: {
+        streamId: 'probe_stream_id',
+        buyerId: 'probe_buyer_id',
+        hostId: 'probe_host_id',
+        amount,
+        platformFee: 1,
+        hostReceives: 8.99,
+        status: 'pending',
+        paymentIntentId: '',
+        currency: 'USD',
+        purchasedAt: new Date().toISOString(),
+      },
+    }),
+  });
+  const text = await res.text();
+  if (res.ok) {
+    await fetch(
+      `${endpoint}/databases/${databaseId}/collections/${streamPurchasesId}/documents/${id}`,
+      { method: 'DELETE', headers: appwriteHeaders() }
+    );
+    return { ok: true };
+  }
+  return { ok: false, body: text };
+}
+
 async function main() {
   console.log('Paid live streaming — Appwrite schema verification\n');
 
@@ -229,6 +261,20 @@ async function main() {
       'streamPurchases'
     );
     ok = reportMissing('streamPurchases', PURCHASE_KEYS, purchaseAttrs) && ok;
+
+    const lowAmountProbe = await probePurchaseAmount(1.99);
+    if (!lowAmountProbe.ok && /between 6 and 10/i.test(lowAmountProbe.body || '')) {
+      console.log(
+        '❌ streamPurchases.amount has wrong min/max in Appwrite (only $6.00–$9.99 allowed).'
+      );
+      console.log(
+        '   Fix: Appwrite Console → Databases → streamPurchases → Attributes → amount'
+      );
+      console.log(
+        '   Delete the amount attribute and recreate as Float with NO minimum/maximum.'
+      );
+      ok = false;
+    }
   } catch (e) {
     if (e.missing) {
       console.log(`❌ streamPurchases: missing ${e.missing}`);

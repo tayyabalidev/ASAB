@@ -24,7 +24,7 @@ import FeedVideoPlayer from "../../components/FeedVideoPlayer";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFocused, theme, isDarkMode, cardHeight = SCREEN_HEIGHT }) => {
+const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onVideoStateChange, isHomeFocused, theme, isDarkMode, cardHeight = SCREEN_HEIGHT }) => {
   const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
   const { t } = useTranslation();
   const [play, setPlay] = useState(false);
@@ -136,8 +136,9 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
     }
   }, [isVisible, showProfileHint]);
 
-  // Fetch comments count on mount or when item changes
+  // Fetch comments count when the card becomes visible
   useEffect(() => {
+    if (!isVisible) return undefined;
     async function fetchCommentsCount() {
       try {
         const comments = await getComments(item.$id);
@@ -145,25 +146,25 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       } catch {}
     }
     fetchCommentsCount();
-  }, [item.$id]);
+  }, [isVisible, item.$id]);
 
-  // Check bookmark status on mount
+  // Check bookmark status when visible
   useEffect(() => {
+    if (!isVisible || !user?.$id) return undefined;
     async function checkBookmarkStatus() {
-      if (user?.$id) {
-        try {
-          const isBookmarked = await isVideoBookmarked(user.$id, item.$id);
-          setBookmarked(isBookmarked);
-        } catch (error) {
-          
-        }
+      try {
+        const isBookmarked = await isVideoBookmarked(user.$id, item.$id);
+        setBookmarked(isBookmarked);
+      } catch (error) {
+        
       }
     }
     checkBookmarkStatus();
-  }, [user?.$id, item.$id]);
+  }, [isVisible, user?.$id, item.$id]);
 
-  // Fetch share count on mount
+  // Fetch share count when visible
   useEffect(() => {
+    if (!isVisible) return undefined;
     async function fetchShareCount() {
       try {
         const shares = await getShareCount(item.$id);
@@ -173,25 +174,25 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       }
     }
     fetchShareCount();
-  }, [item.$id]);
+  }, [isVisible, item.$id]);
 
-  // Check like status on mount
+  // Check like status when visible
   useEffect(() => {
+    if (!isVisible || !user?.$id) return undefined;
     async function checkLikeStatus() {
-      if (user?.$id) {
-        try {
-          const isLiked = await isPostLiked(user.$id, item.$id);
-          setLiked(isLiked);
-        } catch (error) {
-          
-        }
+      try {
+        const isLiked = await isPostLiked(user.$id, item.$id);
+        setLiked(isLiked);
+      } catch (error) {
+        
       }
     }
     checkLikeStatus();
-  }, [user?.$id, item.$id]);
+  }, [isVisible, user?.$id, item.$id]);
 
-  // Fetch like count on mount
+  // Fetch like count when visible
   useEffect(() => {
+    if (!isVisible) return undefined;
     async function fetchLikeCount() {
       try {
         const likes = await getLikeCount(item.$id);
@@ -201,11 +202,12 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       }
     }
     fetchLikeCount();
-  }, [item.$id]);
+  }, [isVisible, item.$id]);
 
 
-  // Check if current user is following the video/photo creator
+  // Check if current user is following the video/photo creator when visible
   useEffect(() => {
+    if (!isVisible) return undefined;
     async function checkFollowStatus() {
       const creatorId = creator?.$id || (typeof item.creator === 'string' ? item.creator : item.creator?.$id);
       if (user?.$id && creatorId && user.$id !== creatorId) {
@@ -231,7 +233,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
       }
     }
     checkFollowStatus();
-  }, [user?.$id, creator?.$id, item.creator, followStatus]);
+  }, [isVisible, user?.$id, creator?.$id, item.creator, followStatus]);
 
   // Fetch comments when modal opens
   useEffect(() => {
@@ -1002,6 +1004,21 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             
             // Use WebView if there are filters or adjustments to apply CSS filters
             if (videoFilterCSS !== 'none') {
+              if (!shouldLoadSource) {
+                return (
+                  <View style={{ width: '100%', height: '100%', backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+                    {posterUri ? (
+                      <Image
+                        source={{ uri: posterUri }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <ActivityIndicator size="large" color="#ffffff" />
+                    )}
+                  </View>
+                );
+              }
               return (
                 <View style={{ width: '100%', height: '100%' }}>
                   <WebView
@@ -1036,7 +1053,7 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
                           <body>
                             <video 
                               src="${videoUrl}" 
-                              autoplay 
+                              ${play && isVisible && isHomeFocused ? 'autoplay' : ''}
                               loop 
                               muted
                               playsinline
@@ -1063,11 +1080,28 @@ const StrollVideoCard = ({ item, index, isVisible, onVideoStateChange, isHomeFoc
             }
             
             // Native player with Picture-in-Picture when the app is backgrounded
+            if (!shouldLoadSource) {
+              return (
+                <View style={{ width: '100%', height: '100%', backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+                  {posterUri ? (
+                    <Image
+                      source={{ uri: posterUri }}
+                      style={{ width: '100%', height: '100%' }}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <ActivityIndicator size="large" color="#ffffff" />
+                  )}
+                </View>
+              );
+            }
+
             return (
               <FeedVideoPlayer
                 ref={videoRef}
                 videoUrl={videoUrl}
                 posterUri={posterUri}
+                loadSource={shouldLoadSource}
                 shouldPlay={play && isVisible && isHomeFocused}
                 isLooping
                 isMuted={false}
@@ -2350,8 +2384,8 @@ const Home = () => {
   const viewabilityConfigCallbackPairs = useRef([
     {
       viewabilityConfig: {
-        itemVisiblePercentThreshold: 80,
-        minimumViewTime: 150,
+        itemVisiblePercentThreshold: 50,
+        minimumViewTime: 100,
       },
       onViewableItemsChanged,
     },
@@ -2380,6 +2414,10 @@ const Home = () => {
 
   const renderVideoCard = useCallback(
     ({ item, index }) => {
+      const shouldLoadSource =
+        currentVideoIndex != null &&
+        Math.abs(currentVideoIndex - index) <= 1;
+
       // Render advertisement if it's an ad
       if (item.isAd) {
         return (
@@ -2395,6 +2433,7 @@ const Home = () => {
           item={item}
           index={index}
           isVisible={currentVideoIndex === index}
+          shouldLoadSource={shouldLoadSource}
           onVideoStateChange={() => {}} // Empty function since we're not using it anymore
           isHomeFocused={isHomeFocused && !trendingModalVisible}
           theme={theme}
@@ -3220,10 +3259,10 @@ const Home = () => {
             }
             style={{ flex: 1 }}
             removeClippedSubviews={Platform.OS === 'android'}
-            maxToRenderPerBatch={3}
+            maxToRenderPerBatch={2}
             updateCellsBatchingPeriod={50}
             initialNumToRender={2}
-            windowSize={7}
+            windowSize={5}
         />
         
         {/* Scroll to Top Button */}
