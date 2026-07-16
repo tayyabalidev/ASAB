@@ -1,57 +1,17 @@
 /**
- * Admin / CEO content broadcast — list all users via API key, create in-app
- * notifications, send Expo push (real-time on mobile).
+ * Creator post/live fan-out — resolve followers/subscribers via API key,
+ * create in-app notifications, send Expo push (same delivery path as DMs via pushRelay).
  */
 
 const crypto = require('crypto');
 const axios = require('axios');
+const { fetchPushTokensForUserIds, sendExpoPushBatch } = require('./pushRelay');
+const { isPlatformBroadcaster } = require('./adminBroadcast');
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const DEDUPE_TYPES = new Set(['live', 'video_post', 'photo_post', 'content_post', 'post']);
 const NOTIFY_BATCH = 25;
 const PUSH_BATCH = 100;
-
-function splitCsv(raw) {
-  return String(raw || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function getAdminEmails() {
-  return splitCsv(process.env.ADMIN_EMAILS || process.env.EXPO_PUBLIC_ADMIN_EMAILS).map((e) =>
-    e.toLowerCase()
-  );
-}
-
-function getBroadcasterUserIds() {
-  return new Set([
-    ...splitCsv(process.env.CEO_USER_IDS),
-    ...splitCsv(process.env.CEO_USER_ID),
-    ...splitCsv(process.env.EXPO_PUBLIC_CEO_USER_IDS),
-    ...splitCsv(process.env.EXPO_PUBLIC_CEO_USER_ID),
-  ]);
-}
-
-function getBroadcasterEmails() {
-  return new Set(
-    [
-      ...splitCsv(process.env.CEO_EMAILS),
-      ...splitCsv(process.env.CEO_USER_EMAIL),
-      ...splitCsv(process.env.EXPO_PUBLIC_CEO_EMAILS),
-      ...splitCsv(process.env.EXPO_PUBLIC_CEO_USER_EMAIL),
-      ...getAdminEmails(),
-    ].map((e) => e.toLowerCase())
-  );
-}
-
-function isPlatformBroadcaster({ userId, email }) {
-  const id = String(userId || '').trim();
-  const em = String(email || '').trim().toLowerCase();
-  if (id && getBroadcasterUserIds().has(id)) return true;
-  if (em && getBroadcasterEmails().has(em)) return true;
-  return false;
-}
 
 function appwriteHeaders() {
   return {
@@ -66,9 +26,20 @@ function appwriteBase() {
 }
 
 function collectionUrl(collectionId) {
-  const base = appwriteBase();
   const db = process.env.APPWRITE_DATABASE_ID;
-  return `${base}/databases/${db}/collections/${collectionId}/documents`;
+  return `${appwriteBase()}/databases/${db}/collections/${collectionId}/documents`;
+}
+
+function uniqueIds(ids) {
+  return [...new Set((ids || []).filter(Boolean).map(String))];
+}
+
+function parseSubscribers(raw) {
+  if (Array.isArray(raw)) return uniqueIds(raw);
+  if (typeof raw === 'string' && raw.trim()) {
+    return uniqueIds(raw.split(',').map((part) => part.trim()));
+  }
+  return [];
 }
 
 function normalizeAvatar(avatar) {
@@ -100,15 +71,11 @@ async function listAllUserIds(excludeUserId) {
   while (true) {
     const queries = [`limit(${pageSize})`];
     if (cursor) queries.push(`cursorAfter("${cursor}")`);
-
     const queryString = queries.map((q) => `queries[]=${encodeURIComponent(q)}`).join('&');
-    const url = `${collectionUrl(userCol)}?${queryString}`;
-    const response = await appwriteGet(url);
+    const response = await appwriteGet(`${collectionUrl(userCol)}?${queryString}`);
 
     for (const doc of response.documents || []) {
-      if (!excludeUserId || doc.$id !== excludeUserId) {
-        ids.push(doc.$id);
-      }
+      if (!excludeUserId || doc.$id !== excludeUserId) ids.push(doc.$id);
     }
 
     if ((response.documents || []).length < pageSize) break;
@@ -116,6 +83,15 @@ async function listAllUserIds(excludeUserId) {
   }
 
   return ids;
+}
+
+function resolveAudienceFromCreator(creator, creatorUserId) {
+  const followers = Array.isArray(creator.followers) ? creator.followers : [];
+  const favorites = Array.isArray(creator.profileLikes) ? creator.profileLikes : [];
+  const subscribers = parseSubscribers(creator.notificationSubscribers);
+  return uniqueIds([...followers, ...favorites, ...subscribers]).filter(
+    (id) => id && id !== String(creatorUserId)
+  );
 }
 
 async function findExistingNotification(type, fromUserId, targetUserId, postId) {
@@ -130,17 +106,22 @@ async function findExistingNotification(type, fromUserId, targetUserId, postId) 
   if (postId) queries.push(`equal("postId", "${postId}")`);
 
   const q = queries.map((query) => `queries[]=${encodeURIComponent(query)}`).join('&');
-  const url = `${collectionUrl(notifCol)}?${q}&limit=1`;
-
   try {
-    const response = await appwriteGet(url);
+    const response = await appwriteGet(`${collectionUrl(notifCol)}?${q}&limit=1`);
     return response.documents?.[0] || null;
   } catch (_) {
     return null;
   }
 }
 
-async function createNotificationDoc({ type, fromUserId, fromUsername, fromUserAvatar, targetUserId, postId }) {
+async function createNotificationDoc({
+  type,
+  fromUserId,
+  fromUsername,
+  fromUserAvatar,
+  targetUserId,
+  postId,
+}) {
   const notifCol = process.env.APPWRITE_NOTIFICATIONS_COLLECTION_ID;
   if (!notifCol) throw new Error('APPWRITE_NOTIFICATIONS_COLLECTION_ID not configured');
 
@@ -150,9 +131,7 @@ async function createNotificationDoc({ type, fromUserId, fromUsername, fromUserA
   }
 
   const docId = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
-  const url = collectionUrl(notifCol);
-
-  return appwritePost(url, {
+  return appwritePost(collectionUrl(notifCol), {
     documentId: docId,
     data: {
       type,
@@ -167,11 +146,38 @@ async function createNotificationDoc({ type, fromUserId, fromUsername, fromUserA
   });
 }
 
-function buildPushCopy(type) {
-  if (type === 'live') {
-    return { title: 'Admin is now LIVE!', body: 'Join the stream now.' };
+function buildPushCopy(type, displayName, title, broadcast) {
+  const trimmed = title && String(title).trim() ? String(title).trim() : '';
+
+  if (broadcast) {
+    if (type === 'live') {
+      return { title: 'Admin is now LIVE!', body: 'Join the stream now.' };
+    }
+    return { title: 'Admin posted new content.', body: 'Tap to view.' };
   }
-  return { title: 'Admin posted new content.', body: 'Tap to view.' };
+
+  if (type === 'live') {
+    return {
+      title: `${displayName} is LIVE now`,
+      body: trimmed || 'Join the stream!',
+    };
+  }
+  if (type === 'photo_post') {
+    return {
+      title: displayName,
+      body: trimmed ? `just uploaded a new photo: ${trimmed}` : 'just uploaded a new photo.',
+    };
+  }
+  if (type === 'content_post' || type === 'post') {
+    return {
+      title: displayName,
+      body: trimmed ? `posted new content: ${trimmed}` : 'posted new content. Tap to view.',
+    };
+  }
+  return {
+    title: displayName,
+    body: trimmed ? `just uploaded a new video: ${trimmed}` : 'just uploaded a new video.',
+  };
 }
 
 function buildDeepLink(type, postId, fromUserId) {
@@ -184,49 +190,16 @@ function buildDeepLink(type, postId, fromUserId) {
   return null;
 }
 
-async function sendExpoPushBatch(messages) {
-  if (!messages.length) return;
-  await axios.post(EXPO_PUSH_URL, messages, {
-    headers: {
-      Accept: 'application/json',
-      'Accept-Encoding': 'gzip, deflate',
-      'Content-Type': 'application/json',
-    },
-  });
-}
-
-async function fetchPushTokensForUserIds(userIds) {
-  const userCol = process.env.APPWRITE_USER_COLLECTION_ID;
-  if (!userCol) return [];
-
-  const tokens = [];
-  for (const userId of userIds) {
-    try {
-      const url = `${collectionUrl(userCol)}/${userId}`;
-      const user = await appwriteGet(url);
-      const token = user?.expoPushToken;
-      if (token && typeof token === 'string' && token.startsWith('ExponentPushToken')) {
-        tokens.push({ userId, token });
-      }
-    } catch (_) {
-      /* skip */
-    }
-  }
-  return tokens;
-}
-
-async function broadcastContentNotifications({
+async function notifyCreatorContent({
   creatorUserId,
   creatorEmail,
   type,
   postId,
+  title,
+  recipientIds,
 }) {
   if (!process.env.APPWRITE_API_KEY) {
     throw new Error('APPWRITE_API_KEY not configured on server');
-  }
-
-  if (!isPlatformBroadcaster({ userId: creatorUserId, email: creatorEmail })) {
-    throw new Error('Not authorized for platform broadcast');
   }
 
   const userCol = process.env.APPWRITE_USER_COLLECTION_ID;
@@ -235,20 +208,30 @@ async function broadcastContentNotifications({
     throw new Error('APPWRITE_USER_COLLECTION_ID and APPWRITE_NOTIFICATIONS_COLLECTION_ID required');
   }
 
-  const creatorUrl = `${collectionUrl(userCol)}/${creatorUserId}`;
-  const creator = await appwriteGet(creatorUrl);
-  const fromUsername = creator?.username || 'ASAB';
+  const creator = await appwriteGet(`${collectionUrl(userCol)}/${creatorUserId}`);
+  const fromUsername = creator?.username || 'Someone';
   const fromUserAvatar = normalizeAvatar(creator?.avatar);
+  const broadcast = isPlatformBroadcaster({
+    userId: creatorUserId,
+    email: creatorEmail || creator?.email,
+  });
 
-  const recipientIds = await listAllUserIds(creatorUserId);
-  if (!recipientIds.length) {
-    return { notified: 0, pushed: 0, recipients: 0 };
+  let recipients = [];
+  if (Array.isArray(recipientIds) && recipientIds.length) {
+    recipients = uniqueIds(recipientIds).filter((id) => id !== String(creatorUserId));
+  } else if (broadcast) {
+    recipients = await listAllUserIds(creatorUserId);
+  } else {
+    recipients = resolveAudienceFromCreator(creator, creatorUserId);
+  }
+
+  if (!recipients.length) {
+    return { notified: 0, pushed: 0, recipients: 0, broadcast };
   }
 
   const notifiedIds = [];
-
-  for (let i = 0; i < recipientIds.length; i += NOTIFY_BATCH) {
-    const batch = recipientIds.slice(i, i + NOTIFY_BATCH);
+  for (let i = 0; i < recipients.length; i += NOTIFY_BATCH) {
+    const batch = recipients.slice(i, i + NOTIFY_BATCH);
     const results = await Promise.allSettled(
       batch.map((targetUserId) =>
         createNotificationDoc({
@@ -261,19 +244,17 @@ async function broadcastContentNotifications({
         })
       )
     );
-
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') notifiedIds.push(batch[index]);
     });
-
-    if (i + NOTIFY_BATCH < recipientIds.length) {
+    if (i + NOTIFY_BATCH < recipients.length) {
       await new Promise((r) => setTimeout(r, 80));
     }
   }
 
-  const pushTargets = notifiedIds.length ? notifiedIds : recipientIds;
+  const pushTargets = notifiedIds.length ? notifiedIds : recipients;
   const tokenEntries = await fetchPushTokensForUserIds(pushTargets);
-  const { title: pushTitle, body } = buildPushCopy(type);
+  const { title: pushTitle, body } = buildPushCopy(type, fromUsername, title, broadcast);
   const deepLink = buildDeepLink(type, postId, creatorUserId);
   const channelId = type === 'live' ? 'live-streams' : 'creator-content';
   const pushType = type === 'live' ? 'live' : type;
@@ -291,24 +272,28 @@ async function broadcastContentNotifications({
       postId: type !== 'live' ? postId : undefined,
       fromUserId: creatorUserId,
       url: deepLink || undefined,
-      broadcast: true,
+      broadcast: broadcast || undefined,
     },
   }));
 
+  let pushed = 0;
   for (let i = 0; i < messages.length; i += PUSH_BATCH) {
-    await sendExpoPushBatch(messages.slice(i, i + PUSH_BATCH));
+    const batch = messages.slice(i, i + PUSH_BATCH);
+    const result = await sendExpoPushBatch(batch);
+    if (result.ok) pushed += batch.length;
   }
 
   return {
     notified: notifiedIds.length,
-    pushed: tokenEntries.length,
-    recipients: recipientIds.length,
+    pushed,
+    recipients: recipients.length,
+    broadcast,
   };
 }
 
-async function handleBroadcastContentRequest(req, res) {
+async function handleCreatorContentNotifyRequest(req, res) {
   try {
-    const { creatorUserId, creatorEmail, type, postId } = req.body || {};
+    const { creatorUserId, creatorEmail, type, postId, title, recipientIds } = req.body || {};
 
     if (!creatorUserId || !type) {
       return res.status(400).json({ error: 'creatorUserId and type are required' });
@@ -318,23 +303,24 @@ async function handleBroadcastContentRequest(req, res) {
       return res.status(400).json({ error: 'Invalid notification type' });
     }
 
-    const result = await broadcastContentNotifications({
+    const result = await notifyCreatorContent({
       creatorUserId,
       creatorEmail,
       type,
       postId: postId || null,
+      title: title || '',
+      recipientIds,
     });
 
     return res.status(200).json({ ok: true, ...result });
   } catch (error) {
-    const message = error?.response?.data?.message || error?.message || 'Broadcast failed';
-    console.error('[adminBroadcast]', message);
-    return res.status(error?.message?.includes('Not authorized') ? 403 : 500).json({ error: message });
+    const message = error?.response?.data?.message || error?.message || 'Creator notify failed';
+    console.error('[creatorContentNotify]', message);
+    return res.status(500).json({ error: message });
   }
 }
 
 module.exports = {
-  handleBroadcastContentRequest,
-  isPlatformBroadcaster,
-  broadcastContentNotifications,
+  handleCreatorContentNotifyRequest,
+  notifyCreatorContent,
 };

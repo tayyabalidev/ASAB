@@ -18,6 +18,7 @@ const PORT = process.env.PORT || 3001;
 const muxHandlers = require('./mux');
 const adminBroadcast = require('./adminBroadcast');
 const pushRelay = require('./pushRelay');
+const creatorContentNotify = require('./creatorContentNotify');
 const { registerStreamAccessRoutes, handleStripeStreamAccessWebhook } = require('./streamAccess');
 const { checkLiveViewerTokenAccess } = require('../appwrite-functions/videosdk-token/streamAccessCheck');
 
@@ -883,6 +884,11 @@ registerStreamAccessRoutes(app, stripe);
 // Admin / CEO — broadcast in-app + mobile push to all users when posting content
 app.post('/api/admin/broadcast-content', (req, res) =>
   adminBroadcast.handleBroadcastContentRequest(req, res)
+);
+
+// Creator post/live — notify followers/favorites/subscribers (API key reads tokens)
+app.post('/api/creator/notify-content', (req, res) =>
+  creatorContentNotify.handleCreatorContentNotifyRequest(req, res)
 );
 
 // Push relay — send Expo push to specific users (API key reads tokens server-side)

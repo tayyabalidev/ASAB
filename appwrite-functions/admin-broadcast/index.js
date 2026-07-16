@@ -15,7 +15,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
-const DEDUPE_TYPES = new Set(['live', 'video_post', 'photo_post']);
+const DEDUPE_TYPES = new Set(['live', 'video_post', 'photo_post', 'content_post', 'post']);
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -127,7 +127,7 @@ async function createNotificationDoc(payload) {
   );
 }
 
-async function broadcast({ creatorUserId, creatorEmail, type, postId, title, log }) {
+async function broadcast({ creatorUserId, creatorEmail, type, postId, log }) {
   if (!isPlatformBroadcaster({ userId: creatorUserId, email: creatorEmail })) {
     throw new Error('Not authorized for platform broadcast');
   }
@@ -165,16 +165,11 @@ async function broadcast({ creatorUserId, creatorEmail, type, postId, title, log
   }
 
   const platform = process.env.APP_PLATFORM || 'com.bilal.asab';
-  const displayName = fromUsername;
-  const trimmed = title && String(title).trim() ? String(title).trim() : '';
-  let pushTitle = `${displayName} posted a video`;
-  let pushBody = trimmed || 'Tap to watch the new video';
+  let pushTitle = 'Admin posted new content.';
+  let pushBody = 'Tap to view.';
   if (type === 'live') {
-    pushTitle = `${displayName} is live`;
-    pushBody = trimmed || 'Tap to watch the live stream';
-  } else if (type === 'photo_post') {
-    pushTitle = `${displayName} posted a photo`;
-    pushBody = trimmed || 'Tap to view the new post';
+    pushTitle = 'Admin is now LIVE!';
+    pushBody = 'Join the stream now.';
   }
 
   const deepLink =
@@ -232,10 +227,14 @@ module.exports = async ({ req, res, log, error }) => {
     if (method !== 'POST') return res.json({ error: 'Method not allowed' }, 405, cors);
 
     const body = getBodyJson(req);
-    const { creatorUserId, creatorEmail, type, postId, title } = body;
+    const { creatorUserId, creatorEmail, type, postId } = body;
 
     if (!creatorUserId || !type) {
       return res.json({ error: 'creatorUserId and type required' }, 400, cors);
+    }
+
+    if (!['live', 'video_post', 'photo_post', 'content_post', 'post'].includes(type)) {
+      return res.json({ error: 'Invalid notification type' }, 400, cors);
     }
 
     const result = await broadcast({
@@ -243,7 +242,6 @@ module.exports = async ({ req, res, log, error }) => {
       creatorEmail,
       type,
       postId,
-      title,
       log,
     });
 

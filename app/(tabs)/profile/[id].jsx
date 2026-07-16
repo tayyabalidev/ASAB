@@ -323,6 +323,11 @@ const UserProfile = () => {
     const nextLiked = !isProfileLikedByMe;
     setIsProfileLikedByMe(nextLiked);
     setLikesCount((prev) => (nextLiked ? prev + 1 : Math.max(0, prev - 1)));
+    if (nextLiked) {
+      setIsNotificationsOn(true);
+    } else if (!isFollowing) {
+      setIsNotificationsOn(false);
+    }
     setTogglingProfileLike(true);
 
     try {
@@ -333,6 +338,11 @@ const UserProfile = () => {
     } catch (error) {
       setIsProfileLikedByMe(!nextLiked);
       setLikesCount((prev) => (nextLiked ? Math.max(0, prev - 1) : prev + 1));
+      setIsNotificationsOn(
+        profileUser
+          ? isUserSubscribedToCreator(profileUser, currentUser.$id)
+          : isFollowing
+      );
       const message = error?.message || t('profile.alerts.profileLikeError');
       Alert.alert(
         t('common.error'),
@@ -380,7 +390,7 @@ const UserProfile = () => {
   const handleNotificationToggle = async () => {
     if (!currentUser?.$id || !id || togglingNotifications) return;
 
-    if (!isFollowing) {
+    if (!isFollowing && !isProfileLikedByMe) {
       Alert.alert(
         t('profile.actions.notificationsFollowRequiredTitle'),
         t('profile.actions.notificationsFollowRequiredMessage')
