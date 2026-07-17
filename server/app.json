@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "de73615d-5f8b-492a-8084-ae306bd02445"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.ahmerfareed.videophotoprocessor",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}
