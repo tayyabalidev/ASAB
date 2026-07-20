@@ -23,6 +23,7 @@ import { safeRouterBack } from "../../lib/routerHelpers";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import {
   getVideoById,
+  getPhotoById,
   getComments,
   addComment,
   toggleLikeComment,
@@ -70,10 +71,28 @@ const PostDetails = () => {
     setLoading(true);
     setError(null);
     try {
-      const video = await getVideoById(id);
-      setPost(video);
+      try {
+        const video = await getVideoById(id);
+        setPost(video);
+        return;
+      } catch (_) {
+        /* try photo collection next */
+      }
+      try {
+        const photo = await getPhotoById(id);
+        setPost(photo);
+        return;
+      } catch (_) {
+        /* not found in either collection */
+      }
+      setError("This post is no longer available.");
     } catch (err) {
-      setError(err.message || "Failed to load post");
+      const msg = String(err?.message || "");
+      if (msg.toLowerCase().includes("could not be found")) {
+        setError("This post is no longer available.");
+      } else {
+        setError(msg || "Failed to load post");
+      }
     } finally {
       setLoading(false);
     }
@@ -316,22 +335,22 @@ const PostDetails = () => {
           </View>
         ) : error ? (
           <View
-            style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
+            style={{ flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 24 }}
           >
-            <Text style={{ color: theme.textPrimary, fontSize: 16 }}>
+            <Text style={{ color: theme.textPrimary, fontSize: 16, textAlign: "center" }}>
               {error}
             </Text>
             <TouchableOpacity
-              onPress={fetchPost}
+              onPress={() => safeRouterBack(router)}
               style={{
                 marginTop: 12,
                 paddingHorizontal: 16,
                 paddingVertical: 10,
+                borderRadius: 8,
                 backgroundColor: theme.accent,
-                borderRadius: 20,
               }}
             >
-              <Text style={{ color: "#fff", fontWeight: "600" }}>Retry</Text>
+              <Text style={{ color: "#fff", fontWeight: "600" }}>Go back</Text>
             </TouchableOpacity>
           </View>
         ) : !post ? (

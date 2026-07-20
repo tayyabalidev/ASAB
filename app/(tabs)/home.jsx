@@ -4,7 +4,7 @@ import { Platform } from "react-native";
 import { FlatList, Image, RefreshControl, Text, View, TouchableOpacity, Dimensions, Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Share, Alert, ScrollView, Linking } from "react-native";
 import { ResizeMode, Video } from "expo-av";
 import Slider from "@react-native-community/slider";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { GestureHandlerRootView, PanGestureHandler, State } from "react-native-gesture-handler";
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getTrendingVideos, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, getVideoPosterUri, toggleFollowUser, getAllPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount } from "../../lib/appwrite";
+import { getAllPosts, getTrendingVideos, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, getVideoPosterUri, toggleFollowUser, getAllPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount, getVideoById, getPhotoById } from "../../lib/appwrite";
 import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
@@ -21,6 +21,7 @@ import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
 import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 import { getFilterCSS, getVideoFilterCSS } from "../../lib/filterCss";
 import FeedVideoPlayer from "../../components/FeedVideoPlayer";
+import { normalizeRouteParam } from "../../lib/notificationNavigation";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -1787,6 +1788,8 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
 const Home = () => {
   const { user, isRTL, theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
+  const { postId: postIdParam } = useLocalSearchParams();
+  const focusPostId = normalizeRouteParam(postIdParam);
   const [selectedTab, setSelectedTab] = useState('forYou'); // 'forYou' or 'following'
   const [refreshing, setRefreshing] = useState(false);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(null);
@@ -1821,6 +1824,9 @@ const Home = () => {
   const lastSyncedVideoIdRef = useRef(null); // Track last synced video ID to prevent re-syncing
   const flatListRef = useRef(null);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [notificationFocusPost, setNotificationFocusPost] = useState(null);
+  const handledFocusPostRef = useRef(null);
+  const scrolledFocusPostRef = useRef(null);
   
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -2033,13 +2039,19 @@ const Home = () => {
 
   // Insert ads into posts every 5 posts
   const displayPostsWithAds = useMemo(() => {
-    const basePosts = isSearching ? searchResults : posts;
+    let basePosts = isSearching ? searchResults : posts;
+    if (
+      notificationFocusPost?.$id &&
+      !(basePosts || []).some((p) => p.$id === notificationFocusPost.$id)
+    ) {
+      basePosts = [notificationFocusPost, ...(basePosts || [])];
+    }
     if (!activeAds || activeAds.length === 0) return basePosts;
     
     const postsWithAds = [];
     const adInterval = 5; // Show ad every 5 posts
     
-    basePosts.forEach((post, index) => {
+    (basePosts || []).forEach((post, index) => {
       postsWithAds.push(post);
       
       // Insert ad after every adInterval posts
@@ -2059,10 +2071,83 @@ const Home = () => {
     });
     
     return postsWithAds;
-  }, [isSearching ? searchResults : posts, activeAds]);
+  }, [isSearching, searchResults, posts, activeAds, notificationFocusPost]);
   
   // Use search results if searching, otherwise use normal posts with ads
   const displayPosts = displayPostsWithAds;
+
+  // From notification / deep link: open home feed on that exact post.
+  useEffect(() => {
+    if (!focusPostId) return;
+    if (handledFocusPostRef.current === focusPostId) return;
+
+    let cancelled = false;
+
+    (async () => {
+      setSelectedTab('forYou');
+      setIsSearching(false);
+      setSearchQuery('');
+      setSearchResults([]);
+      setTrendingModalVisible(false);
+
+      const existing = (combinedForYouPosts || []).find((p) => p.$id === focusPostId);
+      if (existing) {
+        if (cancelled) return;
+        handledFocusPostRef.current = focusPostId;
+        setNotificationFocusPost(null);
+        return;
+      }
+
+      let fetched = null;
+      try {
+        fetched = { ...(await getVideoById(focusPostId)), postType: 'video' };
+      } catch (_) {
+        try {
+          fetched = { ...(await getPhotoById(focusPostId)), postType: 'photo' };
+        } catch (__) {
+          fetched = null;
+        }
+      }
+
+      if (cancelled) return;
+      handledFocusPostRef.current = focusPostId;
+      if (fetched) {
+        setNotificationFocusPost(fetched);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [focusPostId, combinedForYouPosts]);
+
+  useEffect(() => {
+    if (!focusPostId || !displayPosts?.length || !flatListRef.current) return;
+
+    const idx = displayPosts.findIndex((p) => p.$id === focusPostId && !p.isAd);
+    if (idx < 0) return;
+    if (scrolledFocusPostRef.current === focusPostId) return;
+    scrolledFocusPostRef.current = focusPostId;
+
+    const timer = setTimeout(() => {
+      try {
+        flatListRef.current?.scrollToOffset({
+          offset: feedHeaderHeight + idx * SCREEN_HEIGHT,
+          animated: true,
+        });
+        setCurrentVideoIndex(idx);
+      } catch (_) {
+        /* ignore */
+      }
+      try {
+        router.setParams({ postId: undefined });
+      } catch (_) {
+        /* ignore */
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [focusPostId, displayPosts, feedHeaderHeight]);
 
   const onRefresh = async () => {
     setRefreshing(true);

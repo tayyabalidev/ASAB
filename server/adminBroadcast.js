@@ -179,7 +179,7 @@ function buildDeepLink(type, postId, fromUserId) {
   if (type === 'live' && postId) {
     return `${platform}://live-viewer?streamId=${encodeURIComponent(postId)}`;
   }
-  if (postId) return `${platform}://post/${encodeURIComponent(postId)}`;
+  if (postId) return `${platform}://home?postId=${encodeURIComponent(postId)}`;
   if (fromUserId) return `${platform}://profile/${encodeURIComponent(fromUserId)}`;
   return null;
 }
