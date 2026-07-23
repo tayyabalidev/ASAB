@@ -48,6 +48,8 @@ import LiveStreamChatOverlay from './LiveStreamChatOverlay';
 import LiveStreamHeartReactions from './LiveStreamHeartReactions';
 import LiveHostGuestControls from './LiveHostGuestControls';
 import LiveRemoteRtcTiles from './LiveRemoteRtcTiles';
+import LiveGroupStage from './LiveGroupStage';
+import { MAX_STAGE_GUESTS } from '../lib/liveStageLayout';
 import { getBroadcasterLiveChatLayout } from '../lib/liveChatLayout';
 
 /** Minimal settle delays ΓÇö long waits add perceived lag before HLS is available to viewers. */
@@ -674,6 +676,7 @@ function LocalPreviewInner({
   insets,
   isBlurEnabled = false,
   isInPipMode = false,
+  contained = false,
 }) {
   const { t } = useTranslation();
   const { localScreenShareOn, localWebcamOn, localWebcamStream } = useMeeting();
@@ -751,7 +754,7 @@ function LocalPreviewInner({
 
   if (!webcamOn || !streamURL) {
     return (
-      <View style={styles.placeholder}>
+      <View style={contained ? styles.placeholderContained : styles.placeholder}>
         <ActivityIndicator color="#fff" />
         <Text style={styles.placeholderText}>
           {webcamOn ? t('liveBroadcast.cameraLoading') : t('liveBroadcast.cameraStarting')}
@@ -767,7 +770,7 @@ function LocalPreviewInner({
     <RTCView
       key={useFrontCamera ? 'host-camera-front' : 'host-camera-back'}
       streamURL={streamURL}
-      style={styles.video}
+      style={contained ? styles.videoContained : styles.video}
       objectFit="cover"
       mirror={previewMirror}
       zOrder={0}
@@ -782,11 +785,12 @@ function LocalPreview({
   insets,
   isBlurEnabled = false,
   isInPipMode = false,
+  contained = false,
 }) {
   const { t } = useTranslation();
   if (!localParticipantId) {
     return (
-      <View style={styles.placeholder}>
+      <View style={contained ? styles.placeholderContained : styles.placeholder}>
         <ActivityIndicator color="#fff" />
         <Text style={styles.placeholderText}>{t('liveBroadcast.cameraStarting')}</Text>
       </View>
@@ -800,6 +804,7 @@ function LocalPreview({
       insets={insets}
       isBlurEnabled={isBlurEnabled}
       isInPipMode={isInPipMode}
+      contained={contained}
     />
   );
 }
@@ -815,6 +820,7 @@ function BroadcasterMeetingInner({
   meetingParticipantId,
   roomDebug,
   hostDisplayName,
+  hostAvatar: _hostAvatar,
 }) {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
@@ -1918,8 +1924,8 @@ function BroadcasterMeetingInner({
         const isScreen = liveModeRef.current === 'screen';
         actionsRef.current.startHls?.({
           layout: isScreen
-            ? { type: 'GRID', priority: 'PIN', gridSize: 4 }
-            : { type: 'GRID', priority: 'SPEAKER', gridSize: 4 },
+            ? { type: 'GRID', priority: 'PIN', gridSize: MAX_STAGE_GUESTS }
+            : { type: 'GRID', priority: 'SPEAKER', gridSize: MAX_STAGE_GUESTS },
           theme: 'DARK',
           mode: 'video-and-audio',
           quality: mapLiveQualityToHls(quality),
@@ -2171,15 +2177,45 @@ function BroadcasterMeetingInner({
           ) : null}
         </>
       ) : null}
-      <LocalPreview
-        liveMode={liveMode}
-        localParticipantId={localParticipant?.id}
-        useFrontCamera={useFrontCamera}
-        insets={insets}
-        isBlurEnabled={isBlurEnabled}
-        isInPipMode={isInPipMode}
+      {liveMode === 'camera' && !isInPipMode ? (
+        <LiveGroupStage
+          role="host"
+          hostParticipantId={localParticipant?.id}
+          onEmptySlotPress={() => setShowGuests(true)}
+          renderHost={() => (
+            <LocalPreview
+              liveMode={liveMode}
+              localParticipantId={localParticipant?.id}
+              useFrontCamera={useFrontCamera}
+              insets={insets}
+              isBlurEnabled={isBlurEnabled}
+              isInPipMode={isInPipMode}
+              contained
+            />
+          )}
+        />
+      ) : (
+        <>
+          <LocalPreview
+            liveMode={liveMode}
+            localParticipantId={localParticipant?.id}
+            useFrontCamera={useFrontCamera}
+            insets={insets}
+            isBlurEnabled={isBlurEnabled}
+            isInPipMode={isInPipMode}
+          />
+          {!isInPipMode ? (
+            <LiveRemoteRtcTiles
+              excludeParticipantId={localParticipant?.id}
+              maxTiles={MAX_STAGE_GUESTS}
+            />
+          ) : null}
+        </>
+      )}
+      <LiveHostGuestControls
+        visible={showGuests && !isInPipMode}
+        onClose={() => setShowGuests(false)}
       />
-      {!isInPipMode ? <LiveRemoteRtcTiles excludeParticipantId={localParticipant?.id} /> : null}
       {!isInPipMode ? (
         <>
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
@@ -2227,8 +2263,6 @@ function BroadcasterMeetingInner({
           </View>
         </View>
       ) : null}
-      <LiveHostGuestControls visible={showGuests} onClose={() => setShowGuests(false)} />
-
       {liveMode === 'camera' && meetingJoined ? (
         <TouchableOpacity
           style={[styles.sideFab, styles.sideFabLeft, { bottom: Math.max(insets.bottom, 16) + 88 }]}
@@ -2320,6 +2354,7 @@ export default function LiveStreamBroadcasterImpl({
   initialToken,
   hostUserId,
   hostDisplayName,
+  hostAvatar,
   quality = 'auto',
   liveMode = 'camera',
   onStreamEnd,
@@ -2522,6 +2557,10 @@ export default function LiveStreamBroadcasterImpl({
     micEnabled: false,
     webcamEnabled: false,
     name: hostDisplayName || hostUserId || 'Host',
+    metaData: {
+      avatar: hostAvatar || '',
+      role: 'host',
+    },
     debugMode: false,
     ...(Platform.OS === 'android'
       ? {
@@ -2547,6 +2586,7 @@ export default function LiveStreamBroadcasterImpl({
         meetingParticipantId={meetingParticipantId}
         roomDebug={effectiveRoomId}
         hostDisplayName={hostDisplayName}
+        hostAvatar={hostAvatar}
       />
     </MeetingProvider>
   );
@@ -2561,8 +2601,20 @@ const styles = StyleSheet.create({
     width,
     height,
   },
+  videoContained: {
+    width: '100%',
+    height: '100%',
+  },
   placeholder: {
     ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#111',
+  },
+  placeholderContained: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#111',
@@ -2630,6 +2682,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: 'center',
+    zIndex: 12,
   },
   topBarRow: {
     flexDirection: 'row',

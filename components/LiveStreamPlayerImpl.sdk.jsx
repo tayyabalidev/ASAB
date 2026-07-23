@@ -20,6 +20,7 @@ import {
 import LiveStreamChatOverlay from './LiveStreamChatOverlay';
 import LiveStreamHeartReactions from './LiveStreamHeartReactions';
 import { LiveCoHostInviteListener, LiveCoHostGuestMedia } from './LiveCoHostGuest';
+import LiveGroupStage from './LiveGroupStage';
 import { useGlobalContext } from '../context/GlobalProvider';
 import {
   subscribeLiveStreamUpdates,
@@ -361,21 +362,21 @@ function LiveViewerJoinedLayers({
   showChat,
   displayName,
   liveMode,
+  localIsSpeaker = false,
 }) {
   const insets = useSafeAreaInsets();
-  const { localParticipant } = useMeeting();
-  const localMode = String(localParticipant?.mode || '').toUpperCase();
-  const localIsSpeaker =
-    localMode === 'SEND_AND_RECV' ||
-    localMode === 'SEND_RECV' ||
-    localMode === 'CONFERENCE';
   const isScreenLive = liveMode === 'screen';
   const chatLayout = getViewerLiveChatLayout(insets, { compact: isScreenLive });
 
   return (
     <>
       <LiveCoHostInviteListener />
-      {localIsSpeaker ? <LiveCoHostGuestMedia /> : null}
+      {localIsSpeaker ? (
+        <>
+          <LiveGroupStage role="guest" />
+          <LiveCoHostGuestMedia hidePreview />
+        </>
+      ) : null}
       <LiveStreamChatOverlay
         streamId={streamId}
         displayName={displayName}
@@ -383,6 +384,7 @@ function LiveViewerJoinedLayers({
         bottomOffset={chatLayout.chatBottomOffset}
         messageMaxHeight={chatLayout.messageMaxHeight}
         compact={isScreenLive}
+        showRaiseHand={!localIsSpeaker}
       />
       <LiveStreamHeartReactions
         streamId={streamId}
@@ -402,21 +404,32 @@ function LiveViewerInMeeting({
   displayName = 'Viewer',
 }) {
   const [overlaysReady, setOverlaysReady] = useState(false);
+  const { localParticipant } = useMeeting();
+  const localMode = String(localParticipant?.mode || '').toUpperCase();
+  const localIsSpeaker =
+    localMode === 'SEND_AND_RECV' ||
+    localMode === 'SEND_RECV' ||
+    localMode === 'CONFERENCE';
 
   return (
     <View style={styles.viewerMeetingRoot}>
-      <LiveHlsViewerInner
-        liveMode={liveMode}
-        thumbnailUri={thumbnailUri}
-        onPlaybackEnded={onPlaybackEnded}
-        onOverlaysReady={() => setOverlaysReady(true)}
-      />
-      {overlaysReady ? (
+      {localIsSpeaker ? (
+        <View style={styles.viewerMeetingRoot} />
+      ) : (
+        <LiveHlsViewerInner
+          liveMode={liveMode}
+          thumbnailUri={thumbnailUri}
+          onPlaybackEnded={onPlaybackEnded}
+          onOverlaysReady={() => setOverlaysReady(true)}
+        />
+      )}
+      {localIsSpeaker || overlaysReady ? (
         <LiveViewerJoinedLayers
           streamId={streamId}
           showChat={showChat}
           displayName={displayName}
           liveMode={liveMode}
+          localIsSpeaker={localIsSpeaker}
         />
       ) : null}
     </View>
@@ -623,7 +636,12 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
             webcamEnabled: false,
             name: user.username || user.$id || 'Viewer',
             mode: 'RECV_ONLY',
+            metaData: {
+              avatar: user.avatar || '',
+              role: 'viewer',
+            },
             debugMode: false,
+            ...(viewerParticipantId ? { participantId: viewerParticipantId } : {}),
             ...(Platform.OS === 'android'
               ? {
                   notification: {

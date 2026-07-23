@@ -85,6 +85,7 @@ const LiveBroadcast = () => {
           initialToken={hostToken}
           hostUserId={user.$id}
           hostDisplayName={user.username}
+          hostAvatar={user.avatar}
           quality={qualityParam}
           liveMode={liveModeParam}
           onStreamEnd={handleStreamEnd}

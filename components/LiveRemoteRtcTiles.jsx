@@ -65,7 +65,7 @@ function RemoteTile({ participantId }) {
  */
 export default function LiveRemoteRtcTiles({
   excludeParticipantId = null,
-  maxTiles = 4,
+  maxTiles = 6,
   /** When true (viewer), hide tiles if only the host is publishing — HLS already shows host. */
   hideWhenSinglePublisher = false,
 }) {

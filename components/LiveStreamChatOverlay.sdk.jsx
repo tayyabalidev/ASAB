@@ -8,10 +8,12 @@ import {
   StyleSheet,
   Keyboard,
   Platform,
+  Alert,
 } from 'react-native';
 import { useMeeting, usePubSub } from '@videosdk.live/react-native-sdk';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { addLiveComment, getLiveComments } from '../lib/livestream';
+import { encodePubSubPayload } from '../lib/livePubSubPayload';
 
 const USERNAME_COLORS = ['#7dd3fc', '#a77df8', '#f9a8d4', '#86efac', '#fcd34d', '#fda4af'];
 
@@ -39,13 +41,17 @@ export default function LiveStreamChatOverlay({
   bottomOffset = 110,
   messageMaxHeight,
   compact = false,
+  showRaiseHand = false,
 }) {
   const { user } = useGlobalContext();
   const { localParticipant } = useMeeting();
   const localParticipantId = localParticipant?.id;
   const chat = usePubSub('CHAT', {});
+  const { publish: publishRaiseHand } = usePubSub('RAISE_HAND', {});
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [raiseSent, setRaiseSent] = useState(false);
+  const [raiseBusy, setRaiseBusy] = useState(false);
   const [displayMessages, setDisplayMessages] = useState([]);
   const scrollRef = useRef(null);
   const seenRef = useRef(new Set());
@@ -147,7 +153,55 @@ export default function LiveStreamChatOverlay({
     }
   };
 
-  if (!visible) return null;
+  const handleRaiseHand = async () => {
+    if (raiseSent || raiseBusy) return;
+    if (!localParticipantId) {
+      Alert.alert(
+        'Not connected yet',
+        'Wait until the live connection finishes, then tap ✋ again.'
+      );
+      return;
+    }
+    if (typeof publishRaiseHand !== 'function') {
+      Alert.alert('Unavailable', 'Could not send join request. Try again in a moment.');
+      return;
+    }
+    setRaiseBusy(true);
+    try {
+      const payload = encodePubSubPayload({
+        senderName: displayName || user?.username || 'Viewer',
+        participantId: localParticipantId,
+      });
+      await Promise.resolve(publishRaiseHand(payload, { persist: false }));
+      setRaiseSent(true);
+      Alert.alert(
+        'Request sent',
+        'The host was notified. Wait for an invite to join the stage.'
+      );
+      setTimeout(() => setRaiseSent(false), 8000);
+    } catch (_) {
+      Alert.alert('Request failed', 'Could not reach the host. Check your connection and try again.');
+    } finally {
+      setRaiseBusy(false);
+    }
+  };
+
+  if (!visible) {
+    if (!showRaiseHand) return null;
+    return (
+      <View style={[styles.raiseFabWrap, { bottom: bottomOffset + 8 }]} pointerEvents="box-none">
+        <TouchableOpacity
+          style={[styles.raiseFab, (raiseSent || raiseBusy) && styles.raiseBtnSent]}
+          onPress={handleRaiseHand}
+          disabled={raiseSent || raiseBusy}
+          activeOpacity={0.85}
+          accessibilityLabel="Request to join stage"
+        >
+          <Text style={styles.raiseIcon}>✋</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const resolvedMessageMaxHeight =
     messageMaxHeight ?? (compact ? 140 : 180);
@@ -192,6 +246,17 @@ export default function LiveStreamChatOverlay({
           onSubmitEditing={sendMessage}
           maxLength={300}
         />
+        {showRaiseHand ? (
+          <TouchableOpacity
+            style={[styles.raiseBtn, (raiseSent || raiseBusy) && styles.raiseBtnSent]}
+            onPress={handleRaiseHand}
+            disabled={raiseSent || raiseBusy}
+            activeOpacity={0.85}
+            accessibilityLabel="Request to join stage"
+          >
+            <Text style={styles.raiseIcon}>✋</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           style={[styles.sendBtn, (sending || !message.trim()) && styles.sendBtnDisabled]}
           onPress={sendMessage}
@@ -277,5 +342,35 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  raiseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+  },
+  raiseBtnSent: {
+    opacity: 0.45,
+  },
+  raiseIcon: {
+    fontSize: 16,
+  },
+  raiseFabWrap: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 26,
+  },
+  raiseFab: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
