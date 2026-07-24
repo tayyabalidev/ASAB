@@ -37,6 +37,7 @@ function CoHostInviteListenerInner({
   changeMode,
   muteMic,
   disableWebcam,
+  localParticipant,
 }) {
   const { t } = useTranslation();
   const lastIndexModeRef = useRef(0);
@@ -45,75 +46,81 @@ function CoHostInviteListenerInner({
   const changeModeRef = useRef(changeMode);
   const muteMicRef = useRef(muteMic);
   const disableWebcamRef = useRef(disableWebcam);
+  const localParticipantRef = useRef(localParticipant);
+  const [inviteVisible, setInviteVisible] = useState(false);
+  const [inviterName, setInviterName] = useState('');
   changeModeRef.current = changeMode;
   muteMicRef.current = muteMic;
   disableWebcamRef.current = disableWebcam;
+  localParticipantRef.current = localParticipant;
+
+  const showInvite = useCallback(
+    (senderName) => {
+      setInviterName(senderName || 'Host');
+      setInviteVisible(true);
+    },
+    []
+  );
 
   const handleInviteMessage = useCallback(
-    (data) => {
+    (data, { trustTopic = false } = {}) => {
+      // Docs shape: { message: { mode: "SEND_AND_RECV" }, senderName }
+      const rawMessage = data?.message;
+      const docsMode =
+        rawMessage && typeof rawMessage === 'object' && !Array.isArray(rawMessage)
+          ? String(rawMessage.mode || '').toUpperCase()
+          : '';
+
       const payload = decodePubSubMessage(data);
       const target =
         payload.targetParticipantId || payload.participantId || null;
-      // Shared STAGE_CONTROL may be broadcast — ignore commands for other people.
-      if (target && String(target) !== String(participantId)) return;
+      // Per-participant topic is already addressed to us; shared topic must match target.
+      if (!trustTopic && target && String(target) !== String(participantId)) return;
 
-      const nextMode = payload.mode;
+      const nextMode = docsMode || String(payload.mode || '').toUpperCase();
       if (!nextMode) return;
 
       const key = `${nextMode}:${data?.id || data?.timestamp || `${payload.senderId}:${Date.now()}`}`;
       if (handledRef.current.has(key)) return;
       handledRef.current.add(key);
 
-      if (nextMode === 'RECV_ONLY') {
+      if (
+        nextMode === 'SIGNALLING_ONLY' ||
+        nextMode === 'RECV_ONLY' ||
+        nextMode === 'VIEWER'
+      ) {
+        // Demote only via STAGE_CONTROL (shared topic). CHANGE_MODE is invite-only.
+        if (trustTopic) return;
+        setInviteVisible(false);
         try {
           muteMicRef.current?.();
         } catch (_) {}
         try {
           disableWebcamRef.current?.();
         } catch (_) {}
-        applyModeChange(changeModeRef.current, 'RECV_ONLY');
+        applyModeChange(changeModeRef.current, 'SIGNALLING_ONLY');
         return;
       }
 
-      if (nextMode === 'SEND_AND_RECV') {
-        Alert.alert(
-          t('liveBroadcast.groupStage.joinTitle', { defaultValue: 'Join as guest' }),
-          t('liveBroadcast.groupStage.joinBody', {
-            defaultValue: 'The host invited you to speak on camera. Join as a guest speaker?',
-          }),
-          [
-            { text: t('common.cancel', { defaultValue: 'Not now' }), style: 'cancel' },
-            {
-              text: t('liveBroadcast.groupStage.join', { defaultValue: 'Join' }),
-              onPress: () => {
-                const ok = applyModeChange(changeModeRef.current, 'SEND_AND_RECV');
-                if (!ok) {
-                  Alert.alert(
-                    'Could not join',
-                    'Failed to switch to guest mode. Try again or ask the host to re-invite.'
-                  );
-                }
-              },
-            },
-          ]
-        );
+      if (nextMode === 'SEND_AND_RECV' || nextMode === 'SEND_RECV') {
+        showInvite(data?.senderName || payload.senderName || 'Host');
       }
     },
-    [participantId, t]
+    [participantId, showInvite]
   );
 
   const { messages: modeMessages } = usePubSub(`CHANGE_MODE_${participantId}`, {
-    onMessageReceived: handleInviteMessage,
+    onMessageReceived: (data) => handleInviteMessage(data, { trustTopic: true }),
   });
 
   const { messages: stageMessages } = usePubSub(STAGE_CONTROL_TOPIC, {
-    onMessageReceived: handleInviteMessage,
+    onMessageReceived: (data) => handleInviteMessage(data, { trustTopic: false }),
   });
 
   useEffect(() => {
     const msgs = modeMessages || [];
     for (let i = lastIndexModeRef.current; i < msgs.length; i += 1) {
-      handleInviteMessage(msgs[i]);
+      handleInviteMessage(msgs[i], { trustTopic: true });
     }
     lastIndexModeRef.current = msgs.length;
   }, [modeMessages, handleInviteMessage]);
@@ -121,12 +128,63 @@ function CoHostInviteListenerInner({
   useEffect(() => {
     const msgs = stageMessages || [];
     for (let i = lastIndexStageRef.current; i < msgs.length; i += 1) {
-      handleInviteMessage(msgs[i]);
+      handleInviteMessage(msgs[i], { trustTopic: false });
     }
     lastIndexStageRef.current = msgs.length;
   }, [stageMessages, handleInviteMessage]);
 
-  return null;
+  const acceptInvite = () => {
+    setInviteVisible(false);
+    const ok = applyModeChange(changeModeRef.current, 'SEND_AND_RECV');
+    if (!ok) {
+      Alert.alert(
+        'Could not join',
+        'Failed to switch to guest mode. Try again or ask the host to re-invite.'
+      );
+      return;
+    }
+    // Fast-path pin; onParticipantModeChanged also pins when mode settles.
+    try {
+      const lp = localParticipantRef.current;
+      if (lp && typeof lp.pin === 'function') lp.pin();
+    } catch (_) {
+      /* ignore */
+    }
+  };
+
+  if (!inviteVisible) return null;
+
+  return (
+    <View style={styles.inviteOverlay} pointerEvents="box-none">
+      <View style={styles.inviteCard}>
+        <Text style={styles.inviteTitle}>
+          {t('liveBroadcast.groupStage.joinTitle', { defaultValue: 'Join as guest' })}
+        </Text>
+        <Text style={styles.inviteBody}>
+          {t('liveBroadcast.groupStage.joinBodyNamed', {
+            defaultValue: '{{name}} invited you to speak on stage.',
+            name: inviterName,
+          })}
+        </Text>
+        <View style={styles.inviteActions}>
+          <TouchableOpacity
+            style={styles.inviteDecline}
+            onPress={() => setInviteVisible(false)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.inviteDeclineText}>
+              {t('common.cancel', { defaultValue: 'Not now' })}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.inviteAccept} onPress={acceptInvite} activeOpacity={0.85}>
+            <Text style={styles.inviteAcceptText}>
+              {t('liveBroadcast.groupStage.join', { defaultValue: 'Join' })}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
 }
 
 /** Listens for host invite — no mic/cam (safe for all viewers). */
@@ -140,6 +198,7 @@ export function LiveCoHostInviteListener() {
       changeMode={changeMode}
       muteMic={muteMic}
       disableWebcam={disableWebcam}
+      localParticipant={localParticipant}
     />
   );
 }
@@ -190,7 +249,7 @@ function GuestControlListenerInner({
         try {
           disableWebcamRef.current?.();
         } catch (_) {}
-        applyModeChange(changeModeRef.current, 'RECV_ONLY');
+        applyModeChange(changeModeRef.current, 'SIGNALLING_ONLY');
       }
     },
     [participantId]
@@ -393,6 +452,63 @@ export default function LiveCoHostGuest() {
 }
 
 const styles = StyleSheet.create({
+  inviteOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 28,
+  },
+  inviteCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: 'rgba(20,20,20,0.98)',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  inviteTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  inviteBody: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  inviteActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  inviteDecline: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  inviteDeclineText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  inviteAccept: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: '#a77df8',
+  },
+  inviteAcceptText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
   wrap: {
     position: 'absolute',
     zIndex: 15,

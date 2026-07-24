@@ -363,6 +363,7 @@ function LiveViewerJoinedLayers({
   displayName,
   liveMode,
   localIsSpeaker = false,
+  includeInviteListener = true,
 }) {
   const insets = useSafeAreaInsets();
   const isScreenLive = liveMode === 'screen';
@@ -370,7 +371,7 @@ function LiveViewerJoinedLayers({
 
   return (
     <>
-      <LiveCoHostInviteListener />
+      {includeInviteListener ? <LiveCoHostInviteListener /> : null}
       {localIsSpeaker ? (
         <>
           <LiveGroupStage role="guest" />
@@ -404,7 +405,29 @@ function LiveViewerInMeeting({
   displayName = 'Viewer',
 }) {
   const [overlaysReady, setOverlaysReady] = useState(false);
-  const { localParticipant } = useMeeting();
+  const meetingRef = useRef(null);
+  const meeting = useMeeting({
+    onParticipantModeChanged: ({ participantId, mode }) => {
+      // Docs: pin local participant after upgrading to SEND_AND_RECV (required for HLS/stage).
+      // https://docs.videosdk.live/react-native/guide/interactive-live-streaming/handling-participants/invite-guest-on-stage
+      const lp = meetingRef.current?.localParticipant;
+      if (!lp?.id || String(participantId) !== String(lp.id)) return;
+      const next = String(mode || '').toUpperCase();
+      try {
+        if (next === 'SEND_AND_RECV' || next === 'SEND_RECV' || next === 'CONFERENCE') {
+          if (typeof lp.pin === 'function') lp.pin();
+        } else if (typeof lp.unpin === 'function') {
+          lp.unpin();
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    },
+  });
+  useEffect(() => {
+    meetingRef.current = meeting;
+  }, [meeting]);
+  const localParticipant = meeting?.localParticipant;
   const localMode = String(localParticipant?.mode || '').toUpperCase();
   const localIsSpeaker =
     localMode === 'SEND_AND_RECV' ||
@@ -413,6 +436,8 @@ function LiveViewerInMeeting({
 
   return (
     <View style={styles.viewerMeetingRoot}>
+      {/* Always listen for host invites — do not wait for HLS overlays. */}
+      <LiveCoHostInviteListener />
       {localIsSpeaker ? (
         <View style={styles.viewerMeetingRoot} />
       ) : (
@@ -430,6 +455,7 @@ function LiveViewerInMeeting({
           displayName={displayName}
           liveMode={liveMode}
           localIsSpeaker={localIsSpeaker}
+          includeInviteListener={false}
         />
       ) : null}
     </View>
@@ -635,7 +661,8 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
             micEnabled: false,
             webcamEnabled: false,
             name: user.username || user.$id || 'Viewer',
-            mode: 'RECV_ONLY',
+            // ILS audience must join SIGNALLING_ONLY so host invite → changeMode works.
+            mode: 'SIGNALLING_ONLY',
             metaData: {
               avatar: user.avatar || '',
               role: 'viewer',

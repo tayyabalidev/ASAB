@@ -46,6 +46,14 @@ docs/
 # Server files (not needed for mobile build)
 server/
 appwrite-functions/
+signaling-server.js
+
+# Local tooling / Cursor (not needed for build)
+.cursor/
+agent-transcripts/
+
+# Example / reference SDK (not part of the app)
+videosdk-ils-react-native-sdk-example/
 
 # Temporary files
 tmp/
@@ -69,7 +77,6 @@ ios/build/
 ios/Pods/
 ios/.xcode.env.local
 
-# Large media files (if not needed)
-# Uncomment if you have large video/image files
-# assets/videos/
-# assets/large-images/
+# Local debug dumps
+debug.log
+*.hprof

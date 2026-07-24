@@ -45,7 +45,11 @@ const checks = [
   },
   {
     name: 'isRecvOnlyMode detects viewers',
-    pass: () => isRecvOnlyMode('RECV_ONLY') && isRecvOnlyMode('VIEWER') && !isRecvOnlyMode('SEND_AND_RECV'),
+    pass: () =>
+      isRecvOnlyMode('RECV_ONLY') &&
+      isRecvOnlyMode('VIEWER') &&
+      isRecvOnlyMode('SIGNALLING_ONLY') &&
+      !isRecvOnlyMode('SEND_AND_RECV'),
   },
   {
     name: 'listOnStageGuestIds excludes host, recv-only, empty mode; caps at 6',
@@ -117,18 +121,19 @@ const checks = [
     },
   },
   {
-    name: 'Host guest controls: mute/unmute/remove + max 6 + GUEST_CONTROL',
+    name: 'Host guest controls: mute/unmute/remove + max 6 + STAGE_CONTROL',
     pass: () => {
       const src = read('components/LiveHostGuestControls.jsx');
       return (
-        src.includes('GUEST_CONTROL_') &&
+        src.includes('STAGE_CONTROL_TOPIC') &&
         src.includes("action: 'mute'") &&
         src.includes("action: 'unmute'") &&
         src.includes("action: 'remove'") &&
         src.includes('MAX_STAGE_GUESTS') &&
         src.includes('stageFull') &&
         src.includes('On stage') &&
-        src.includes('RAISE_HAND')
+        src.includes('RAISE_HAND') &&
+        src.includes('PersistentChangeModePublisher')
       );
     },
   },
@@ -237,11 +242,15 @@ const checks = [
     pass: () => {
       const host = read('components/LiveHostGuestControls.jsx');
       const guest = read('components/LiveCoHostGuest.jsx');
+      const player = read('components/LiveStreamPlayerImpl.sdk.jsx');
       return (
         host.includes('CHANGE_MODE_') &&
         guest.includes('CHANGE_MODE_') &&
         host.includes("'SEND_AND_RECV'") &&
-        host.includes("'RECV_ONLY'")
+        host.includes("'SIGNALLING_ONLY'") &&
+        player.includes("mode: 'SIGNALLING_ONLY'") &&
+        guest.includes('SIGNALLING_ONLY') &&
+        player.includes('onParticipantModeChanged')
       );
     },
   },

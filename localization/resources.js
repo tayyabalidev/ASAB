@@ -2091,6 +2091,7 @@ export const resources = {
           raiseHandBody: "{{name}} wants to speak.",
           joinTitle: "Join as guest",
           joinBody: "The host invited you to speak on camera. Join as a guest speaker?",
+          joinBodyNamed: "{{name}} invited you to speak on stage.",
           join: "Join",
           youreOnStage: "You're on stage",
           blurOn: "Blur",

@@ -14,57 +14,110 @@ import {
   isHostParticipantId,
   listOnStageGuestIds,
 } from '../lib/liveStageLayout';
-import { decodePubSubMessage, encodePubSubPayload, publishStageCommand, STAGE_CONTROL_TOPIC } from '../lib/livePubSubPayload';
+import {
+  decodePubSubMessage,
+  encodePubSubPayload,
+  publishStageCommand,
+  STAGE_CONTROL_TOPIC,
+} from '../lib/livePubSubPayload';
 
-function StageCommandPublisher({ command, onDone }) {
-  const targetId = command?.participantId ? String(command.participantId) : '';
-  const perTargetTopic = targetId ? `CHANGE_MODE_${targetId}` : 'CHANGE_MODE_PENDING';
-  const controlTopic = targetId ? `GUEST_CONTROL_${targetId}` : 'GUEST_CONTROL_PENDING';
-
-  const { publish: publishStage } = usePubSub(STAGE_CONTROL_TOPIC, {});
-  const { publish: publishMode } = usePubSub(perTargetTopic, {});
-  const { publish: publishControl } = usePubSub(controlTopic, {});
+/**
+ * Always-mounted CHANGE_MODE_{id} publisher (VideoSDK invite-guest docs).
+ * Must stay subscribed — remounting one-shot publishers race and drop invites
+ * (especially raise-hand → "Invite to stage" while the guests sheet is closed).
+ */
+function PersistentChangeModePublisher({ participantId, command, onPublished }) {
+  const { publish } = usePubSub(`CHANGE_MODE_${participantId}`, {});
+  const publishRef = useRef(publish);
+  publishRef.current = publish;
+  const onPublishedRef = useRef(onPublished);
+  onPublishedRef.current = onPublished;
+  const lastTokenRef = useRef('');
 
   useEffect(() => {
-    if (!command?.participantId) return undefined;
+    if (!command?.token || !command?.mode) return undefined;
+    if (String(command.participantId) !== String(participantId)) return undefined;
+    if (lastTokenRef.current === command.token) return undefined;
+    lastTokenRef.current = command.token;
+
     let cancelled = false;
-
     (async () => {
-      const pid = String(command.participantId);
-      const sendOnly = [pid];
-
       try {
-        if (command.mode) {
-          const modePayload = {
-            mode: command.mode,
-            targetParticipantId: pid,
-            participantId: pid,
-          };
-          // Shared topic (always subscribed on guest) + per-participant topic (docs pattern).
-          await publishStageCommand(publishStage, modePayload, { sendOnly });
-          await publishStageCommand(publishMode, modePayload, { sendOnly });
-        }
-        if (command.action) {
-          const actionPayload = {
-            action: command.action,
-            targetParticipantId: pid,
-            participantId: pid,
-          };
-          await publishStageCommand(publishStage, actionPayload, { sendOnly });
-          await publishStageCommand(publishControl, actionPayload, { sendOnly });
-        }
+        // Docs shape: publish({ mode: "SEND_AND_RECV" })
+        await Promise.resolve(
+          publishRef.current({ mode: command.mode }, { persist: false })
+        );
       } catch (_) {
-        /* best-effort */
+        try {
+          await Promise.resolve(
+            publishRef.current(
+              encodePubSubPayload({
+                mode: command.mode,
+                targetParticipantId: participantId,
+              }),
+              { persist: false }
+            )
+          );
+        } catch (__) {
+          /* best-effort */
+        }
       } finally {
-        if (!cancelled) onDone?.();
+        if (!cancelled) onPublishedRef.current?.(command.token);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per command token
-  }, [command?.token]);
+  }, [command?.token, command?.participantId, command?.mode, participantId]);
+
+  return null;
+}
+
+/** STAGE_CONTROL bus for invite backup + mute/unmute/remove actions. */
+function StableStageControlBus({ command, onDone }) {
+  const { publish: publishStage } = usePubSub(STAGE_CONTROL_TOPIC, {});
+  const publishStageRef = useRef(publishStage);
+  publishStageRef.current = publishStage;
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  const lastTokenRef = useRef('');
+
+  useEffect(() => {
+    if (!command?.participantId || !command?.token) return undefined;
+    if (lastTokenRef.current === command.token) return undefined;
+    lastTokenRef.current = command.token;
+
+    let cancelled = false;
+    const pid = String(command.participantId);
+
+    (async () => {
+      try {
+        if (command.mode) {
+          await publishStageCommand(publishStageRef.current, {
+            mode: command.mode,
+            targetParticipantId: pid,
+            participantId: pid,
+          });
+        }
+        if (command.action) {
+          await publishStageCommand(publishStageRef.current, {
+            action: command.action,
+            targetParticipantId: pid,
+            participantId: pid,
+          });
+        }
+      } catch (_) {
+        /* best-effort */
+      } finally {
+        if (!cancelled) onDoneRef.current?.(command.token);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [command?.token, command?.participantId, command?.mode, command?.action]);
 
   return null;
 }
@@ -80,11 +133,33 @@ function GuestRow({
 }) {
   const { t } = useTranslation();
   const { displayName, micOn, webcamOn, isLocal } = useParticipant(participantId);
+  // Docs pattern: each row owns CHANGE_MODE_{id} publish (most reliable when sheet open).
+  const { publish: publishChangeMode } = usePubSub(`CHANGE_MODE_${participantId}`, {});
 
   if (isLocal) return null;
   if (isHostParticipantId(participantId)) return null;
 
   const name = displayName || participantId?.slice(0, 8) || 'Guest';
+
+  const inviteDirect = async () => {
+    if (stageFull) {
+      Alert.alert(
+        t('liveBroadcast.groupStage.stageFullTitle', { defaultValue: 'Stage full' }),
+        t('liveBroadcast.groupStage.stageFullBody', {
+          defaultValue: 'Remove a guest before inviting another (max {{count}}).',
+          count: MAX_STAGE_GUESTS,
+        })
+      );
+      return;
+    }
+    try {
+      // Official invite-guest guide: publish({ mode: "SEND_AND_RECV" })
+      await Promise.resolve(publishChangeMode({ mode: 'SEND_AND_RECV' }, { persist: false }));
+    } catch (_) {
+      /* fall through to bus */
+    }
+    onInvite?.(participantId);
+  };
 
   return (
     <View style={styles.row}>
@@ -130,19 +205,7 @@ function GuestRow({
           <TouchableOpacity
             style={[styles.allowBtn, stageFull && styles.btnDisabled]}
             disabled={stageFull}
-            onPress={() => {
-              if (stageFull) {
-                Alert.alert(
-                  t('liveBroadcast.groupStage.stageFullTitle', { defaultValue: 'Stage full' }),
-                  t('liveBroadcast.groupStage.stageFullBody', {
-                    defaultValue: 'Remove a guest before inviting another (max {{count}}).',
-                    count: MAX_STAGE_GUESTS,
-                  })
-                );
-                return;
-              }
-              onInvite?.(participantId);
-            }}
+            onPress={inviteDirect}
           >
             <Text style={styles.allowText}>
               {t('liveBroadcast.groupStage.invite', { defaultValue: 'Invite' })}
@@ -166,8 +229,13 @@ function HostRaiseHandListener({ onInvite, stageFull }) {
   const handleRaiseHandMessage = useCallback(
     (data) => {
       const payload = decodePubSubMessage(data);
-      const senderName = payload.senderName || 'Viewer';
-      const pid = payload.participantId || payload.senderId;
+      const senderName = payload.senderName || data?.senderName || 'Viewer';
+      // Prefer VideoSDK envelope senderId (real meeting participant id).
+      const pid =
+        payload.participantId ||
+        data?.senderId ||
+        payload.senderId ||
+        null;
       if (!pid) return;
       const key = String(pid);
       if (seenRef.current.has(key)) return;
@@ -214,7 +282,6 @@ function HostRaiseHandListener({ onInvite, stageFull }) {
     onMessageReceived: handleRaiseHandMessage,
   });
 
-  // Same pattern as live hearts/chat — messages[] is more reliable than onMessageReceived alone.
   useEffect(() => {
     const msgs = messages || [];
     for (let i = lastIndexRef.current; i < msgs.length; i += 1) {
@@ -232,8 +299,8 @@ function HostRaiseHandListener({ onInvite, stageFull }) {
 export default function LiveHostGuestControls({ visible, onClose }) {
   const { t } = useTranslation();
   const { participants, localParticipant } = useMeeting();
-  const [modePublish, setModePublish] = useState(null);
-  const [controlPublish, setControlPublish] = useState(null);
+  const [pendingCommand, setPendingCommand] = useState(null);
+  const doneTokensRef = useRef(new Set());
 
   const remoteIds = useMemo(() => {
     const localId = localParticipant?.id;
@@ -257,59 +324,81 @@ export default function LiveHostGuestControls({ visible, onClose }) {
   );
   const stageFull = onStageIds.length >= MAX_STAGE_GUESTS;
 
-  const invite = (pid) => {
-    if (stageFull) {
-      Alert.alert(
-        t('liveBroadcast.groupStage.stageFullTitle', { defaultValue: 'Stage full' }),
-        t('liveBroadcast.groupStage.stageFullBody', {
-          defaultValue: 'Remove a guest before inviting another (max {{count}}).',
-          count: MAX_STAGE_GUESTS,
-        })
-      );
-      return;
-    }
-    setModePublish({
-      participantId: pid,
-      mode: 'SEND_AND_RECV',
-      token: `${pid}:SEND_AND_RECV:${Date.now()}`,
-    });
-    Alert.alert(
-      t('liveBroadcast.groupStage.inviteSentTitle', { defaultValue: 'Invite sent' }),
-      t('liveBroadcast.groupStage.inviteSentBody', {
-        defaultValue: 'Waiting for the viewer to accept and join the stage.',
-      })
-    );
-  };
+  // Keep CHANGE_MODE publishers subscribed for every remote + pending target.
+  const publisherIds = useMemo(() => {
+    const set = new Set(remoteIds.map(String));
+    if (pendingCommand?.participantId) set.add(String(pendingCommand.participantId));
+    return [...set];
+  }, [remoteIds, pendingCommand?.participantId]);
 
-  const remove = (pid) => {
-    const ts = Date.now();
-    setModePublish({
-      participantId: pid,
-      mode: 'RECV_ONLY',
-      token: `${pid}:RECV_ONLY:${ts}`,
-    });
-    setControlPublish({
-      participantId: pid,
+  const clearPendingIfDone = useCallback((token) => {
+    if (!token) return;
+    doneTokensRef.current.add(token);
+    // Clear after both CHANGE_MODE + STAGE_CONTROL paths have had a chance;
+    // either path alone is enough to deliver the invite.
+    setPendingCommand((prev) => (prev?.token === token ? null : prev));
+  }, []);
+
+  const invite = useCallback(
+    (pid) => {
+      if (stageFull) {
+        Alert.alert(
+          t('liveBroadcast.groupStage.stageFullTitle', { defaultValue: 'Stage full' }),
+          t('liveBroadcast.groupStage.stageFullBody', {
+            defaultValue: 'Remove a guest before inviting another (max {{count}}).',
+            count: MAX_STAGE_GUESTS,
+          })
+        );
+        return;
+      }
+      setPendingCommand({
+        participantId: String(pid),
+        mode: 'SEND_AND_RECV',
+        token: `${pid}:SEND_AND_RECV:${Date.now()}`,
+      });
+    },
+    [stageFull, t]
+  );
+
+  const remove = useCallback((pid) => {
+    // Demote via STAGE_CONTROL action only — do not publish SIGNALLING_ONLY on
+    // CHANGE_MODE_{id} (that topic is reserved for SEND_AND_RECV invites per docs Step 3).
+    setPendingCommand({
+      participantId: String(pid),
       action: 'remove',
-      token: `${pid}:remove:${ts}`,
+      token: `${pid}:remove:${Date.now()}`,
     });
-  };
+  }, []);
+
+  const mute = useCallback((pid) => {
+    setPendingCommand({
+      participantId: String(pid),
+      action: 'mute',
+      token: `${pid}:mute:${Date.now()}`,
+    });
+  }, []);
+
+  const unmute = useCallback((pid) => {
+    setPendingCommand({
+      participantId: String(pid),
+      action: 'unmute',
+      token: `${pid}:unmute:${Date.now()}`,
+    });
+  }, []);
 
   return (
     <>
       <HostRaiseHandListener onInvite={invite} stageFull={stageFull} />
-      {modePublish ? (
-        <StageCommandPublisher
-          command={modePublish}
-          onDone={() => setModePublish(null)}
+      {/* Always mounted — works even when guests sheet is closed (raise-hand invite). */}
+      {publisherIds.map((id) => (
+        <PersistentChangeModePublisher
+          key={`cm-${id}`}
+          participantId={id}
+          command={pendingCommand}
+          onPublished={clearPendingIfDone}
         />
-      ) : null}
-      {controlPublish ? (
-        <StageCommandPublisher
-          command={controlPublish}
-          onDone={() => setControlPublish(null)}
-        />
-      ) : null}
+      ))}
+      <StableStageControlBus command={pendingCommand} onDone={clearPendingIfDone} />
       {!visible ? null : (
         <View style={styles.sheet}>
           <View style={styles.header}>
@@ -352,20 +441,8 @@ export default function LiveHostGuestControls({ visible, onClose }) {
                       stageFull={stageFull}
                       onInvite={invite}
                       onRemove={remove}
-                      onMute={(pid) =>
-                        setControlPublish({
-                          participantId: pid,
-                          action: 'mute',
-                          token: `${pid}:mute:${Date.now()}`,
-                        })
-                      }
-                      onUnmute={(pid) =>
-                        setControlPublish({
-                          participantId: pid,
-                          action: 'unmute',
-                          token: `${pid}:unmute:${Date.now()}`,
-                        })
-                      }
+                      onMute={mute}
+                      onUnmute={unmute}
                     />
                   ))
                 )}

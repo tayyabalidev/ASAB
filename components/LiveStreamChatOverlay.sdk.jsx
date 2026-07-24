@@ -174,10 +174,7 @@ export default function LiveStreamChatOverlay({
       });
       await Promise.resolve(publishRaiseHand(payload, { persist: false }));
       setRaiseSent(true);
-      Alert.alert(
-        'Request sent',
-        'The host was notified. Wait for an invite to join the stage.'
-      );
+      // Do NOT use Alert.alert here — it blocks the later host-invite UI on iOS/Android.
       setTimeout(() => setRaiseSent(false), 8000);
     } catch (_) {
       Alert.alert('Request failed', 'Could not reach the host. Check your connection and try again.');
@@ -234,6 +231,10 @@ export default function LiveStreamChatOverlay({
         })}
       </ScrollView>
 
+      {raiseSent ? (
+        <Text style={styles.raiseHint}>Request sent — wait for the host to invite you.</Text>
+      ) : null}
+
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
@@ -288,6 +289,13 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     flexGrow: 1,
     justifyContent: 'flex-end',
+  },
+  raiseHint: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    marginBottom: 6,
+    textShadowColor: '#000',
+    textShadowRadius: 4,
   },
   commentBubble: {
     alignSelf: 'flex-start',

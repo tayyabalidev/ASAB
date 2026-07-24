@@ -846,6 +846,7 @@ function BroadcasterMeetingInner({
   const reconnectTimerRef = useRef(null);
   const connectedOnceRef = useRef(false);
   const localParticipantRef = useRef(null);
+  const participantsRef = useRef(null);
   const pinAttemptedRef = useRef(false);
   const meetingJoinedRef = useRef(false);
   const joinRequestedRef = useRef(false);
@@ -1262,6 +1263,24 @@ function BroadcasterMeetingInner({
     },
     onParticipantLeft: (p) => {
     },
+    onParticipantModeChanged: ({ participantId, mode }) => {
+      // Pin speakers for HLS GRID+PIN so guests appear beside the host.
+      try {
+        const map = participantsRef.current;
+        const p =
+          map instanceof Map
+            ? map.get(participantId) || map.get(String(participantId))
+            : null;
+        const next = String(mode || '').toUpperCase();
+        if (next === 'SEND_AND_RECV' || next === 'SEND_RECV' || next === 'CONFERENCE') {
+          if (p && typeof p.pin === 'function') p.pin();
+        } else if (p && typeof p.unpin === 'function') {
+          p.unpin();
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    },
     onWebcamRequested: ({ accept }) => {
       accept?.();
     },
@@ -1507,6 +1526,7 @@ function BroadcasterMeetingInner({
   changeWebcamFnRef.current = changeWebcam;
   toggleMicFnRef.current = toggleMic;
   localParticipantRef.current = localParticipant || null;
+  participantsRef.current = participants || null;
 
   const localParticipantIdForMedia = localParticipant?.id || '';
   const [participantHasWebcamTrack, setParticipantHasWebcamTrack] = useState(false);
