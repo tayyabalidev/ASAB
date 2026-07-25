@@ -11,7 +11,24 @@ index 8794d0e..f0678aa 100644
  
  function _interopNamespace(e) {
      if (e && e.__esModule) return e;
-@@ -3116,14 +3116,14 @@ class Storage extends Service {
+@@ -135,11 +135,14 @@ class Client {
+             createHeartbeat: () => {
+                 if (this.realtime.heartbeat) {
+-                    clearTimeout(this.realtime.heartbeat);
++                    clearInterval(this.realtime.heartbeat);
+                 }
+                 this.realtime.heartbeat = window === null || window === void 0 ? void 0 : window.setInterval(() => {
+                     var _a;
+-                    (_a = this.realtime.socket) === null || _a === void 0 ? void 0 : _a.send(JSON.stringify({
++                    if (((_a = this.realtime.socket) === null || _a === void 0 ? void 0 : _a.readyState) !== WebSocket.OPEN) {
++                        return;
++                    }
++                    this.realtime.socket.send(JSON.stringify({
+                         type: 'ping'
+                     }));
+                 }, 20000);
+             },
+@@ -3116,14 +3119,14 @@ class Storage extends Service {
                      apiHeaders['x-appwrite-id'] = response.$id;
                  }
                  let chunk = yield FileSystem__namespace.readAsStringAsync(file.uri, {
@@ -39,7 +56,24 @@ index dbb19d4..2b8a4a2 100644
  
  /******************************************************************************
  Copyright (c) Microsoft Corporation.
-@@ -3094,14 +3094,14 @@ class Storage extends Service {
+@@ -113,11 +113,14 @@ class Client {
+             createHeartbeat: () => {
+                 if (this.realtime.heartbeat) {
+-                    clearTimeout(this.realtime.heartbeat);
++                    clearInterval(this.realtime.heartbeat);
+                 }
+                 this.realtime.heartbeat = window === null || window === void 0 ? void 0 : window.setInterval(() => {
+                     var _a;
+-                    (_a = this.realtime.socket) === null || _a === void 0 ? void 0 : _a.send(JSON.stringify({
++                    if (((_a = this.realtime.socket) === null || _a === void 0 ? void 0 : _a.readyState) !== WebSocket.OPEN) {
++                        return;
++                    }
++                    this.realtime.socket.send(JSON.stringify({
+                         type: 'ping'
+                     }));
+                 }, 20000);
+             },
+@@ -3094,14 +3097,14 @@ class Storage extends Service {
                      apiHeaders['x-appwrite-id'] = response.$id;
                  }
                  let chunk = yield FileSystem.readAsStringAsync(file.uri, {

@@ -148,7 +148,10 @@ const checks = [
         src.includes('toggleBlur') &&
         src.includes("action === 'mute'") &&
         src.includes("action === 'remove'") &&
-        src.includes('hidePreview')
+        src.includes('hidePreview') &&
+        src.includes('publishGuestMic') &&
+        src.includes('publishGuestWebcam') &&
+        src.includes('createMicrophoneAudioTrack')
       );
     },
   },
@@ -238,6 +241,27 @@ const checks = [
     pass: () => read('components/LiveRemoteRtcTiles.jsx').includes('maxTiles = 6'),
   },
   {
+    name: 'Viewer: join/leave owned by LiveViewerInMeeting (not HLS unmount)',
+    pass: () => {
+      const src = read('components/LiveStreamPlayerImpl.sdk.jsx');
+      const hlsStart = src.indexOf('function LiveHlsViewerInner');
+      const meetingStart = src.indexOf('function LiveViewerInMeeting');
+      if (hlsStart < 0 || meetingStart < 0 || meetingStart <= hlsStart) return false;
+      const hlsBody = src.slice(hlsStart, meetingStart);
+      const meetingBody = src.slice(meetingStart, src.indexOf('export default function LiveStreamPlayerImpl'));
+      // HLS must not call leave() — that kicked guests off when switching to stage.
+      const hlsLeaves =
+        /actionsRef\.current\.leave|leave\?\.\(\)|leave\(\)/.test(hlsBody) &&
+        !hlsBody.includes('Do NOT leave()');
+      return (
+        !hlsLeaves &&
+        meetingBody.includes('actionsRef.current.leave') &&
+        meetingBody.includes('waitForMeetingJoinFn') &&
+        meetingBody.includes('meetingJoined={meetingJoined}')
+      );
+    },
+  },
+  {
     name: 'CHANGE_MODE invite/remove topics still used',
     pass: () => {
       const host = read('components/LiveHostGuestControls.jsx');
@@ -247,7 +271,7 @@ const checks = [
         host.includes('CHANGE_MODE_') &&
         guest.includes('CHANGE_MODE_') &&
         host.includes("'SEND_AND_RECV'") &&
-        host.includes("'SIGNALLING_ONLY'") &&
+        host.includes('SIGNALLING_ONLY') &&
         player.includes("mode: 'SIGNALLING_ONLY'") &&
         guest.includes('SIGNALLING_ONLY') &&
         player.includes('onParticipantModeChanged')

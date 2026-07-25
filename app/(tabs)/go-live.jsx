@@ -505,13 +505,14 @@ const GoLive = () => {
       >
         <View style={styles.previewModal}>
           {permission?.granted && (
-            <CameraView 
-              style={styles.previewCamera} 
-              facing={facing}
-              ref={cameraRef}
-            >
-              {/* Preview Overlay */}
-              <View style={styles.previewOverlay}>
+            <View style={styles.previewCamera}>
+              <CameraView
+                style={StyleSheet.absoluteFill}
+                facing={facing}
+                ref={cameraRef}
+              />
+              {/* Preview Overlay — absolute, not CameraView children */}
+              <View style={styles.previewOverlay} pointerEvents="box-none">
                 {/* Top Bar */}
                 <View style={styles.previewTopBar}>
                   <TouchableOpacity 
@@ -568,7 +569,7 @@ const GoLive = () => {
                   />
                 </View>
               </View>
-            </CameraView>
+            </View>
           )}
         </View>
       </Modal>
@@ -912,7 +913,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   previewOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-between',
   },
   previewTopBar: {

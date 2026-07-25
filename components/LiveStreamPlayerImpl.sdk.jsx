@@ -52,13 +52,23 @@ const TOKEN_ENDPOINT_HINT = `Token URL: ${VIDEOSDK_CONFIG.tokenServerUrl || 'mis
   VIDEOSDK_CONFIG.tokenPath || ''
 }`;
 
-function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlaysReady }) {
+/**
+ * HLS playback only. Join/leave must live in LiveViewerInMeeting so becoming a
+ * stage guest (unmounting this tree) does NOT leave the VideoSDK meeting.
+ */
+function LiveHlsViewerInner({
+  liveMode,
+  thumbnailUri,
+  onPlaybackEnded,
+  onOverlaysReady,
+  meetingJoined = false,
+}) {
   const [hlsUrl, setHlsUrl] = useState(null);
-  const [hlsStateText, setHlsStateText] = useState('CONNECTING');
+  const [hlsStateText, setHlsStateText] = useState(
+    meetingJoined ? 'MEETING_JOINED' : 'CONNECTING'
+  );
   const [playbackError, setPlaybackError] = useState(null);
   const [waitSeconds, setWaitSeconds] = useState(0);
-  const joinOnceRef = useRef(false);
-  const meetingJoinedRef = useRef(false);
   const playbackStartedRef = useRef(false);
   const lastLoadedUrlRef = useRef(null);
   const hlsPayloadRef = useRef(null);
@@ -67,7 +77,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlay
   const overlayReadyFiredRef = useRef(false);
   const overlayReadyTimerRef = useRef(null);
   const hlsUrlRef = useRef(null);
-  const actionsRef = useRef({});
+  const meetingJoinedRef = useRef(meetingJoined);
   const onOverlaysReadyRef = useRef(onOverlaysReady);
   const isCameraLive = liveMode !== 'screen';
 
@@ -78,6 +88,13 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlay
   useEffect(() => {
     hlsUrlRef.current = hlsUrl;
   }, [hlsUrl]);
+
+  useEffect(() => {
+    meetingJoinedRef.current = meetingJoined;
+    if (meetingJoined) {
+      setHlsStateText((prev) => (prev === 'CONNECTING' ? 'MEETING_JOINED' : prev));
+    }
+  }, [meetingJoined]);
 
   const scheduleOverlayReady = useCallback(() => {
     if (overlayReadyFiredRef.current) return;
@@ -124,12 +141,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlay
     return true;
   }, []);
 
-  const { join, leave, hlsUrls } = useMeeting({
-    onMeetingJoined: () => {
-      meetingJoinedRef.current = true;
-      setHlsStateText('MEETING_JOINED');
-      scheduleOverlayReady();
-    },
+  const { hlsUrls } = useMeeting({
     onHlsStarted: (payload = {}) => {
       setHlsStateText('HLS_STARTED');
       applyHlsPayload(payload);
@@ -144,9 +156,6 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlay
         onPlaybackEnded?.();
       }
     },
-    onMeetingLeft: () => {
-      if (!meetingJoinedRef.current) return;
-    },
     onError: (err) => {
       const msg = err?.message || err?.reason || 'Meeting error';
       setHlsStateText(`ERROR: ${msg}`);
@@ -160,10 +169,10 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlay
 
   // Mount chat/reactions only after meeting join + HLS URL (avoids PubSub vs player native crash).
   useEffect(() => {
-    if (!hlsUrl || !meetingJoinedRef.current) return undefined;
+    if (!hlsUrl || !meetingJoined) return undefined;
     scheduleOverlayReady();
     return undefined;
-  }, [hlsUrl, scheduleOverlayReady]);
+  }, [hlsUrl, meetingJoined, scheduleOverlayReady]);
 
   useEffect(() => {
     if (!hlsUrl) return undefined;
@@ -241,44 +250,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlay
         player.pause();
       } catch (_) {}
     };
-  }, [hlsUrl, player, tryNextHlsUrl]);
-
-  actionsRef.current.join = join;
-  actionsRef.current.leave = leave;
-
-  // Join once — do not call leave() in this effect's cleanup (Strict Mode / re-renders
-  // were disconnecting viewers before join completed). Leave only on unmount below.
-  useEffect(() => {
-    if (joinOnceRef.current) return undefined;
-    joinOnceRef.current = true;
-    let cancelled = false;
-    (async () => {
-      try {
-        let joinFn = actionsRef.current.join;
-        if (typeof joinFn !== 'function') {
-          joinFn = await waitForMeetingJoinFn(() => actionsRef.current.join, {
-            isCancelled: () => cancelled,
-            timeoutMs: 8000,
-            intervalMs: 50,
-          });
-        }
-        if (cancelled || !joinFn) {
-          throw new Error('VideoSDK viewer join() was not ready');
-        }
-        if (Platform.OS === 'ios') {
-          await new Promise((r) => setTimeout(r, 120));
-        }
-        await Promise.resolve(joinFn());
-      } catch (err) {
-        if (!cancelled) {
-          setHlsStateText(`JOIN_ERROR: ${err?.message || 'join failed'}`);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [hlsUrl, player, tryNextHlsUrl, scheduleOverlayReady]);
 
   useEffect(() => {
     return () => {
@@ -290,10 +262,7 @@ function LiveHlsViewerInner({ liveMode, thumbnailUri, onPlaybackEnded, onOverlay
         clearTimeout(overlayReadyTimerRef.current);
         overlayReadyTimerRef.current = null;
       }
-      if (!meetingJoinedRef.current) return;
-      try {
-        actionsRef.current.leave?.();
-      } catch (_) {}
+      // Do NOT leave() here — guest invite unmounts HLS while staying in the meeting.
     };
   }, []);
 
@@ -405,8 +374,29 @@ function LiveViewerInMeeting({
   displayName = 'Viewer',
 }) {
   const [overlaysReady, setOverlaysReady] = useState(false);
+  const [meetingJoined, setMeetingJoined] = useState(false);
+  const [joinError, setJoinError] = useState(null);
   const meetingRef = useRef(null);
+  const meetingJoinedRef = useRef(false);
+  const joinOnceRef = useRef(false);
+  const actionsRef = useRef({});
+
   const meeting = useMeeting({
+    onMeetingJoined: () => {
+      meetingJoinedRef.current = true;
+      setMeetingJoined(true);
+      setJoinError(null);
+    },
+    onMeetingLeft: () => {
+      meetingJoinedRef.current = false;
+      setMeetingJoined(false);
+    },
+    onMicRequested: ({ accept }) => {
+      accept?.();
+    },
+    onWebcamRequested: ({ accept }) => {
+      accept?.();
+    },
     onParticipantModeChanged: ({ participantId, mode }) => {
       // Docs: pin local participant after upgrading to SEND_AND_RECV (required for HLS/stage).
       // https://docs.videosdk.live/react-native/guide/interactive-live-streaming/handling-participants/invite-guest-on-stage
@@ -427,6 +417,52 @@ function LiveViewerInMeeting({
   useEffect(() => {
     meetingRef.current = meeting;
   }, [meeting]);
+
+  actionsRef.current.join = meeting?.join;
+  actionsRef.current.leave = meeting?.leave;
+
+  // Join/leave owned here so swapping HLS ↔ stage does not disconnect the guest.
+  useEffect(() => {
+    if (joinOnceRef.current) return undefined;
+    joinOnceRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        let joinFn = actionsRef.current.join;
+        if (typeof joinFn !== 'function') {
+          joinFn = await waitForMeetingJoinFn(() => actionsRef.current.join, {
+            isCancelled: () => cancelled,
+            timeoutMs: 8000,
+            intervalMs: 50,
+          });
+        }
+        if (cancelled || !joinFn) {
+          throw new Error('VideoSDK viewer join() was not ready');
+        }
+        if (Platform.OS === 'ios') {
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        await Promise.resolve(joinFn());
+      } catch (err) {
+        if (!cancelled) {
+          setJoinError(err?.message || 'join failed');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (!meetingJoinedRef.current) return;
+      try {
+        actionsRef.current.leave?.();
+      } catch (_) {}
+    };
+  }, []);
+
   const localParticipant = meeting?.localParticipant;
   const localMode = String(localParticipant?.mode || '').toUpperCase();
   const localIsSpeaker =
@@ -438,6 +474,12 @@ function LiveViewerInMeeting({
     <View style={styles.viewerMeetingRoot}>
       {/* Always listen for host invites — do not wait for HLS overlays. */}
       <LiveCoHostInviteListener />
+      {joinError && !meetingJoined ? (
+        <View style={styles.hlsWaiting}>
+          <Text style={styles.hlsWaitingText}>Could not join live</Text>
+          <Text style={styles.hlsStateText}>JOIN_ERROR: {joinError}</Text>
+        </View>
+      ) : null}
       {localIsSpeaker ? (
         <View style={styles.viewerMeetingRoot} />
       ) : (
@@ -446,6 +488,7 @@ function LiveViewerInMeeting({
           thumbnailUri={thumbnailUri}
           onPlaybackEnded={onPlaybackEnded}
           onOverlaysReady={() => setOverlaysReady(true)}
+          meetingJoined={meetingJoined}
         />
       )}
       {localIsSpeaker || overlaysReady ? (
@@ -726,7 +769,7 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
               onPress={handleFollowToggle}
             >
               <Text style={[styles.followButtonText, isFollowingUser && styles.followingButtonText]}>
-                {isFollowingUser ? 'Γ£ô Following' : '+ Follow'}
+                {isFollowingUser ? '✓ Following' : '+ Follow'}
               </Text>
             </TouchableOpacity>
           )}

@@ -14,10 +14,14 @@ import {
   usePubSub,
   RTCView,
   MediaStream,
+  createMicrophoneAudioTrack,
+  createCameraVideoTrack,
 } from '@videosdk.live/react-native-sdk';
 import { Feather } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { decodePubSubMessage, STAGE_CONTROL_TOPIC } from '../lib/livePubSubPayload';
+import { ensureCallMediaPermissions } from '../lib/videosdkMediaPermissions';
+import { isPublisherMode } from '../lib/liveStageLayout';
 
 function applyModeChange(changeMode, mode) {
   if (!changeMode || !mode) return false;
@@ -30,6 +34,41 @@ function applyModeChange(changeMode, mode) {
   } catch (_) {
     return false;
   }
+}
+
+async function publishGuestMic(unmuteMicFn) {
+  await Promise.resolve(unmuteMicFn?.());
+  try {
+    const speechTrack = await createMicrophoneAudioTrack({
+      encoderConfig: 'speech_standard',
+      noiseConfig: {
+        noiseSuppression: true,
+        echoCancellation: true,
+        autoGainControl: true,
+      },
+    });
+    await Promise.resolve(unmuteMicFn?.(speechTrack));
+  } catch (_) {
+    /* default mic track is already live */
+  }
+}
+
+async function publishGuestWebcam(enableWebcamFn) {
+  try {
+    const customTrack = await createCameraVideoTrack({
+      optimizationMode: 'motion',
+      encoderConfig: 'h480p_w640p',
+      facingMode: 'user',
+      multiStream: false,
+    });
+    await Promise.resolve(enableWebcamFn?.(customTrack));
+  } catch (_) {
+    await Promise.resolve(enableWebcamFn?.());
+  }
+}
+
+function delay(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 function CoHostInviteListenerInner({
@@ -133,8 +172,20 @@ function CoHostInviteListenerInner({
     lastIndexStageRef.current = msgs.length;
   }, [stageMessages, handleInviteMessage]);
 
-  const acceptInvite = () => {
+  const acceptInvite = async () => {
     setInviteVisible(false);
+    try {
+      const allowed = await ensureCallMediaPermissions('video');
+      if (!allowed) {
+        Alert.alert(
+          'Permission needed',
+          'Camera and microphone permission are required to join the stage.'
+        );
+        return;
+      }
+    } catch (_) {
+      /* continue — unmute/enableWebcam will fail visibly if blocked */
+    }
     const ok = applyModeChange(changeModeRef.current, 'SEND_AND_RECV');
     if (!ok) {
       Alert.alert(
@@ -238,7 +289,7 @@ function GuestControlListenerInner({
       }
       if (action === 'unmute') {
         try {
-          unmuteMicRef.current?.();
+          publishGuestMic(unmuteMicRef.current);
         } catch (_) {}
         return;
       }
@@ -326,24 +377,68 @@ export function LiveCoHostGuestMedia({ hidePreview = false }) {
   } = useMeeting();
 
   const participantId = localParticipant?.id || '';
+  const localMode = String(localParticipant?.mode || '');
+  const isPublisher = isPublisherMode(localMode);
   const mediaStartedRef = useRef(false);
   const [blurMode, setBlurMode] = useState(false);
+  const [publishFailed, setPublishFailed] = useState(false);
+  const unmuteMicRef = useRef(unmuteMic);
+  const enableWebcamRef = useRef(enableWebcam);
+  const muteMicRef = useRef(muteMic);
+  const disableWebcamRef = useRef(disableWebcam);
+  const localMicOnRef = useRef(localMicOn);
+  const localWebcamOnRef = useRef(localWebcamOn);
+  const blurModeRef = useRef(blurMode);
+  unmuteMicRef.current = unmuteMic;
+  enableWebcamRef.current = enableWebcam;
+  muteMicRef.current = muteMic;
+  disableWebcamRef.current = disableWebcam;
+  localMicOnRef.current = localMicOn;
+  localWebcamOnRef.current = localWebcamOn;
+  blurModeRef.current = blurMode;
 
   useEffect(() => {
-    if (!participantId) return undefined;
+    if (!participantId || !isPublisher) return undefined;
     let cancelled = false;
     mediaStartedRef.current = true;
+    setPublishFailed(false);
 
     (async () => {
       try {
-        await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 300 : 200));
+        const allowed = await ensureCallMediaPermissions('video');
         if (cancelled) return;
-        await Promise.resolve(unmuteMic?.());
-        await new Promise((r) => setTimeout(r, Platform.OS === 'android' ? 300 : 200));
-        if (cancelled || blurMode) return;
-        await Promise.resolve(enableWebcam?.());
+        if (!allowed) {
+          mediaStartedRef.current = false;
+          setPublishFailed(true);
+          return;
+        }
+
+        // Mode just flipped — give VideoSDK a beat before producing A/V.
+        await delay(Platform.OS === 'android' ? 400 : 280);
+        if (cancelled) return;
+
+        // Retry publish until mic/cam report on (or attempts exhausted).
+        for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
+          if (!localMicOnRef.current) {
+            await publishGuestMic(unmuteMicRef.current);
+          }
+          await delay(Platform.OS === 'android' ? 350 : 250);
+          if (cancelled) return;
+          if (!blurModeRef.current && !localWebcamOnRef.current) {
+            await publishGuestWebcam(enableWebcamRef.current);
+          }
+          await delay(Platform.OS === 'android' ? 350 : 250);
+          if (localMicOnRef.current && (blurModeRef.current || localWebcamOnRef.current)) {
+            break;
+          }
+        }
+
+        if (!cancelled && !localMicOnRef.current) {
+          setPublishFailed(true);
+        }
       } catch (_) {
         mediaStartedRef.current = false;
+        if (!cancelled) setPublishFailed(true);
       }
     })();
 
@@ -351,15 +446,15 @@ export function LiveCoHostGuestMedia({ hidePreview = false }) {
       cancelled = true;
       mediaStartedRef.current = false;
       try {
-        muteMic?.();
+        muteMicRef.current?.();
       } catch (_) {}
       try {
-        disableWebcam?.();
+        disableWebcamRef.current?.();
       } catch (_) {}
     };
-    // Intentionally omit blurMode — join always starts with cam on unless user toggles blur.
+    // isPublisher boolean avoids remount churn from equivalent mode string variants.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [participantId, unmuteMic, enableWebcam, muteMic, disableWebcam]);
+  }, [participantId, isPublisher]);
 
   const toggleBlur = async () => {
     try {
@@ -367,7 +462,7 @@ export function LiveCoHostGuestMedia({ hidePreview = false }) {
         await Promise.resolve(disableWebcam?.());
         setBlurMode(true);
       } else {
-        await Promise.resolve(enableWebcam?.());
+        await publishGuestWebcam(enableWebcamRef.current);
         setBlurMode(false);
       }
     } catch (_) {
@@ -378,9 +473,21 @@ export function LiveCoHostGuestMedia({ hidePreview = false }) {
   const toggleSelfMute = async () => {
     try {
       if (localMicOn) await Promise.resolve(muteMic?.());
-      else await Promise.resolve(unmuteMic?.());
+      else await publishGuestMic(unmuteMicRef.current);
     } catch (_) {
       /* ignore */
+    }
+  };
+
+  const retryPublish = async () => {
+    setPublishFailed(false);
+    try {
+      await publishGuestMic(unmuteMicRef.current);
+      if (!blurModeRef.current) {
+        await publishGuestWebcam(enableWebcamRef.current);
+      }
+    } catch (_) {
+      setPublishFailed(true);
     }
   };
 
@@ -406,6 +513,15 @@ export function LiveCoHostGuestMedia({ hidePreview = false }) {
           <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
         ) : null}
       </View>
+      {publishFailed && !localMicOn ? (
+        <TouchableOpacity style={styles.retryBtn} onPress={retryPublish} activeOpacity={0.85}>
+          <Text style={styles.retryBtnText}>
+            {t('liveBroadcast.groupStage.retryMedia', {
+              defaultValue: 'Tap to enable mic & camera',
+            })}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
       <View style={styles.controlsRow}>
         <TouchableOpacity
           style={styles.controlBtn}
@@ -534,6 +650,18 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 13,
+  },
+  retryBtn: {
+    marginTop: 8,
+    backgroundColor: 'rgba(167, 125, 248, 0.95)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
   },
   controlsRow: {
     flexDirection: 'row',
