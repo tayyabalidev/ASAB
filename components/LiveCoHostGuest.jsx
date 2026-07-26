@@ -53,13 +53,8 @@ async function publishGuestMic(unmuteMicFn) {
   }
 }
 
-async function publishGuestWebcam(enableWebcamFn) {
-  // Plain enable first — custom tracks can succeed create but fail to render locally.
-  try {
-    await Promise.resolve(enableWebcamFn?.());
-  } catch (_) {
-    /* try custom below */
-  }
+async function publishGuestWebcam(enableWebcamFn, changeWebcamFn) {
+  // Always front camera first. Bare enableWebcam() defaults to back (environment).
   try {
     const customTrack = await createCameraVideoTrack({
       optimizationMode: 'motion',
@@ -68,12 +63,25 @@ async function publishGuestWebcam(enableWebcamFn) {
       multiStream: false,
     });
     await Promise.resolve(enableWebcamFn?.(customTrack));
+    return;
   } catch (_) {
-    try {
-      await Promise.resolve(enableWebcamFn?.());
-    } catch (_) {
-      /* ignore */
+    /* fall through */
+  }
+  try {
+    await Promise.resolve(enableWebcamFn?.());
+    if (typeof changeWebcamFn === 'function') {
+      try {
+        await Promise.resolve(changeWebcamFn('user'));
+      } catch (_) {
+        try {
+          await Promise.resolve(changeWebcamFn('front'));
+        } catch (_) {
+          /* ignore */
+        }
+      }
     }
+  } catch (_) {
+    /* ignore */
   }
 }
 
@@ -384,6 +392,7 @@ export function LiveCoHostGuestMedia({ hidePreview = false, controlsBottom = 168
     localMicOn,
     localWebcamOn,
     changeMode,
+    changeWebcam,
   } = useMeeting();
 
   const participantId = localParticipant?.id || '';
@@ -394,6 +403,7 @@ export function LiveCoHostGuestMedia({ hidePreview = false, controlsBottom = 168
   const [publishFailed, setPublishFailed] = useState(false);
   const unmuteMicRef = useRef(unmuteMic);
   const enableWebcamRef = useRef(enableWebcam);
+  const changeWebcamRef = useRef(changeWebcam);
   const muteMicRef = useRef(muteMic);
   const disableWebcamRef = useRef(disableWebcam);
   const localMicOnRef = useRef(localMicOn);
@@ -401,6 +411,7 @@ export function LiveCoHostGuestMedia({ hidePreview = false, controlsBottom = 168
   const blurModeRef = useRef(blurMode);
   unmuteMicRef.current = unmuteMic;
   enableWebcamRef.current = enableWebcam;
+  changeWebcamRef.current = changeWebcam;
   muteMicRef.current = muteMic;
   disableWebcamRef.current = disableWebcam;
   localMicOnRef.current = localMicOn;
@@ -423,6 +434,10 @@ export function LiveCoHostGuestMedia({ hidePreview = false, controlsBottom = 168
           return;
         }
 
+        // Always start with camera visible (not blur) on stage.
+        setBlurMode(false);
+        blurModeRef.current = false;
+
         // Mode just flipped — give VideoSDK a beat before producing A/V.
         await delay(Platform.OS === 'android' ? 400 : 280);
         if (cancelled) return;
@@ -434,16 +449,17 @@ export function LiveCoHostGuestMedia({ hidePreview = false, controlsBottom = 168
           }
           await delay(Platform.OS === 'android' ? 350 : 250);
           if (cancelled) return;
-          if (!blurModeRef.current && !localWebcamOnRef.current) {
-            await publishGuestWebcam(enableWebcamRef.current);
+          // Keep front camera on by default when joining stage.
+          if (!localWebcamOnRef.current) {
+            await publishGuestWebcam(enableWebcamRef.current, changeWebcamRef.current);
           }
           await delay(Platform.OS === 'android' ? 350 : 250);
-          if (localMicOnRef.current && (blurModeRef.current || localWebcamOnRef.current)) {
+          if (localMicOnRef.current && localWebcamOnRef.current) {
             break;
           }
         }
 
-        if (!cancelled && !localMicOnRef.current) {
+        if (!cancelled && (!localMicOnRef.current || !localWebcamOnRef.current)) {
           setPublishFailed(true);
         }
       } catch (_) {
@@ -472,7 +488,7 @@ export function LiveCoHostGuestMedia({ hidePreview = false, controlsBottom = 168
         await Promise.resolve(disableWebcam?.());
         setBlurMode(true);
       } else {
-        await publishGuestWebcam(enableWebcamRef.current);
+        await publishGuestWebcam(enableWebcamRef.current, changeWebcamRef.current);
         setBlurMode(false);
       }
     } catch (_) {
@@ -494,7 +510,7 @@ export function LiveCoHostGuestMedia({ hidePreview = false, controlsBottom = 168
     try {
       await publishGuestMic(unmuteMicRef.current);
       if (!blurModeRef.current) {
-        await publishGuestWebcam(enableWebcamRef.current);
+        await publishGuestWebcam(enableWebcamRef.current, changeWebcamRef.current);
       }
     } catch (_) {
       setPublishFailed(true);

@@ -706,6 +706,8 @@ export default function LiveStreamPlayerImpl({ stream, onClose, showChat = true 
             meetingId: effectiveRoomId,
             micEnabled: false,
             webcamEnabled: false,
+            // Guest stage enableWebcam fallback should open selfie cam, not back.
+            defaultCamera: 'front',
             name: user.username || user.$id || 'Viewer',
             // ILS audience must join SIGNALLING_ONLY so host invite → changeMode works.
             mode: 'SIGNALLING_ONLY',
