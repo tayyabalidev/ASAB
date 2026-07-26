@@ -54,6 +54,12 @@ async function publishGuestMic(unmuteMicFn) {
 }
 
 async function publishGuestWebcam(enableWebcamFn) {
+  // Plain enable first — custom tracks can succeed create but fail to render locally.
+  try {
+    await Promise.resolve(enableWebcamFn?.());
+  } catch (_) {
+    /* try custom below */
+  }
   try {
     const customTrack = await createCameraVideoTrack({
       optimizationMode: 'motion',
@@ -63,7 +69,11 @@ async function publishGuestWebcam(enableWebcamFn) {
     });
     await Promise.resolve(enableWebcamFn?.(customTrack));
   } catch (_) {
-    await Promise.resolve(enableWebcamFn?.());
+    try {
+      await Promise.resolve(enableWebcamFn?.());
+    } catch (_) {
+      /* ignore */
+    }
   }
 }
 
@@ -361,9 +371,9 @@ function GuestPreview({ participantId }) {
 
 /**
  * Guest on-stage media — only mount when local mode is SEND_AND_RECV.
- * @param {{ hidePreview?: boolean }} props
+ * @param {{ hidePreview?: boolean, controlsBottom?: number }} props
  */
-export function LiveCoHostGuestMedia({ hidePreview = false }) {
+export function LiveCoHostGuestMedia({ hidePreview = false, controlsBottom = 168 }) {
   const { t } = useTranslation();
   const {
     localParticipant,
@@ -493,7 +503,11 @@ export function LiveCoHostGuestMedia({ hidePreview = false }) {
 
   return (
     <View
-      style={[styles.wrap, hidePreview ? styles.wrapOnStage : styles.wrapPreview]}
+      style={[
+        styles.wrap,
+        hidePreview ? styles.wrapOnStage : styles.wrapPreview,
+        hidePreview ? { bottom: controlsBottom } : null,
+      ]}
       pointerEvents="box-none"
     >
       {participantId ? (
@@ -627,7 +641,8 @@ const styles = StyleSheet.create({
   },
   wrap: {
     position: 'absolute',
-    zIndex: 15,
+    zIndex: 45,
+    elevation: 45,
     alignItems: 'flex-end',
   },
   wrapPreview: {
@@ -635,7 +650,8 @@ const styles = StyleSheet.create({
     right: 12,
   },
   wrapOnStage: {
-    bottom: 168,
+    // Default; LiveViewerJoinedLayers overrides bottom to sit above the heart FAB.
+    bottom: 220,
     right: 12,
   },
   pill: {

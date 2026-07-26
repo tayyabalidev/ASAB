@@ -44,11 +44,15 @@ function resolveAvatarUri(metaData, fallbackUri) {
 
 function resolveStreamUrl(webcamOn, webcamStream) {
   try {
+    if (!webcamStream) return null;
+    // Prefer SDK stream URL (works for local + remote). MediaStream(track) often fails for local.
+    if (typeof webcamStream.toURL === 'function') {
+      if (webcamOn || webcamStream?.track) {
+        return webcamStream.toURL();
+      }
+    }
     if (webcamOn && webcamStream?.track) {
       return new MediaStream([webcamStream.track]).toURL();
-    }
-    if (webcamStream && typeof webcamStream.toURL === 'function') {
-      return webcamStream.toURL();
     }
   } catch (_) {
     /* ignore */
@@ -62,7 +66,7 @@ function HostRemoteCell({ participantId, label }) {
   const streamURL = resolveStreamUrl(webcamOn, webcamStream);
   const avatarUri = resolveAvatarUri(metaData);
   const name = displayName || label || 'Host';
-  const showVideo = Boolean(webcamOn && streamURL);
+  const showVideo = Boolean(streamURL);
 
   return (
     <View style={[styles.hostCell, isActiveSpeaker && styles.activeBorder]}>
@@ -102,10 +106,14 @@ function GuestSlotOccupied({ participantId, mirror }) {
     isActiveSpeaker,
     isLocal,
   } = useParticipant(participantId);
-  const streamURL = resolveStreamUrl(webcamOn, webcamStream);
+  // Local guest: useMeeting streams — useParticipant often has no playable local track URL.
+  const { localWebcamOn, localWebcamStream } = useMeeting();
+  const effectiveWebcamOn = isLocal ? Boolean(localWebcamOn) : Boolean(webcamOn);
+  const effectiveStream = isLocal ? localWebcamStream : webcamStream;
+  const streamURL = resolveStreamUrl(effectiveWebcamOn, effectiveStream);
   const avatarUri = resolveAvatarUri(metaData);
   const name = displayName || 'Guest';
-  const showVideo = Boolean(webcamOn && streamURL);
+  const showVideo = Boolean(streamURL);
 
   return (
     <View style={[styles.slot, isActiveSpeaker && styles.activeBorder]}>

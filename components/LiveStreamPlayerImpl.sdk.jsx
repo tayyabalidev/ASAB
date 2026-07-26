@@ -344,7 +344,10 @@ function LiveViewerJoinedLayers({
       {localIsSpeaker ? (
         <>
           <LiveGroupStage role="guest" />
-          <LiveCoHostGuestMedia hidePreview />
+          <LiveCoHostGuestMedia
+            hidePreview
+            controlsBottom={chatLayout.chatBottomOffset + 66}
+          />
         </>
       ) : null}
       <LiveStreamChatOverlay
