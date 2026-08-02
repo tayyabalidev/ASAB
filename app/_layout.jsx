@@ -30,6 +30,26 @@ if (canLoadVideoSdkNative()) {
 
 SplashScreen.preventAutoHideAsync();
 
+/** Keep the rest of the app portrait; live screens unlock rotation themselves. */
+function DefaultPortraitOrientation() {
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ScreenOrientation = require('expo-screen-orientation');
+        if (cancelled) return;
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      } catch (_) {
+        /* Expo Go / missing native module */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return null;
+}
+
 // ✅ Badge Notification Handler Component
 function BadgeNotificationHandler() {
   useBadgeNotifications();
@@ -412,6 +432,7 @@ export default function RootLayout() {
         <NotificationProvider>
         <MessageProvider>
         <OAuthHandler />
+        <DefaultPortraitOrientation />
         <BadgeNotificationHandler />
         <PushNotificationHandler />
         <IncomingCallHandler />

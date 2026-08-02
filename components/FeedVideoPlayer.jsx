@@ -275,9 +275,30 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     return () => subscription.remove();
   }, [player, handleError]);
 
+  // Hard-stop when this feed item unmounts (scrolled away / left home) so audio cannot linger.
+  useEffect(() => {
+    return () => {
+      clearPipRetries();
+      isInPipRef.current = false;
+      try {
+        player.staysActiveInBackground = false;
+        player.showNowPlayingNotification = false;
+      } catch (_) {}
+      try {
+        player.pause();
+      } catch (_) {}
+      try {
+        videoViewRef.current?.stopPictureInPicture?.().catch(() => {});
+      } catch (_) {}
+    };
+  }, [player, clearPipRetries]);
+
   const handlePictureInPictureStart = () => {
     isInPipRef.current = true;
     clearPipRetries();
+    try {
+      player.staysActiveInBackground = true;
+    } catch (_) {}
     if (Platform.OS === 'ios') {
       try {
         player.showNowPlayingNotification = true;
@@ -295,15 +316,22 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
         player.showNowPlayingNotification = false;
       } catch (_) {}
     }
-    if (shouldPlayRef.current) {
+    // Closing the small PiP window must stop audio when the app is not on that video.
+    // Previously we kept playing if shouldPlay was still true while backgrounded → ghost audio.
+    const appActive = appStateRef.current === 'active';
+    if (appActive && shouldPlayRef.current) {
       try {
         player.play();
       } catch (_) {}
-    } else {
-      try {
-        player.pause();
-      } catch (_) {}
+      return;
     }
+    try {
+      player.pause();
+      player.staysActiveInBackground = false;
+    } catch (_) {}
+    try {
+      videoViewRef.current?.stopPictureInPicture?.().catch(() => {});
+    } catch (_) {}
   };
 
   return (

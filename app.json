@@ -2,8 +2,8 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.1.15",
-    "orientation": "portrait",
+    "version": "1.1.16",
+    "orientation": "default",
     "icon": "./assets/images/asabicon.png",
     "userInterfaceStyle": "dark",
     "splash": {
@@ -126,6 +126,12 @@
       "./plugins/withIosHostCameraPip",
       "expo-web-browser",
       "expo-camera",
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT_UP"
+        }
+      ],
       "@videosdk.live/expo-config-plugin",
       [
         "@config-plugins/react-native-webrtc",

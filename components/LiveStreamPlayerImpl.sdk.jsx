@@ -113,6 +113,11 @@ function LiveHlsViewerInner({
   const player = useVideoPlayer(null, (p) => {
     p.loop = false;
     p.muted = false;
+    // Live HLS must not keep playing after leaving the stream / exiting the app.
+    p.staysActiveInBackground = false;
+    if (Platform.OS === 'ios') {
+      p.showNowPlayingNotification = false;
+    }
   });
 
   const applyHlsPayload = useCallback((payload) => {
@@ -263,8 +268,14 @@ function LiveHlsViewerInner({
         overlayReadyTimerRef.current = null;
       }
       // Do NOT leave() here — guest invite unmounts HLS while staying in the meeting.
+      // But always stop HLS audio/video so sound cannot continue after exit.
+      try {
+        player.staysActiveInBackground = false;
+        player.muted = true;
+        player.pause();
+      } catch (_) {}
     };
-  }, []);
+  }, [player]);
 
   useEffect(() => {
     if (hlsUrl) return undefined;

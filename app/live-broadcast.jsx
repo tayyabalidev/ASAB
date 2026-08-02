@@ -6,6 +6,7 @@ import { LiveStreamBroadcaster } from '../components';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { useTranslation } from 'react-i18next';
 import { peekLiveHostSession, clearLiveHostSession } from '../lib/pendingLiveBroadcast';
+import { useLiveScreenOrientation } from '../hooks/useLiveScreenOrientation';
 
 /** Expo Router may pass a param as string or string[] */
 function firstRouteParam(value) {
@@ -24,6 +25,7 @@ const LiveBroadcast = () => {
   const liveMode = stashed?.liveMode ?? firstRouteParam(params.liveMode);
   const { user } = useGlobalContext();
   const { t } = useTranslation();
+  useLiveScreenOrientation();
 
   const handleStreamEnd = () => {
     if (streamId) clearLiveHostSession(streamId);

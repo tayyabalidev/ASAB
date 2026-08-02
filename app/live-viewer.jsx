@@ -17,6 +17,7 @@ import { getLiveStreamById, joinLiveStream, leaveLiveStream } from '../lib/lives
 import { getStreamAccessStatus, isPaidLiveStream } from '../lib/streamAccess';
 import LiveStreamPaywall from '../components/LiveStreamPaywall';
 import { useTranslation } from 'react-i18next';
+import { useLiveScreenOrientation } from '../hooks/useLiveScreenOrientation';
 
 function firstRouteParam(value) {
   if (value == null) return undefined;
@@ -77,6 +78,7 @@ const LiveViewer = () => {
   const accessCheckRunRef = useRef(0);
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  useLiveScreenOrientation();
 
   const accessGranted = accessState === 'granted';
 
