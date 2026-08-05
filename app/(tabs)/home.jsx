@@ -1823,6 +1823,8 @@ const Home = () => {
   const recentTrendingLikeActionRef = useRef(false);
   const lastSyncedVideoIdRef = useRef(null); // Track last synced video ID to prevent re-syncing
   const flatListRef = useRef(null);
+  const feedScrollOffsetRef = useRef(0);
+  const lastVideoIndexRef = useRef(null);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   const [notificationFocusPost, setNotificationFocusPost] = useState(null);
   const handledFocusPostRef = useRef(null);
@@ -2076,9 +2078,14 @@ const Home = () => {
   // Use search results if searching, otherwise use normal posts with ads
   const displayPosts = displayPostsWithAds;
 
-  // From notification / deep link: open home feed on that exact post.
+  // From notification / deep link / search: open home feed on that exact post.
   useEffect(() => {
-    if (!focusPostId) return;
+    if (!focusPostId) {
+      // Allow the same postId to focus again on a later visit (e.g. search → video).
+      handledFocusPostRef.current = null;
+      scrolledFocusPostRef.current = null;
+      return;
+    }
     if (handledFocusPostRef.current === focusPostId) return;
 
     let cancelled = false;
@@ -2158,17 +2165,55 @@ const Home = () => {
   // Reset video index when switching tabs and scroll back to header
   useEffect(() => {
     setCurrentVideoIndex(null);
+    lastVideoIndexRef.current = null;
+    feedScrollOffsetRef.current = 0;
     flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [selectedTab]);
 
-  // Handle focus/blur to stop videos when navigating away and refresh data
+  const restoreActiveVideoFromScroll = useCallback(() => {
+    const postsLen = displayPosts?.length || 0;
+    if (postsLen === 0) return;
+
+    const offsetY = feedScrollOffsetRef.current;
+    const headerH = feedHeaderHeight || 0;
+    // Still fully in the header — do not autoplay an off-screen cell.
+    if (offsetY < Math.max(0, headerH - SCREEN_HEIGHT * 0.35)) {
+      return;
+    }
+
+    const raw = Math.round((offsetY - headerH) / SCREEN_HEIGHT);
+    const idx = Math.min(postsLen - 1, Math.max(0, raw));
+    lastVideoIndexRef.current = idx;
+    setCurrentVideoIndex(idx);
+  }, [displayPosts?.length, feedHeaderHeight]);
+
+  // Pause playback when leaving Home; restore active cell immediately on return
+  // so the feed is not blank while FlatList viewability catches up after search.
   useFocusEffect(
     useCallback(() => {
       setIsHomeFocused(true);
+      restoreActiveVideoFromScroll();
+
+      let raf2 = null;
+      const raf1 = requestAnimationFrame(() => {
+        const y = feedScrollOffsetRef.current;
+        try {
+          flatListRef.current?.scrollToOffset({ offset: y, animated: false });
+        } catch (_) {
+          /* ignore */
+        }
+        restoreActiveVideoFromScroll();
+        raf2 = requestAnimationFrame(() => {
+          restoreActiveVideoFromScroll();
+        });
+      });
+
       return () => {
         setIsHomeFocused(false);
+        cancelAnimationFrame(raf1);
+        if (raf2 != null) cancelAnimationFrame(raf2);
       };
-    }, [])
+    }, [restoreActiveVideoFromScroll])
   );
 
   // Sync trending modal data when trendingModalVideo changes
@@ -2462,6 +2507,7 @@ const Home = () => {
       (entry) => entry.isViewable && entry.index != null && entry.item && !entry.item.isAd
     );
     if (primary?.index != null) {
+      lastVideoIndexRef.current = primary.index;
       setCurrentVideoIndex(primary.index);
     }
   }).current;
@@ -2469,8 +2515,8 @@ const Home = () => {
   const viewabilityConfigCallbackPairs = useRef([
     {
       viewabilityConfig: {
-        itemVisiblePercentThreshold: 50,
-        minimumViewTime: 100,
+        itemVisiblePercentThreshold: 40,
+        minimumViewTime: 0,
       },
       onViewableItemsChanged,
     },
@@ -2499,9 +2545,11 @@ const Home = () => {
 
   const renderVideoCard = useCallback(
     ({ item, index }) => {
+      // Keep nearby sources warm using last known index; only the focused index plays.
+      const loadAnchor =
+        currentVideoIndex != null ? currentVideoIndex : lastVideoIndexRef.current;
       const shouldLoadSource =
-        currentVideoIndex != null &&
-        Math.abs(currentVideoIndex - index) <= 1;
+        loadAnchor != null && Math.abs(loadAnchor - index) <= 1;
 
       // Render advertisement if it's an ad
       if (item.isAd) {
@@ -3171,9 +3219,12 @@ const Home = () => {
                 </View>
               </View>
 
-              {/* Search Bar */}
+              {/* Search Bar — opens Instagram-style live search */}
               <View style={{ paddingHorizontal: 20, marginBottom: 10 }}>
-                <View style={{
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => router.push('/search')}
+                  style={{
                   flexDirection: 'row',
                   alignItems: 'center',
                   backgroundColor: themedColor('rgba(255,255,255,0.1)', theme.surface),
@@ -3183,57 +3234,20 @@ const Home = () => {
                   borderColor: themedColor('rgba(255,255,255,0.2)', theme.border),
                   borderRadius: 14,
                 }}>
-                  <TextInput
-                    ref={searchInputRef}
-                    placeholder={t("home.searchPlaceholder")}
-                    placeholderTextColor={themedColor('rgba(255,255,255,0.6)', theme.textSecondary)}
+                  <Text
                     style={{
                       flex: 1,
-                      color: theme.textPrimary,
+                      color: themedColor('rgba(255,255,255,0.6)', theme.textSecondary),
                       fontSize: 16,
                       marginRight: 10,
                       textAlign: isRTL ? 'right' : 'left',
                     }}
-                    value={searchQuery}
-                    onChangeText={handleSearch}
-                    blurOnSubmit={false}
-                    returnKeyType="search"
-                    autoCorrect={false}
-                    autoCapitalize="none"
-                    onSubmitEditing={() => {
-                      // Keep focus on the input
-                      searchInputRef.current?.focus();
-                      
-                    }}
-                  />
-                  <TouchableOpacity onPress={() => {
-                    if (searchQuery.trim()) {
-                      // Clear search
-                      setSearchQuery('');
-                      setSearchResults([]);
-                      setIsSearching(false);
-                    }
-                  }}>
-                  <Text style={{ color: theme.textPrimary, fontSize: 18 }}>
-                      {searchQuery.trim() ? '✕' : '🔍'}
-                    </Text>
-                  </TouchableOpacity>
-                  
-
-                </View>
-              </View>
-
-              {/* Search Results Indicator */}
-              {isSearching && searchQuery.trim() && (
-                <View style={{ paddingHorizontal: 20, marginBottom: 20 }}>
-                  <Text style={{ color: theme.textPrimary, fontSize: 16, textAlign: 'center' }}>
-                    {searchResults.length > 0 
-                      ? t("home.searchResults", { count: searchResults.length, query: searchQuery })
-                      : t("home.searchNoResults", { query: searchQuery })
-                    }
+                  >
+                    {t("home.searchPlaceholder")}
                   </Text>
-                </View>
-              )}
+                  <Text style={{ color: theme.textPrimary, fontSize: 18 }}>🔍</Text>
+                </TouchableOpacity>
+              </View>
 
               {/* Trending Videos Section */}
               {combinedLatestPosts && combinedLatestPosts.length > 0 ? (
@@ -3336,9 +3350,10 @@ const Home = () => {
             getItemLayout={feedHeaderHeight > 0 ? getVideoItemLayout : undefined}
             onScroll={(event) => {
               const offsetY = event.nativeEvent.contentOffset.y;
+              feedScrollOffsetRef.current = offsetY;
               setShowScrollToTop(offsetY > feedHeaderHeight + SCREEN_HEIGHT);
             }}
-            scrollEventThrottle={400}
+            scrollEventThrottle={16}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
             }
@@ -3356,6 +3371,9 @@ const Home = () => {
             onPress={() => {
               flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
               setShowScrollToTop(false); // Hide immediately when clicked
+              feedScrollOffsetRef.current = 0;
+              lastVideoIndexRef.current = null;
+              setCurrentVideoIndex(null);
             }}
             style={{
               position: 'absolute',

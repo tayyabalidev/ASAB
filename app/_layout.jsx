@@ -442,6 +442,9 @@ export default function RootLayout() {
             headerTitle: '', // Empty title
             title: '', // Empty title
             contentStyle: { backgroundColor: 'transparent' },
+            // Keep underlying tabs (Home feed) mounted/warm when opening search etc.
+            freezeOnBlur: false,
+            detachInactiveScreens: false,
           }}
         >
           <Stack.Screen 
@@ -467,7 +470,17 @@ export default function RootLayout() {
               title: '',
               headerTitle: '',
               presentation: 'card',
+              freezeOnBlur: false,
             }} 
+          />
+          <Stack.Screen
+            name="search/index"
+            options={{
+              headerShown: false,
+              title: '',
+              headerTitle: '',
+              animation: 'slide_from_right',
+            }}
           />
           <Stack.Screen 
             name="post/[id]" 

@@ -2138,7 +2138,12 @@ export const resources = {
       search: {
         header: "Search Results",
         emptyTitle: "No Videos Found",
-        emptySubtitle: "No videos found for \"{{query}}\""
+        emptySubtitle: "No results for \"{{query}}\"",
+        placeholder: "Search users and videos",
+        recent: "Recent",
+        clearAll: "Clear all",
+        noRecent: "No recent searches",
+        results: "Results",
       },
     },
   },

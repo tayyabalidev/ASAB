@@ -1,66 +1,22 @@
-import { useEffect } from "react";
-import { useLocalSearchParams } from "expo-router";
-import { View, Text, FlatList } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useTranslation } from "react-i18next";
+import { useEffect } from 'react';
+import { useLocalSearchParams, router } from 'expo-router';
+import { View, ActivityIndicator } from 'react-native';
 
-import useAppwrite from "../../lib/useAppwrite";
-import { searchPosts } from "../../lib/appwrite";
-import { EmptyState, SearchInput, VideoCard } from "../../components";
-
-const Search = () => {
+/** Legacy `/search/:query` → Instagram-style search screen with live results. */
+export default function SearchQueryRedirect() {
   const { query } = useLocalSearchParams();
-  const { t } = useTranslation();
-  const { data: posts, refetch } = useAppwrite(() => searchPosts(query), [query]);
+  const q = Array.isArray(query) ? query[0] : query;
 
   useEffect(() => {
-    refetch();
-  }, [query]);
+    router.replace({
+      pathname: '/search',
+      params: q ? { q: String(q) } : undefined,
+    });
+  }, [q]);
 
   return (
-    <SafeAreaView className="bg-primary h-full">
-      <FlatList
-        data={posts}
-        keyExtractor={(item) => item.$id}
-        renderItem={({ item }) => (
-          <VideoCard
-            title={item.title}
-            thumbnail={item.thumbnail}
-            video={item.video}
-            creator={item.creator.username}
-            avatar={item.creator.avatar}
-            creatorId={item.creator.$id}
-            $id={item.$id}
-            mux_playback_id={item.mux_playback_id}
-            muxPlaybackId={item.muxPlaybackId}
-          />
-        )}
-        ListHeaderComponent={() => (
-          <>
-            <View className="flex my-6 px-4">
-              <Text className="font-pmedium text-gray-100 text-sm">
-                {t('search.header')}
-              </Text>
-              <Text className="text-2xl font-psemibold text-white mt-1">
-                {query}
-              </Text>
-
-              <View className="mt-6 mb-8">
-                <SearchInput initialQuery={query} refetch={refetch} />
-              </View>
-            </View>
-          </>
-        )}
-        ListEmptyComponent={() => (
-          <EmptyState
-            title={t('search.emptyTitle')}
-            subtitle={t('search.emptySubtitle', { query })}
-          />
-        )}
-      />
-    </SafeAreaView>
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+      <ActivityIndicator color="#a77df8" />
+    </View>
   );
-};
-
-export default Search;
-
+}
