@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { View, Image, FlatList, TouchableOpacity, Modal, Text, TextInput, Alert, Platform, ScrollView, ActivityIndicator, KeyboardAvoidingView, Share, Linking, useWindowDimensions } from "react-native";
+import { View, Image, FlatList, TouchableOpacity, Modal, Text, TextInput, Alert, Platform, ScrollView, ActivityIndicator, KeyboardAvoidingView, Share, Linking, useWindowDimensions, StyleSheet } from "react-native";
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as ImagePicker from "expo-image-picker";
@@ -14,7 +14,7 @@ import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
 import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getProfileLikers, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri, getVideoPlaybackUrls, getCurrentUser } from "../../lib/appwrite";
 import { useNotifications } from "../../hooks/useNotifications";
-import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../lib/muxPlayback";
+import { getPlaybackUriForPost, getGridThumbnailUriForPost, isMuxProcessingPost } from "../../lib/muxPlayback";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar } from "../../components";
 import { images } from "../../constants";
@@ -23,6 +23,7 @@ import { isAdminUser } from "../../lib/admin";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
 import { getFilterCSS } from "../../lib/filterCss";
 import { prefetchAdjacentProfileVideos } from "../../lib/prefetchVideoSource";
+import { subscribeContentFeedInvalidate } from "../../lib/contentFeedEvents";
 
 // Component to display pending request with user details
 const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
@@ -256,6 +257,36 @@ const Profile = () => {
       }
     }, [refetchPosts, refetchPhotos, user?.$id, user?.stripeAccountId, showEarningsDashboard, setUser])
   );
+
+  // Instant refresh when Create finishes uploading a video/photo
+  useEffect(() => {
+    const sub = subscribeContentFeedInvalidate((payload) => {
+      if (payload?.userId && user?.$id && String(payload.userId) !== String(user.$id)) {
+        return;
+      }
+      if (payload?.type === 'photo') {
+        refetchPhotos?.();
+        return;
+      }
+      if (payload?.type === 'video') {
+        refetchPosts?.();
+        return;
+      }
+      refetchPosts?.();
+      refetchPhotos?.();
+    });
+    return () => sub.remove();
+  }, [refetchPosts, refetchPhotos, user?.$id]);
+
+  // While Mux is still processing any grid video, keep polling so thumbs appear without leaving profile
+  useEffect(() => {
+    const processing = (posts || []).some((p) => isMuxProcessingPost(p));
+    if (!processing || !refetchPosts) return undefined;
+    const id = setInterval(() => {
+      refetchPosts();
+    }, 4000);
+    return () => clearInterval(id);
+  }, [posts, refetchPosts]);
 
   // Stop videos when profile loses focus
   useFocusEffect(
@@ -2426,7 +2457,21 @@ const Profile = () => {
                             style={{ width: '100%', height: '100%' }}
                             resizeMode="cover"
                           />
-                          {/* Play Icon */}
+                          {isMuxProcessingPost(post) ? (
+                            <View
+                              style={{
+                                ...StyleSheet.absoluteFillObject,
+                                backgroundColor: 'rgba(0,0,0,0.45)',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                              }}
+                            >
+                              <ActivityIndicator color="#fff" />
+                              <Text style={{ color: '#fff', fontSize: 11, marginTop: 6 }}>
+                                Preparing…
+                              </Text>
+                            </View>
+                          ) : null}
                         </View>
                       </TouchableOpacity>
                       {/* Delete Button */}

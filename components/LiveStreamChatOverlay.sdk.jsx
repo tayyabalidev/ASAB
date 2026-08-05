@@ -9,11 +9,14 @@ import {
   Keyboard,
   Platform,
   Alert,
+  Image,
 } from 'react-native';
 import { useMeeting, usePubSub } from '@videosdk.live/react-native-sdk';
 import { useGlobalContext } from '../context/GlobalProvider';
 import { addLiveComment, getLiveComments } from '../lib/livestream';
-import { encodePubSubPayload } from '../lib/livePubSubPayload';
+import { encodePubSubPayload, decodePubSubMessage } from '../lib/livePubSubPayload';
+import { getPhotoUrl } from '../lib/appwrite';
+import images from '../constants/images';
 
 const USERNAME_COLORS = ['#7dd3fc', '#a77df8', '#f9a8d4', '#86efac', '#fcd34d', '#fda4af'];
 
@@ -28,6 +31,49 @@ function pickUsernameColor(name = '') {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
   return USERNAME_COLORS[Math.abs(hash) % USERNAME_COLORS.length];
+}
+
+function resolveAvatarUri(avatar) {
+  if (!avatar) return null;
+  const url = getPhotoUrl(avatar);
+  if (url) return url;
+  if (typeof avatar === 'string' && avatar.startsWith('http')) return avatar;
+  return null;
+}
+
+/** Support plain-text legacy chat + JSON payloads with avatar. */
+function parseChatEnvelope(item) {
+  const decoded = decodePubSubMessage(item);
+  const raw = item?.message;
+  let text = '';
+  let avatar = '';
+  let senderName = item?.senderName || decoded.senderName || '';
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{')) {
+      text = String(decoded.text || decoded.message || '').trim();
+      avatar = decoded.avatar || '';
+      if (decoded.senderName) senderName = decoded.senderName;
+    } else {
+      text = trimmed;
+    }
+  } else if (raw && typeof raw === 'object') {
+    text = String(raw.text || raw.message || decoded.text || '').trim();
+    avatar = raw.avatar || decoded.avatar || '';
+    if (raw.senderName) senderName = raw.senderName;
+  } else {
+    text = String(decoded.text || decoded.message || '').trim();
+    avatar = decoded.avatar || '';
+  }
+
+  return {
+    text,
+    avatar,
+    senderName: senderName || 'Viewer',
+    senderId: item?.senderId || decoded.senderId || null,
+    timestamp: item?.timestamp,
+  };
 }
 
 /**
@@ -87,6 +133,7 @@ export default function LiveStreamChatOverlay({
             id: c.$id,
             senderId: c.userId,
             senderName: c.username || 'Viewer',
+            avatar: c.avatar || '',
             text: c.content,
             timestamp: c.$createdAt,
           });
@@ -102,11 +149,13 @@ export default function LiveStreamChatOverlay({
       if (item?.senderId && item.senderId === localParticipantId) {
         continue;
       }
+      const parsed = parseChatEnvelope(item);
       appendMessage({
-        senderId: item?.senderId,
-        senderName: item?.senderName || 'Viewer',
-        text: item?.message ?? '',
-        timestamp: item?.timestamp,
+        senderId: parsed.senderId,
+        senderName: parsed.senderName,
+        avatar: parsed.avatar,
+        text: parsed.text,
+        timestamp: parsed.timestamp,
       });
     }
     lastChatIndexRef.current = msgs.length;
@@ -124,9 +173,11 @@ export default function LiveStreamChatOverlay({
     const text = message.trim();
     if (!text || sending) return;
     setSending(true);
+    const avatar = user?.avatar || '';
     appendMessage({
       senderId: localParticipantId,
       senderName: displayName || user?.username || 'Viewer',
+      avatar,
       text,
       timestamp: new Date().toISOString(),
     });
@@ -135,14 +186,20 @@ export default function LiveStreamChatOverlay({
       if (typeof chat?.publish !== 'function') {
         throw new Error('Chat is unavailable');
       }
-      await Promise.resolve(chat.publish(text, { persist: true }));
+      const payload = encodePubSubPayload({
+        text,
+        senderName: displayName || user?.username || 'Viewer',
+        avatar,
+        senderId: user?.$id || localParticipantId || '',
+      });
+      await Promise.resolve(chat.publish(payload, { persist: true }));
       Keyboard.dismiss();
       if (streamId && user?.$id) {
         addLiveComment(
           streamId,
           user.$id,
           displayName || user.username || 'Viewer',
-          user.avatar || '',
+          avatar,
           text
         ).catch(() => {});
       }
@@ -207,6 +264,7 @@ export default function LiveStreamChatOverlay({
     <View
       style={[styles.root, { bottom: bottomOffset }, compact && styles.rootCompact]}
       pointerEvents="box-none"
+      collapsable={false}
     >
       <ScrollView
         ref={scrollRef}
@@ -220,8 +278,13 @@ export default function LiveStreamChatOverlay({
           const isLocal = item.senderId && item.senderId === localParticipantId;
           const name = isLocal ? 'You' : item.senderName || 'Viewer';
           const nameColor = pickUsernameColor(name);
+          const avatarUri = resolveAvatarUri(item.avatar);
           return (
             <View key={`${messageKey(item)}-${index}`} style={styles.commentBubble}>
+              <Image
+                source={avatarUri ? { uri: avatarUri } : images.profile}
+                style={styles.commentAvatar}
+              />
               <Text style={styles.commentText} numberOfLines={3}>
                 <Text style={[styles.username, { color: nameColor }]}>{name}: </Text>
                 <Text style={styles.body}>{item.text}</Text>
@@ -235,17 +298,22 @@ export default function LiveStreamChatOverlay({
         <Text style={styles.raiseHint}>Request sent — wait for the host to invite you.</Text>
       ) : null}
 
-      <View style={styles.inputRow}>
+      <View style={styles.inputRow} collapsable={false}>
         <TextInput
           style={styles.input}
           placeholder="Say something…"
-          placeholderTextColor="rgba(255,255,255,0.45)"
+          placeholderTextColor="rgba(255,255,255,0.65)"
           value={message}
           onChangeText={setMessage}
           editable={!sending}
           returnKeyType="send"
           onSubmitEditing={sendMessage}
           maxLength={300}
+          keyboardAppearance="dark"
+          underlineColorAndroid="transparent"
+          selectionColor="#a77df8"
+          cursorColor="#ffffff"
+          autoCorrect
         />
         {showRaiseHand ? (
           <TouchableOpacity
@@ -276,7 +344,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     right: 72,
-    zIndex: 26,
+    zIndex: 40,
+    elevation: 40,
   },
   rootCompact: {
     right: 68,
@@ -298,15 +367,26 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   commentBubble: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     alignSelf: 'flex-start',
     maxWidth: '100%',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
     paddingVertical: 6,
     marginBottom: 6,
+    gap: 8,
+  },
+  commentAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    marginTop: 1,
   },
   commentText: {
+    flexShrink: 1,
     fontSize: 14,
     lineHeight: 19,
   },
@@ -320,20 +400,23 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.88)',
     borderRadius: 24,
     paddingLeft: 14,
     paddingRight: 4,
     paddingVertical: Platform.OS === 'ios' ? 6 : 4,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.22)',
+    zIndex: 41,
+    elevation: 41,
   },
   input: {
     flex: 1,
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 14,
     paddingVertical: 8,
     maxHeight: 72,
+    backgroundColor: 'transparent',
   },
   sendBtn: {
     width: 36,
@@ -369,7 +452,8 @@ const styles = StyleSheet.create({
   raiseFabWrap: {
     position: 'absolute',
     right: 16,
-    zIndex: 26,
+    zIndex: 40,
+    elevation: 40,
   },
   raiseFab: {
     width: 44,

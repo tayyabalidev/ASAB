@@ -34,6 +34,7 @@ import { createVideoPost, createPhotoPost } from "../../lib/appwrite";
 import { scheduleCreatorSubscriberNotifications } from "../../lib/creatorNotificationDelivery";
 import { isMuxUploadEnabled } from "../../lib/muxConfig";
 import { publishVideoWithMux } from "../../lib/muxClient";
+import { emitContentFeedInvalidate } from "../../lib/contentFeedEvents";
 import {
   processVideo,
   processPhoto,
@@ -1658,6 +1659,7 @@ const Create = () => {
           }
 
           Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
+          emitContentFeedInvalidate({ type: 'video', userId: user.$id });
           router.push("/(tabs)/home");
         } catch (uploadError) {
           throw uploadError; // Re-throw to be caught by outer catch
@@ -1969,6 +1971,7 @@ const Create = () => {
         setUploading(false);
 
         Alert.alert(t("common.success"), "Photo uploaded successfully!");
+        emitContentFeedInvalidate({ type: 'photo', userId: user.$id });
         // Stay on create page - user can navigate manually if they want
       } catch (error) {
         const errorMessage = error.message || error.toString();
