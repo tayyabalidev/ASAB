@@ -2042,11 +2042,12 @@ const Home = () => {
   // Insert ads into posts every 5 posts
   const displayPostsWithAds = useMemo(() => {
     let basePosts = isSearching ? searchResults : posts;
-    if (
-      notificationFocusPost?.$id &&
-      !(basePosts || []).some((p) => p.$id === notificationFocusPost.$id)
-    ) {
-      basePosts = [notificationFocusPost, ...(basePosts || [])];
+    // Pin deep-linked / search-opened post at the front so we can scroll to it reliably
+    if (notificationFocusPost?.$id) {
+      basePosts = [
+        notificationFocusPost,
+        ...(basePosts || []).filter((p) => p.$id !== notificationFocusPost.$id),
+      ];
     }
     if (!activeAds || activeAds.length === 0) return basePosts;
     
@@ -2081,9 +2082,6 @@ const Home = () => {
   // From notification / deep link / search: open home feed on that exact post.
   useEffect(() => {
     if (!focusPostId) {
-      // Allow the same postId to focus again on a later visit (e.g. search → video).
-      handledFocusPostRef.current = null;
-      scrolledFocusPostRef.current = null;
       return;
     }
     if (handledFocusPostRef.current === focusPostId) return;
@@ -2101,7 +2099,8 @@ const Home = () => {
       if (existing) {
         if (cancelled) return;
         handledFocusPostRef.current = focusPostId;
-        setNotificationFocusPost(null);
+        // Always pin so scroll lands on the video (not buried mid-feed / header)
+        setNotificationFocusPost({ ...existing });
         return;
       }
 
@@ -2128,33 +2127,69 @@ const Home = () => {
     };
   }, [focusPostId, combinedForYouPosts]);
 
+  // Scroll the pinned focus post into view (first feed cell under the header).
   useEffect(() => {
     if (!focusPostId || !displayPosts?.length || !flatListRef.current) return;
+    // Wait until the post is pinned to the front of the feed
+    if (notificationFocusPost?.$id !== focusPostId) return;
 
     const idx = displayPosts.findIndex((p) => p.$id === focusPostId && !p.isAd);
     if (idx < 0) return;
     if (scrolledFocusPostRef.current === focusPostId) return;
-    scrolledFocusPostRef.current = focusPostId;
 
-    const timer = setTimeout(() => {
-      try {
-        flatListRef.current?.scrollToOffset({
-          offset: feedHeaderHeight + idx * SCREEN_HEIGHT,
-          animated: true,
-        });
-        setCurrentVideoIndex(idx);
-      } catch (_) {
-        /* ignore */
-      }
+    let cancelled = false;
+    let attempts = 0;
+    const timers = [];
+
+    const finish = () => {
+      if (cancelled) return;
+      scrolledFocusPostRef.current = focusPostId;
       try {
         router.setParams({ postId: undefined });
       } catch (_) {
         /* ignore */
       }
-    }, 350);
+      timers.push(
+        setTimeout(() => {
+          if (cancelled) return;
+          setNotificationFocusPost((prev) =>
+            prev?.$id === focusPostId ? null : prev
+          );
+          handledFocusPostRef.current = null;
+          scrolledFocusPostRef.current = null;
+        }, 800)
+      );
+    };
 
-    return () => clearTimeout(timer);
-  }, [focusPostId, displayPosts, feedHeaderHeight]);
+    const scrollToFocusedPost = () => {
+      if (cancelled || !flatListRef.current) return;
+      attempts += 1;
+      const headerH = feedHeaderHeight || 0;
+      const offset = headerH + idx * SCREEN_HEIGHT;
+      try {
+        flatListRef.current.scrollToOffset({ offset, animated: attempts > 1 });
+        feedScrollOffsetRef.current = offset;
+        lastVideoIndexRef.current = idx;
+        setCurrentVideoIndex(idx);
+        setShowScrollToTop(offset > headerH + SCREEN_HEIGHT);
+      } catch (_) {
+        /* ignore */
+      }
+
+      // Retry — FlatList may not be ready on first focus after search.
+      if (attempts < 4) {
+        timers.push(setTimeout(scrollToFocusedPost, attempts === 1 ? 50 : 200));
+        return;
+      }
+      finish();
+    };
+
+    timers.push(setTimeout(scrollToFocusedPost, 100));
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
+  }, [focusPostId, displayPosts, feedHeaderHeight, notificationFocusPost?.$id]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -2164,13 +2199,18 @@ const Home = () => {
 
   // Reset video index when switching tabs and scroll back to header
   useEffect(() => {
+    // Don't reset while opening a specific post from search / notifications
+    if (focusPostId) return;
     setCurrentVideoIndex(null);
     lastVideoIndexRef.current = null;
     feedScrollOffsetRef.current = 0;
     flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-  }, [selectedTab]);
+  }, [selectedTab, focusPostId]);
 
   const restoreActiveVideoFromScroll = useCallback(() => {
+    // Pending deep-link / search focus owns scroll position
+    if (focusPostId) return;
+
     const postsLen = displayPosts?.length || 0;
     if (postsLen === 0) return;
 
@@ -2185,13 +2225,20 @@ const Home = () => {
     const idx = Math.min(postsLen - 1, Math.max(0, raw));
     lastVideoIndexRef.current = idx;
     setCurrentVideoIndex(idx);
-  }, [displayPosts?.length, feedHeaderHeight]);
+  }, [displayPosts?.length, feedHeaderHeight, focusPostId]);
 
   // Pause playback when leaving Home; restore active cell immediately on return
   // so the feed is not blank while FlatList viewability catches up after search.
   useFocusEffect(
     useCallback(() => {
       setIsHomeFocused(true);
+      // When opening a specific post from search, skip restoring the old scroll (top).
+      if (focusPostId) {
+        return () => {
+          setIsHomeFocused(false);
+        };
+      }
+
       restoreActiveVideoFromScroll();
 
       let raf2 = null;
@@ -2213,7 +2260,7 @@ const Home = () => {
         cancelAnimationFrame(raf1);
         if (raf2 != null) cancelAnimationFrame(raf2);
       };
-    }, [restoreActiveVideoFromScroll])
+    }, [restoreActiveVideoFromScroll, focusPostId])
   );
 
   // Sync trending modal data when trendingModalVideo changes
@@ -2551,12 +2598,15 @@ const Home = () => {
       const shouldLoadSource =
         loadAnchor != null && Math.abs(loadAnchor - index) <= 1;
 
-      // Render advertisement if it's an ad
+      // Render advertisement if it's an ad — full-bleed feed cell with bottom CTA
       if (item.isAd) {
         return (
-          <View style={{ height: SCREEN_HEIGHT, justifyContent: 'center', paddingHorizontal: 16 }}>
-            <AdvertisementCard advertisement={item} />
-          </View>
+          <AdvertisementCard
+            advertisement={item}
+            isVisible={currentVideoIndex === index}
+            shouldLoadSource={shouldLoadSource}
+            cardHeight={SCREEN_HEIGHT}
+          />
         );
       }
       

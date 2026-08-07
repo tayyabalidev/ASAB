@@ -2,7 +2,9 @@ import { useFocusEffect } from "expo-router";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { View, Image, FlatList, TouchableOpacity, Text, Alert, TextInput, Platform } from "react-native";
+import { View, Image, FlatList, TouchableOpacity, Text, Alert, TextInput, Platform, StyleSheet } from "react-native";
+import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
+import { Feather } from "@expo/vector-icons";
 
 import { icons, images } from "../../constants";
 import { databases, appwriteConfig, toggleFollowUser, markNotificationAsRead } from "../../lib/appwrite";
@@ -353,135 +355,135 @@ const Inbox = () => {
     });
   };
 
+  const deleteNotification = useCallback(async (item) => {
+    if (!item?.$id) return;
+    try {
+      await databases.deleteDocument(
+        appwriteConfig.databaseId,
+        appwriteConfig.notificationsCollectionId,
+        item.$id
+      );
+      setNotifications((prev) => prev.filter((n) => n.$id !== item.$id));
+    } catch (error) {
+      Alert.alert(t('common.error'), error.message || t('common.deleteError'));
+    }
+  }, [setNotifications, t]);
+
   const renderNotificationItem = ({ item }) => {
     const isFollow = item.type === 'follow';
     const isLive = item.type === 'live';
     const notificationText = getNotificationMessage(item, t);
 
-    return (
+    const renderRightActions = () => (
       <TouchableOpacity
-        onPress={() => handleNotificationPress(item)}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingVertical: 12,
-          paddingHorizontal: 16,
-          backgroundColor: item.isRead ? theme.surface : theme.accentSoft,
-          borderBottomWidth: 0.5,
-          borderBottomColor: theme.divider,
-          borderRadius: 12,
-          marginHorizontal: 16,
-          marginBottom: 8,
-        }}
+        onPress={() => deleteNotification(item)}
+        activeOpacity={0.85}
+        style={styles.swipeDelete}
       >
-        {/* User Avatar */}
-        <Image
-          source={{ uri: getAvatarUrl(item.fromUserAvatar) }}
-          style={{ width: 48, height: 48, borderRadius: 24, marginRight: 12 }}
-          resizeMode="cover"
-        />
-
-        {/* Notification Content */}
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: '600' }}>
-            {item.fromUsername}
-          </Text>
-          <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
-            {notificationText}
-          </Text>
-          <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
-            {formatTime(item.createdAt)}
-          </Text>
-        </View>
-
-        {/* Action Buttons */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {isFollow && (() => {
-            const isFollowingUser = followingStates[item.fromUserId] || false;
-            return (
-              <TouchableOpacity
-                onPress={async () => {
-                  if (!currentUser?.$id || !item.fromUserId || currentUser.$id === item.fromUserId) return;
-                  
-                  // Immediate visual feedback
-                  const newFollowState = !isFollowingUser;
-                  setFollowingStates(prev => ({ ...prev, [item.fromUserId]: newFollowState }));
-                  updateFollowStatus(item.fromUserId, newFollowState);
-                  
-                  try {
-                    await toggleFollowUser(currentUser.$id, item.fromUserId);
-                    refreshNotificationUpdates();
-                  } catch (error) {
-                    // Revert on error
-                    setFollowingStates(prev => ({ ...prev, [item.fromUserId]: !newFollowState }));
-                    updateFollowStatus(item.fromUserId, !newFollowState);
-                    Alert.alert(t('common.error'), error.message || t('profile.alerts.followError'));
-                  }
-                }}
-                style={{
-                  backgroundColor: isFollowingUser ? theme.cardSoft : theme.accent,
-                  paddingHorizontal: 16,
-                  paddingVertical: 8,
-                  borderRadius: 16
-                }}
-              >
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
-                  {isFollowingUser ? 'Following' : 'Follow Back'}
-                </Text>
-              </TouchableOpacity>
-            );
-          })()}
-          {isLive && (
-            <View style={{
-              backgroundColor: '#ff4757',
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 12,
-              flexDirection: 'row',
-              alignItems: 'center'
-            }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', marginRight: 6 }} />
-              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
-                LIVE
-              </Text>
-            </View>
-          )}
-          {/* Delete Button */}
-          <TouchableOpacity
-            onPress={async () => {
-              Alert.alert(
-                t('Delete Notification'),
-                t('Confirm Delete'),
-                [
-                  { text: t('cancel'), style: 'cancel' },
-                  {
-                    text: t('delete'),
-                    style: 'destructive',
-                    onPress: async () => {
-                      try {
-                        await databases.deleteDocument(
-                          appwriteConfig.databaseId,
-                          appwriteConfig.notificationsCollectionId,
-                          item.$id
-                        );
-                        setNotifications(prev => prev.filter(n => n.$id !== item.$id));
-                      } catch (error) {
-                        Alert.alert(t('common.error'), error.message || t('common.deleteError'));
-                      }
-                    }
-                  }
-                ]
-              );
-            }}
-            style={{
-              padding: 8,
-              borderRadius: 8
-            }}
-          >
-            <Text style={{ color: theme.textMuted, fontSize: 18 }}>×</Text>
-          </TouchableOpacity>
-        </View>
+        <Feather name="trash-2" size={22} color="#fff" />
+        <Text style={styles.swipeDeleteText}>{t('delete', { defaultValue: 'Delete' })}</Text>
       </TouchableOpacity>
+    );
+
+    return (
+      <Swipeable
+        renderRightActions={renderRightActions}
+        overshootRight={false}
+        friction={2}
+        rightThreshold={40}
+        containerStyle={styles.swipeContainer}
+      >
+        <TouchableOpacity
+          onPress={() => handleNotificationPress(item)}
+          activeOpacity={0.85}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingVertical: 12,
+            paddingHorizontal: 16,
+            backgroundColor: item.isRead ? theme.surface : theme.accentSoft,
+            borderBottomWidth: 0.5,
+            borderBottomColor: theme.divider,
+            borderRadius: 12,
+            marginHorizontal: 16,
+            marginBottom: 8,
+          }}
+        >
+          {/* User Avatar */}
+          <Image
+            source={{ uri: getAvatarUrl(item.fromUserAvatar) }}
+            style={{ width: 48, height: 48, borderRadius: 24, marginRight: 12 }}
+            resizeMode="cover"
+          />
+
+          {/* Notification Content */}
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: '600' }}>
+              {item.fromUsername}
+            </Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 14 }}>
+              {notificationText}
+            </Text>
+            <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
+              {formatTime(item.createdAt)}
+            </Text>
+          </View>
+
+          {/* Action Buttons */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {isFollow && (() => {
+              const isFollowingUser = followingStates[item.fromUserId] || false;
+              return (
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (!currentUser?.$id || !item.fromUserId || currentUser.$id === item.fromUserId) return;
+                    
+                    // Immediate visual feedback
+                    const newFollowState = !isFollowingUser;
+                    setFollowingStates(prev => ({ ...prev, [item.fromUserId]: newFollowState }));
+                    updateFollowStatus(item.fromUserId, newFollowState);
+                    
+                    try {
+                      await toggleFollowUser(currentUser.$id, item.fromUserId);
+                      refreshNotificationUpdates();
+                    } catch (error) {
+                      // Revert on error
+                      setFollowingStates(prev => ({ ...prev, [item.fromUserId]: !newFollowState }));
+                      updateFollowStatus(item.fromUserId, !newFollowState);
+                      Alert.alert(t('common.error'), error.message || t('profile.alerts.followError'));
+                    }
+                  }}
+                  style={{
+                    backgroundColor: isFollowingUser ? theme.cardSoft : theme.accent,
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 16
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
+                    {isFollowingUser ? 'Following' : 'Follow Back'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })()}
+            {isLive && (
+              <View style={{
+                backgroundColor: '#ff4757',
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 12,
+                flexDirection: 'row',
+                alignItems: 'center'
+              }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', marginRight: 6 }} />
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                  LIVE
+                </Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Swipeable>
     );
   };
 
@@ -596,6 +598,7 @@ const Inbox = () => {
   }
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       {/* Header */}
       <View style={{
@@ -698,7 +701,29 @@ const Inbox = () => {
         contentContainerStyle={{ paddingBottom: 24 }}
       />
     </SafeAreaView>
+    </GestureHandlerRootView>
   );
 };
+
+const styles = StyleSheet.create({
+  swipeContainer: {
+    overflow: 'hidden',
+  },
+  swipeDelete: {
+    backgroundColor: '#E53935',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 88,
+    marginBottom: 8,
+    marginRight: 16,
+    borderRadius: 12,
+  },
+  swipeDeleteText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+});
 
 export default Inbox; 

@@ -51,6 +51,7 @@ const Advertisements = () => {
     title: "",
     description: "",
     image: null,
+    video: null,
     linkUrl: "",
     subscriptionPlan: "daily",
   });
@@ -123,7 +124,7 @@ const Advertisements = () => {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         quality: 0.8,
-        aspect: [16, 9],
+        aspect: [9, 16],
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -147,13 +148,45 @@ const Advertisements = () => {
     }
   };
 
+  const openVideoPicker = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(t('alerts.permissionRequiredTitle'), t('alerts.permissionRequiredMessage'));
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: false,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const selectedAsset = result.assets[0];
+        const uri = selectedAsset.uri;
+        const rawName = selectedAsset.fileName || selectedAsset.name || uri.split('/').pop() || `ad_video_${Date.now()}.mp4`;
+        const file = {
+          uri,
+          name: rawName.includes('.') ? rawName : `${rawName}.mp4`,
+          type: selectedAsset.mimeType || 'video/mp4',
+          mimeType: selectedAsset.mimeType || 'video/mp4',
+          size: selectedAsset.fileSize || selectedAsset.size,
+        };
+        setForm({ ...form, video: file });
+      }
+    } catch (error) {
+      Alert.alert(t("common.error"), t("alerts.mediaSelectError"));
+    }
+  };
+
   const handleCreate = async () => {
     if (!form.title.trim()) {
       return Alert.alert(t("common.error"), "Title is required");
     }
 
-    if (!form.image) {
-      return Alert.alert(t("common.error"), "Please select an image for your advertisement");
+    if (!form.image && !form.video) {
+      return Alert.alert(t("common.error"), "Please add a video (recommended) or an image for your advertisement");
     }
 
     if (!user?.$id) {
@@ -213,6 +246,7 @@ const Advertisements = () => {
         title: "",
         description: "",
         image: null,
+        video: null,
         linkUrl: "",
         subscriptionPlan: "daily",
       });
@@ -234,6 +268,7 @@ const Advertisements = () => {
       title: ad.title || "",
       description: ad.description || "",
       image: null, // Don't preload image
+      video: null,
       linkUrl: ad.linkUrl || "",
       subscriptionPlan: ad.subscriptionPlan || "daily",
     });
@@ -672,7 +707,74 @@ const Advertisements = () => {
                     fontFamily: 'Poppins-Medium',
                     marginBottom: 8,
                   }}>
-                    Advertisement Image *
+                    Advertisement Video *
+                  </Text>
+                  <Text style={{
+                    color: theme.textSecondary,
+                    fontSize: 12,
+                    fontFamily: 'Poppins-Regular',
+                    marginBottom: 8,
+                  }}>
+                    Vertical video plays full-screen in the feed with a bottom ad button.
+                  </Text>
+                  <TouchableOpacity onPress={openVideoPicker}>
+                    {form.video ? (
+                      <View style={{
+                        width: '100%',
+                        height: 120,
+                        borderRadius: 12,
+                        backgroundColor: theme.surface,
+                        borderWidth: 1,
+                        borderColor: theme.accent,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        paddingHorizontal: 16,
+                      }}>
+                        <Text style={{ color: theme.textPrimary, fontFamily: 'Poppins-Medium' }} numberOfLines={2}>
+                          Video selected
+                        </Text>
+                        <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }} numberOfLines={1}>
+                          {form.video.name}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={{
+                        width: '100%',
+                        height: 120,
+                        borderRadius: 12,
+                        borderWidth: 2,
+                        borderStyle: 'dashed',
+                        borderColor: theme.border,
+                        backgroundColor: theme.surface,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                      }}>
+                        <Image
+                          source={icons.upload}
+                          resizeMode="contain"
+                          style={{ width: 40, height: 40, tintColor: theme.accent }}
+                        />
+                        <Text style={{
+                          color: theme.textSecondary,
+                          marginTop: 8,
+                          fontFamily: 'Poppins-Medium',
+                        }}>
+                          Tap to select video
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                <View>
+                  <Text style={{
+                    color: theme.textPrimary,
+                    fontSize: 16,
+                    fontFamily: 'Poppins-Medium',
+                    marginBottom: 8,
+                    marginTop: 8,
+                  }}>
+                    Cover image {form.video ? '(optional)' : '*'}
                   </Text>
                   <TouchableOpacity onPress={openImagePicker}>
                     {form.image ? (
@@ -688,7 +790,7 @@ const Advertisements = () => {
                     ) : (
                       <View style={{
                         width: '100%',
-                        height: 200,
+                        height: 160,
                         borderRadius: 12,
                         borderWidth: 2,
                         borderStyle: 'dashed',
