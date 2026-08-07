@@ -15,6 +15,8 @@ import { NotificationProvider } from '../context/NotificationProvider';
 import { MessageProvider } from '../context/MessageProvider';
 import IncomingCallHandler from '../components/IncomingCallHandler';
 import { canLoadVideoSdkNative } from '../lib/videosdkNativeGate';
+// Define background location task at startup (Step 5).
+import '../lib/locationBackground';
 
 // VideoSDK native bootstrap (mirror official ILS example) — skip in Expo Go.
 if (canLoadVideoSdkNative()) {
@@ -475,6 +477,15 @@ export default function RootLayout() {
           />
           <Stack.Screen
             name="search/index"
+            options={{
+              headerShown: false,
+              title: '',
+              headerTitle: '',
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="live-map/index"
             options={{
               headerShown: false,
               title: '',

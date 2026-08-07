@@ -87,6 +87,11 @@ module.exports = () => {
 
   const passwordRecoveryRedirectUrl = trimEnv("EXPO_PUBLIC_PASSWORD_RECOVERY_REDIRECT_URL");
 
+  const googleMapsApiKey =
+    trimEnv("EXPO_PUBLIC_GOOGLE_MAPS_API_KEY") ||
+    trimEnv("GOOGLE_MAPS_API_KEY") ||
+    "";
+
   const appleTeamId =
     trimEnv("EXPO_APPLE_TEAM_ID") || trimEnv("APPLE_TEAM_ID") || "";
   const iosBundleId = appJson.expo?.ios?.bundleIdentifier || "com.bilal.asab";
@@ -96,6 +101,12 @@ module.exports = () => {
   if (!appleTeamId) {
     console.warn(
       "[app.config] EXPO_APPLE_TEAM_ID is not set — iOS screen-share builds require it on EAS."
+    );
+  }
+
+  if (!googleMapsApiKey) {
+    console.warn(
+      "[app.config] EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not set — Android maps need a Google Maps API key (iOS can use Apple Maps)."
     );
   }
 
@@ -124,52 +135,71 @@ module.exports = () => {
       : []),
   ];
 
-  return {
-    ...appJson,
-    expo: withStartupAssets({
-      ...appJson.expo,
-      plugins,
-      extra: {
-        ...(appJson.expo.extra || {}),
-        videosdkTokenBaseUrl,
-        videosdkRoomBaseUrl,
-        ...(videosdkTokenPathExplicit !== null
-          ? { videosdkTokenPathExplicit }
+  const baseExpo = withStartupAssets({
+    ...appJson.expo,
+    plugins,
+    ios: {
+      ...(appJson.expo.ios || {}),
+      config: {
+        ...(appJson.expo.ios?.config || {}),
+        ...(googleMapsApiKey ? { googleMapsApiKey } : {}),
+      },
+    },
+    android: {
+      ...(appJson.expo.android || {}),
+      config: {
+        ...(appJson.expo.android?.config || {}),
+        ...(googleMapsApiKey
+          ? { googleMaps: { apiKey: googleMapsApiKey } }
           : {}),
-        ...(videosdkRoomPathExplicit !== null
-          ? { videosdkRoomPathExplicit }
-          : {}),
-        videosdkDebugLogs,
-        ...(passwordRecoveryRedirectUrl
-          ? { passwordRecoveryRedirectUrl }
-          : {}),
-        ...(appleTeamId ? { appleTeamId } : {}),
-        eas: {
-          ...(appJson.expo.extra?.eas || {}),
-          ...(appleTeamId
-            ? {
-                build: {
-                  ...(appJson.expo.extra?.eas?.build || {}),
-                  experimental: {
-                    ios: {
-                      appExtensions: [
-                        {
-                          targetName: BROADCAST_EXTENSION_NAME,
-                          bundleIdentifier: broadcastBundleId,
-                          entitlements: {
-                            "com.apple.security.application-groups": [
-                              iosAppGroupId,
-                            ],
-                          },
+      },
+    },
+    extra: {
+      ...(appJson.expo.extra || {}),
+      videosdkTokenBaseUrl,
+      videosdkRoomBaseUrl,
+      ...(videosdkTokenPathExplicit !== null
+        ? { videosdkTokenPathExplicit }
+        : {}),
+      ...(videosdkRoomPathExplicit !== null
+        ? { videosdkRoomPathExplicit }
+        : {}),
+      videosdkDebugLogs,
+      ...(passwordRecoveryRedirectUrl
+        ? { passwordRecoveryRedirectUrl }
+        : {}),
+      ...(appleTeamId ? { appleTeamId } : {}),
+      ...(googleMapsApiKey ? { googleMapsApiKeyConfigured: true } : {}),
+      eas: {
+        ...(appJson.expo.extra?.eas || {}),
+        ...(appleTeamId
+          ? {
+              build: {
+                ...(appJson.expo.extra?.eas?.build || {}),
+                experimental: {
+                  ios: {
+                    appExtensions: [
+                      {
+                        targetName: BROADCAST_EXTENSION_NAME,
+                        bundleIdentifier: broadcastBundleId,
+                        entitlements: {
+                          "com.apple.security.application-groups": [
+                            iosAppGroupId,
+                          ],
                         },
-                      ],
-                    },
+                      },
+                    ],
                   },
                 },
-              }
-            : {}),
-        },
+              },
+            }
+          : {}),
       },
-    }),
+    },
+  });
+
+  return {
+    ...appJson,
+    expo: baseExpo,
   };
 };

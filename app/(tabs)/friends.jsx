@@ -9,6 +9,7 @@ import { icons, images } from "../../constants";
 import { databases, appwriteConfig } from "../../lib/appwrite";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { useTranslation } from "react-i18next";
+import { Feather } from "@expo/vector-icons";
 
 const Friends = () => {
   const { user: currentUser, isRTL, theme, isDarkMode } = useGlobalContext();
@@ -205,17 +206,55 @@ const Friends = () => {
             imageStyle={{ opacity: isDarkMode ? 0.45 : 0.85 }}
           >
             <View style={{ paddingHorizontal: 20, paddingVertical: 24, flex: 1 }}>
-              <Text
+              <View
                 style={{
-                  fontSize: 24,
-                  fontFamily: 'Poppins-SemiBold',
-                  color: theme.textPrimary,
+                  flexDirection: isRTL ? "row-reverse" : "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
                   marginBottom: 24,
-                  textAlign: isRTL ? 'right' : 'left',
+                  gap: 12,
                 }}
               >
-                {t("community.discoverTitle")}
-              </Text>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontSize: 24,
+                    fontFamily: 'Poppins-SemiBold',
+                    color: theme.textPrimary,
+                    textAlign: isRTL ? 'right' : 'left',
+                  }}
+                >
+                  {t("community.discoverTitle")}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => router.push("/live-map")}
+                  activeOpacity={0.8}
+                  style={{
+                    flexDirection: isRTL ? "row-reverse" : "row",
+                    alignItems: "center",
+                    gap: 8,
+                    backgroundColor: themedColor("rgba(15,23,42,0.75)", "#FFFFFF"),
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    borderRadius: 999,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open live map"
+                >
+                  <Feather name="map-pin" size={16} color={theme.accent} />
+                  <Text
+                    style={{
+                      color: theme.textPrimary,
+                      fontFamily: "Poppins-SemiBold",
+                      fontSize: 13,
+                    }}
+                  >
+                    Live Map
+                  </Text>
+                </TouchableOpacity>
+              </View>
               
               {/* Search Input */}
               <View
