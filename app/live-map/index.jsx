@@ -5,7 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -17,8 +20,8 @@ import {
   View,
 } from "react-native";
 import { router } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
 import ClusteredMapView from "react-native-map-clustering";
 import { Feather } from "@expo/vector-icons";
 
@@ -40,12 +43,14 @@ import {
   enableLocationSharingSession,
   syncLocationSharingPrefsFromUser,
 } from "../../lib/locationSharingSession";
-import { checkAndNotifyNearbyFriends } from "../../lib/locationNotifications";
+import { checkAndNotifyNearbyFriends, inviteUserToShareLocation } from "../../lib/locationNotifications";
 import {
   callFriend,
   openFriendChat,
   openFriendProfile,
 } from "../../lib/liveMapActions";
+import { FriendLocationMarker, YouLocationMarker } from "../../components/LiveMapMarkers";
+import { databases, appwriteConfig } from "../../lib/appwrite";
 
 const DEFAULT_REGION = {
   latitude: 40.7231,
@@ -83,6 +88,7 @@ const PRIVACY_OPTIONS = [
 
 export default function LiveMapScreen() {
   const { theme, isDarkMode, user, isRTL } = useGlobalContext();
+  const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
   const watchRef = useRef(null);
   const followingRef = useRef(true);
@@ -107,6 +113,12 @@ export default function LiveMapScreen() {
   const [statusNote, setStatusNote] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [actionFriend, setActionFriend] = useState(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteCandidates, setInviteCandidates] = useState([]);
+  const [inviteBusyId, setInviteBusyId] = useState("");
+  const [inviteNote, setInviteNote] = useState("");
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const mapProvider = Platform.OS === "android" ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
   const mapStyle = useMemo(() => (isDarkMode ? DARK_MAP_STYLE : []), [isDarkMode]);
@@ -134,6 +146,22 @@ export default function LiveMapScreen() {
   useEffect(() => {
     allowedRef.current = allowedViewerIds;
   }, [allowedViewerIds]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const onShow = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e?.endCoordinates?.height || 0);
+    });
+    const onHide = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+      setSearchFocused(false);
+    });
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -370,6 +398,71 @@ export default function LiveMapScreen() {
     [user?.$id]
   );
 
+  const openInviteSheet = useCallback(async () => {
+    if (!user?.$id) return;
+    setInviteOpen(true);
+    setInviteNote("");
+    try {
+      const following = Array.isArray(user.following) ? user.following.map(String) : [];
+      const followers = Array.isArray(user.followers) ? user.followers.map(String) : [];
+      const ids = [...new Set([...following, ...followers])].filter(
+        (id) => id && id !== String(user.$id)
+      );
+      const sharingIds = new Set(friendsOnMap.map((f) => String(f.userId)));
+      const rows = await Promise.all(
+        ids.slice(0, 80).map(async (id) => {
+          try {
+            const u = await databases.getDocument(
+              appwriteConfig.databaseId,
+              appwriteConfig.userCollectionId,
+              id
+            );
+            return {
+              $id: u.$id,
+              username: u.username || id,
+              avatar: u.avatar || "",
+              alreadySharing: sharingIds.has(String(id)),
+              isMutual: following.includes(id) && followers.includes(id),
+            };
+          } catch {
+            return {
+              $id: id,
+              username: id,
+              avatar: "",
+              alreadySharing: sharingIds.has(String(id)),
+              isMutual: following.includes(id) && followers.includes(id),
+            };
+          }
+        })
+      );
+      rows.sort((a, b) => {
+        if (a.isMutual !== b.isMutual) return a.isMutual ? -1 : 1;
+        return String(a.username).localeCompare(String(b.username));
+      });
+      setInviteCandidates(rows);
+    } catch (e) {
+      setInviteNote(e?.message || "Could not load people to invite");
+      setInviteCandidates([]);
+    }
+  }, [friendsOnMap, user]);
+
+  const sendLocationInvite = useCallback(
+    async (target) => {
+      if (!user?.$id || !target?.$id) return;
+      setInviteBusyId(target.$id);
+      setInviteNote("");
+      try {
+        await inviteUserToShareLocation({ fromUser: user, toUserId: target.$id });
+        setInviteNote(`Invite sent to ${target.username}`);
+      } catch (e) {
+        setInviteNote(e?.message || "Invite failed");
+      } finally {
+        setInviteBusyId("");
+      }
+    },
+    [user]
+  );
+
   const applyPrivacyChoice = useCallback(
     async (mode) => {
       if (!user?.$id) return;
@@ -530,70 +623,20 @@ export default function LiveMapScreen() {
         clusterFontFamily="Poppins-SemiBold"
       >
         {friendsOnMap.map((friend) => (
-          <Marker
+          <FriendLocationMarker
             key={friend.$id || friend.userId}
-            coordinate={{
-              latitude: friend.latitude,
-              longitude: friend.longitude,
-            }}
-            title={friend.username}
-            description={`${friend.freshness?.label || ""}${
-              friend.placeLabel ? ` · ${friend.placeLabel}` : ""
-            }`}
+            friend={friend}
+            borderColor={theme.border}
+            labelColor="#0F172A"
             onPress={() => openFriendActions(friend)}
-            tracksViewChanges={false}
-          >
-            <View style={styles.markerWrap}>
-              <View
-                style={[
-                  styles.markerRing,
-                  {
-                    borderColor: friend.freshness?.isLive ? "#22C55E" : theme.border,
-                  },
-                ]}
-              >
-                <Image
-                  source={
-                    friend.avatar
-                      ? { uri: friend.avatar }
-                      : images.profile
-                  }
-                  style={styles.markerAvatar}
-                />
-              </View>
-              <Text
-                style={[styles.markerLabel, { color: theme.textPrimary }]}
-                numberOfLines={1}
-              >
-                {friend.username} {friend.freshness?.label || ""}
-              </Text>
-            </View>
-          </Marker>
+          />
         ))}
 
-        {coords ? (
-          <Marker
-            coordinate={coords}
-            title={user?.username || "You"}
-            description={placeLabel || "You · Now"}
-            tracksViewChanges={false}
-            cluster={false}
-          >
-            <View style={styles.markerWrap}>
-              <View style={[styles.markerRing, styles.youRing]}>
-                <Image
-                  source={
-                    user?.avatar ? { uri: user.avatar } : images.profile
-                  }
-                  style={styles.markerAvatar}
-                />
-              </View>
-              <Text style={[styles.markerLabel, { color: theme.textPrimary }]}>
-                You · Now
-              </Text>
-            </View>
-          </Marker>
-        ) : null}
+        <YouLocationMarker
+          coordinate={coords}
+          avatar={user?.avatar}
+          labelColor="#0F172A"
+        />
       </ClusteredMapView>
 
       <SafeAreaView pointerEvents="box-none" style={styles.overlay}>
@@ -636,7 +679,23 @@ export default function LiveMapScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.bottomArea} pointerEvents="box-none">
+        <KeyboardAvoidingView
+          pointerEvents="box-none"
+          style={styles.bottomArea}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={Platform.OS === "ios" ? Math.max(insets.bottom, 8) : 0}
+        >
+          <View
+            pointerEvents="box-none"
+            style={{
+              paddingBottom:
+                Platform.OS === "android"
+                  ? Math.max(keyboardHeight - insets.bottom, 0)
+                  : keyboardHeight > 0
+                    ? 8
+                    : 0,
+            }}
+          >
           {loading ? (
             <View style={[styles.sheet, { backgroundColor: theme.surface }]}>
               <ActivityIndicator color={theme.accent} />
@@ -653,7 +712,19 @@ export default function LiveMapScreen() {
           ) : null}
 
           {!loading && !error ? (
-            <View style={[styles.sheet, { backgroundColor: theme.surface }]}>
+            <View
+              style={[
+                styles.sheet,
+                {
+                  backgroundColor: isDarkMode ? "#0F172A" : "#FFFFFF",
+                  borderColor: theme.border,
+                  borderWidth: 1,
+                  maxHeight: searchFocused || keyboardHeight > 0 ? 280 : undefined,
+                },
+              ]}
+            >
+              {!(searchFocused || keyboardHeight > 0) ? (
+                <>
               <View style={styles.sheetHeader}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.youTitle, { color: theme.textPrimary }]}>
@@ -697,43 +768,71 @@ export default function LiveMapScreen() {
                 </TouchableOpacity>
               </View>
 
+              <View style={styles.inviteRow}>
+                <TouchableOpacity
+                  onPress={openInviteSheet}
+                  style={[
+                    styles.inviteBtn,
+                    {
+                      backgroundColor: theme.accentSoft || "rgba(255,156,1,0.18)",
+                      borderColor: theme.accent,
+                    },
+                  ]}
+                >
+                  <Feather name="user-plus" size={16} color={theme.accent} />
+                  <Text
+                    style={{
+                      color: theme.textPrimary,
+                      fontFamily: "Poppins-SemiBold",
+                      fontSize: 13,
+                    }}
+                  >
+                    Invite to share
+                  </Text>
+                </TouchableOpacity>
+              </View>
+                </>
+              ) : null}
+
+              <View
+                style={[
+                  styles.searchRow,
+                  {
+                    backgroundColor: isDarkMode ? "#1E293B" : "#F1F5F9",
+                    borderColor: theme.border,
+                  },
+                ]}
+              >
+                <Feather name="search" size={16} color={theme.textMuted} />
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="Search friends on map..."
+                  placeholderTextColor={theme.inputPlaceholder || theme.textMuted}
+                  style={[styles.searchInput, { color: theme.textPrimary }]}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  blurOnSubmit
+                  returnKeyType="search"
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
+                />
+                {searchQuery ? (
+                  <TouchableOpacity onPress={() => setSearchQuery("")}>
+                    <Feather name="x" size={16} color={theme.textMuted} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
               <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
                 Friends on map ({filteredFriends.length}
                 {searchQuery.trim() ? ` / ${friendsOnMap.length}` : ""})
               </Text>
 
-              {friendsOnMap.length > 0 ? (
-                <View
-                  style={[
-                    styles.searchRow,
-                    {
-                      backgroundColor: theme.surfaceMuted,
-                      borderColor: theme.border,
-                    },
-                  ]}
-                >
-                  <Feather name="search" size={16} color={theme.textMuted} />
-                  <TextInput
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    placeholder="Search for friends..."
-                    placeholderTextColor={theme.inputPlaceholder || theme.textMuted}
-                    style={[styles.searchInput, { color: theme.textPrimary }]}
-                    autoCorrect={false}
-                    autoCapitalize="none"
-                  />
-                  {searchQuery ? (
-                    <TouchableOpacity onPress={() => setSearchQuery("")}>
-                      <Feather name="x" size={16} color={theme.textMuted} />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              ) : null}
-
               {friendsOnMap.length === 0 ? (
                 <Text style={[styles.sheetHint, { color: theme.textMuted }]}>
-                  Mutual friends who are sharing will appear here. Tap a pin for
-                  profile, message, or call.
+                  No one is sharing yet. Tap Invite to share, or follow each other
+                  and both turn Sharing on.
                 </Text>
               ) : filteredFriends.length === 0 ? (
                 <Text style={[styles.sheetHint, { color: theme.textMuted }]}>
@@ -741,15 +840,19 @@ export default function LiveMapScreen() {
                 </Text>
               ) : (
                 <ScrollView
-                  style={{ maxHeight: 180 }}
+                  style={{ maxHeight: searchFocused || keyboardHeight > 0 ? 120 : 180 }}
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
                 >
                   {filteredFriends.map((friend) => (
                     <TouchableOpacity
                       key={friend.userId}
                       style={styles.friendRow}
-                      onPress={() => openFriendActions(friend)}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        openFriendActions(friend);
+                      }}
                     >
                       <Image
                         source={
@@ -786,7 +889,8 @@ export default function LiveMapScreen() {
               )}
             </View>
           ) : null}
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
 
       <Modal visible={settingsOpen} transparent animationType="fade">
@@ -971,6 +1075,132 @@ export default function LiveMapScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal
+        visible={inviteOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setInviteOpen(false)}
+      >
+        <View style={styles.inviteModalRoot}>
+          <TouchableOpacity
+            style={styles.inviteModalDismiss}
+            activeOpacity={1}
+            onPress={() => setInviteOpen(false)}
+          />
+          <View
+            style={[
+              styles.inviteSheet,
+              { backgroundColor: isDarkMode ? "#0F172A" : "#FFFFFF" },
+            ]}
+          >
+            <View style={styles.inviteHeader}>
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: theme.textPrimary, flex: 1, marginBottom: 0 },
+                ]}
+              >
+                Invite to share location
+              </Text>
+              <TouchableOpacity
+                onPress={() => setInviteOpen(false)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={[
+                  styles.roundBtn,
+                  {
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: theme.surfaceMuted,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Close invite"
+              >
+                <Feather name="x" size={18} color={theme.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.sheetHint, { color: theme.textMuted, marginBottom: 8 }]}>
+              Sends a notification asking them to open Live Map and turn Sharing
+              on. Best results when you follow each other.
+            </Text>
+            {inviteNote ? (
+              <Text style={{ color: theme.accent, marginBottom: 8 }}>{inviteNote}</Text>
+            ) : null}
+
+            <FlatList
+              data={inviteCandidates}
+              keyExtractor={(item) => String(item.$id)}
+              style={styles.inviteList}
+              contentContainerStyle={styles.inviteListContent}
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+              bounces
+              ListEmptyComponent={
+                <Text style={{ color: theme.textSecondary, paddingVertical: 20 }}>
+                  Follow people from Discover / Friends first, then invite them
+                  here.
+                </Text>
+              }
+              renderItem={({ item: person }) => (
+                <View style={styles.friendRow}>
+                  <Image
+                    source={
+                      person.avatar ? { uri: person.avatar } : images.profile
+                    }
+                    style={styles.friendAvatar}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        color: theme.textPrimary,
+                        fontFamily: "Poppins-SemiBold",
+                      }}
+                    >
+                      {person.username}
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                      {person.alreadySharing
+                        ? "Already on map"
+                        : person.isMutual
+                          ? "Mutual friend"
+                          : "Following / follower"}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => sendLocationInvite(person)}
+                    disabled={!!inviteBusyId || person.alreadySharing}
+                    style={[
+                      styles.inviteChip,
+                      {
+                        backgroundColor: person.alreadySharing
+                          ? theme.surfaceMuted
+                          : theme.accent,
+                        opacity: inviteBusyId === person.$id ? 0.6 : 1,
+                      },
+                    ]}
+                  >
+                    {inviteBusyId === person.$id ? (
+                      <ActivityIndicator color="#111" size="small" />
+                    ) : (
+                      <Text
+                        style={{
+                          color: person.alreadySharing ? theme.textMuted : "#111",
+                          fontFamily: "Poppins-SemiBold",
+                          fontSize: 12,
+                        }}
+                      >
+                        {person.alreadySharing ? "Sharing" : "Invite"}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1066,6 +1296,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: 2,
   },
+  inviteRow: {
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  inviteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inviteChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minWidth: 72,
+    alignItems: "center",
+  },
+  inviteHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  inviteModalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  inviteModalDismiss: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  inviteSheet: {
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+    maxHeight: "78%",
+    zIndex: 2,
+    elevation: 8,
+  },
+  inviteList: {
+    height: 360,
+  },
+  inviteListContent: {
+    paddingBottom: 24,
+  },
   friendRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1087,28 +1368,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 14,
     padding: 12,
-  },
-  markerWrap: { alignItems: "center", maxWidth: 110 },
-  markerRing: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 3,
-    overflow: "hidden",
-    backgroundColor: "#fff",
-  },
-  youRing: { borderColor: "#22C55E" },
-  markerAvatar: { width: "100%", height: "100%" },
-  markerLabel: {
-    marginTop: 2,
-    fontSize: 11,
-    fontFamily: "Poppins-SemiBold",
-    textAlign: "center",
-    backgroundColor: "rgba(255,255,255,0.88)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    overflow: "hidden",
   },
   modalBackdrop: {
     flex: 1,

@@ -2,7 +2,7 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.1.19",
+    "version": "1.1.20",
     "orientation": "default",
     "icon": "./assets/images/asabicon.png",
     "userInterfaceStyle": "dark",
@@ -34,6 +34,7 @@
         "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication",
         "NSLocationWhenInUseUsageDescription": "ASAB uses your location to show you on the friends live map and share your location with people you choose.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "ASAB uses your location in the background so friends can see live updates when you enable location sharing.",
+        "NSLocationAlwaysUsageDescription": "ASAB uses your location in the background so friends can see live updates when you enable location sharing.",
         "UIBackgroundModes": [
           "audio",
           "voip",
