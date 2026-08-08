@@ -10,32 +10,22 @@ import { AppState, Image, Platform, View } from 'react-native';
 import { VideoView, useVideoPlayer, isPictureInPictureSupported } from 'expo-video';
 import { buildFeedVideoSource } from '../lib/feedVideoSource';
 
-function configurePlayerForPiP(player, { isLooping, isMuted, enablePiP }) {
+function configurePlayer(player, { isLooping, isMuted }) {
   player.loop = isLooping;
   player.muted = isMuted;
   player.timeUpdateEventInterval = 0.5;
+  // Never keep feed audio alive after the app is backgrounded/closed unless
+  // we are actively inside a PiP session (set only in onPictureInPictureStart).
+  player.staysActiveInBackground = false;
   if (Platform.OS === 'ios') {
     player.bufferOptions = {
       preferredForwardBufferDuration: 2,
       waitsToMinimizeStalling: false,
     };
-  }
-  if (enablePiP) {
-    player.staysActiveInBackground = true;
-    if (Platform.OS === 'ios') {
-      // mixWithOthers keeps feed PiP from blocking WebRTC live / calls on go-live.
-      player.audioMixingMode = 'mixWithOthers';
-      player.showNowPlayingNotification = false;
-    }
-  } else {
-    player.staysActiveInBackground = false;
-    if (Platform.OS === 'ios') {
-      player.showNowPlayingNotification = false;
-    }
+    player.audioMixingMode = 'mixWithOthers';
+    player.showNowPlayingNotification = false;
   }
 }
-
-const IOS_PIP_RETRY_DELAYS_MS = [0, 200, 500, 1000];
 
 const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
   {
@@ -45,7 +35,8 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     loadSource = true,
     isLooping = true,
     isMuted = false,
-    enablePiP = true,
+    /** Kept for API compatibility; feed no longer auto-PiPs (caused ghost audio). */
+    enablePiP = false,
     onPlaybackUpdate,
     onReady,
     onError,
@@ -56,98 +47,65 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
   const isInPipRef = useRef(false);
   const shouldPlayRef = useRef(shouldPlay);
   const appStateRef = useRef(AppState.currentState);
-  const pipEligibleRef = useRef(false);
-  const pipRetryTimersRef = useRef([]);
   const [showPoster, setShowPoster] = useState(Boolean(posterUri));
 
   const player = useVideoPlayer(null, (instance) => {
-    configurePlayerForPiP(instance, { isLooping, isMuted, enablePiP });
+    configurePlayer(instance, { isLooping, isMuted });
   });
 
-  const clearPipRetries = useCallback(() => {
-    pipRetryTimersRef.current.forEach(clearTimeout);
-    pipRetryTimersRef.current = [];
-  }, []);
-
-  const updatePipEligibility = useCallback(() => {
-    pipEligibleRef.current =
-      enablePiP && (shouldPlayRef.current || player.playing);
-  }, [enablePiP, player]);
+  const hardStop = useCallback(() => {
+    isInPipRef.current = false;
+    try {
+      player.staysActiveInBackground = false;
+    } catch (_) {}
+    if (Platform.OS === 'ios') {
+      try {
+        player.showNowPlayingNotification = false;
+      } catch (_) {}
+    }
+    try {
+      player.pause();
+    } catch (_) {}
+    try {
+      player.muted = true;
+    } catch (_) {}
+    try {
+      videoViewRef.current?.stopPictureInPicture?.().catch(() => {});
+    } catch (_) {}
+  }, [player]);
 
   useEffect(() => {
     shouldPlayRef.current = shouldPlay;
-    updatePipEligibility();
-  }, [shouldPlay, updatePipEligibility]);
+  }, [shouldPlay]);
 
-  useEffect(() => {
-    if (!player || !enablePiP) return undefined;
-    updatePipEligibility();
-    const subscription = player.addListener('playingChange', () => {
-      updatePipEligibility();
-    });
-    return () => subscription.remove();
-  }, [player, enablePiP, updatePipEligibility]);
-
-  const requestPictureInPicture = useCallback(() => {
-    if (!enablePiP || isInPipRef.current) return;
-    if (!pipEligibleRef.current && !player.playing) return;
-    if (Platform.OS === 'ios' && !isPictureInPictureSupported()) return;
-
-    try {
-      player.play();
-    } catch (_) {}
-
-    clearPipRetries();
-
-    const delays =
-      Platform.OS === 'ios'
-        ? IOS_PIP_RETRY_DELAYS_MS
-        : Platform.OS === 'android' && Platform.Version < 31
-          ? [0]
-          : [];
-
-    delays.forEach((delay) => {
-      const timerId = setTimeout(() => {
-        if (isInPipRef.current) return;
-        if (appStateRef.current === 'active') return;
-        if (!pipEligibleRef.current && !player.playing) return;
-        videoViewRef.current?.startPictureInPicture?.().catch(() => {});
-      }, delay);
-      pipRetryTimersRef.current.push(timerId);
-    });
-  }, [clearPipRetries, enablePiP, player]);
-
+  // Leave / close app → always stop feed audio (no ghost playback).
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       const previousState = appStateRef.current;
       appStateRef.current = nextState;
 
-      if (!enablePiP) return;
-
       if (
         (nextState === 'inactive' || nextState === 'background') &&
         previousState === 'active'
       ) {
-        if (!pipEligibleRef.current && !player.playing) return;
+        hardStop();
+        return;
+      }
 
-        // iOS: auto PiP often needs an explicit start; inactive fires before background.
-        if (Platform.OS === 'ios') {
-          requestPictureInPicture();
-          return;
-        }
-
-        // Android 11 and below do not auto-enter PiP.
-        if (Platform.OS === 'android' && Platform.Version < 31) {
-          requestPictureInPicture();
+      if (nextState === 'active' && previousState !== 'active') {
+        try {
+          player.muted = isMuted;
+        } catch (_) {}
+        if (shouldPlayRef.current) {
+          try {
+            player.play();
+          } catch (_) {}
         }
       }
     });
 
-    return () => {
-      subscription.remove();
-      clearPipRetries();
-    };
-  }, [clearPipRetries, enablePiP, player, requestPictureInPicture]);
+    return () => subscription.remove();
+  }, [hardStop, player, isMuted]);
 
   useImperativeHandle(
     ref,
@@ -159,9 +117,7 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
       },
       pauseAsync: async () => {
         try {
-          if (!isInPipRef.current) {
-            player.pause();
-          }
+          player.pause();
         } catch (_) {}
       },
       setPositionAsync: async (millis) => {
@@ -179,11 +135,13 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
   );
 
   const tryPlay = useCallback(() => {
-    if (!shouldPlayRef.current && !isInPipRef.current) return;
+    if (!shouldPlayRef.current) return;
+    if (appStateRef.current !== 'active') return;
     try {
+      player.muted = isMuted;
       player.play();
     } catch (_) {}
-  }, [player]);
+  }, [player, isMuted]);
 
   useEffect(() => {
     if (!videoUrl || !loadSource) return;
@@ -194,30 +152,21 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
   }, [videoUrl, player, posterUri, loadSource]);
 
   useEffect(() => {
-    configurePlayerForPiP(player, { isLooping, isMuted, enablePiP });
-  }, [isLooping, isMuted, enablePiP, player]);
+    configurePlayer(player, { isLooping, isMuted });
+  }, [isLooping, isMuted, player]);
 
   useEffect(() => {
-    if (!player) return undefined;
+    if (!player) return;
 
-    if (shouldPlay || isInPipRef.current) {
+    if (shouldPlay && appStateRef.current === 'active') {
       tryPlay();
-      return undefined;
-    }
-
-    // Let native PiP keep playing while the app is in the background.
-    if (enablePiP && appStateRef.current !== 'active') {
-      return undefined;
+      return;
     }
 
     try {
       player.pause();
-      if (enablePiP && !isInPipRef.current) {
-        videoViewRef.current?.stopPictureInPicture?.().catch(() => {});
-      }
     } catch (_) {}
-    return undefined;
-  }, [shouldPlay, player, enablePiP, tryPlay]);
+  }, [shouldPlay, player, tryPlay]);
 
   const handlePlaybackUpdate = useCallback(
     (payload) => {
@@ -275,63 +224,36 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     return () => subscription.remove();
   }, [player, handleError]);
 
-  // Hard-stop when this feed item unmounts (scrolled away / left home) so audio cannot linger.
+  // Hard-stop when this feed item unmounts so audio cannot linger.
   useEffect(() => {
     return () => {
-      clearPipRetries();
-      isInPipRef.current = false;
-      try {
-        player.staysActiveInBackground = false;
-        player.showNowPlayingNotification = false;
-      } catch (_) {}
-      try {
-        player.pause();
-      } catch (_) {}
-      try {
-        videoViewRef.current?.stopPictureInPicture?.().catch(() => {});
-      } catch (_) {}
+      hardStop();
     };
-  }, [player, clearPipRetries]);
+  }, [hardStop]);
 
   const handlePictureInPictureStart = () => {
+    // Manual / system PiP only — keep audio alive while the tiny window is open.
     isInPipRef.current = true;
-    clearPipRetries();
     try {
       player.staysActiveInBackground = true;
-    } catch (_) {}
-    if (Platform.OS === 'ios') {
-      try {
-        player.showNowPlayingNotification = true;
-      } catch (_) {}
-    }
-    try {
-      player.play();
     } catch (_) {}
   };
 
   const handlePictureInPictureStop = () => {
     isInPipRef.current = false;
-    if (Platform.OS === 'ios') {
-      try {
-        player.showNowPlayingNotification = false;
-      } catch (_) {}
-    }
-    // Closing the small PiP window must stop audio when the app is not on that video.
-    // Previously we kept playing if shouldPlay was still true while backgrounded → ghost audio.
+    try {
+      player.staysActiveInBackground = false;
+      player.showNowPlayingNotification = false;
+    } catch (_) {}
     const appActive = appStateRef.current === 'active';
     if (appActive && shouldPlayRef.current) {
       try {
+        player.muted = isMuted;
         player.play();
       } catch (_) {}
       return;
     }
-    try {
-      player.pause();
-      player.staysActiveInBackground = false;
-    } catch (_) {}
-    try {
-      videoViewRef.current?.stopPictureInPicture?.().catch(() => {});
-    } catch (_) {}
+    hardStop();
   };
 
   return (
@@ -342,8 +264,8 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
         style={{ width: '100%', height: '100%' }}
         contentFit="contain"
         nativeControls={false}
-        allowsPictureInPicture={enablePiP}
-        startsPictureInPictureAutomatically={enablePiP}
+        allowsPictureInPicture={enablePiP && isPictureInPictureSupported()}
+        startsPictureInPictureAutomatically={false}
         fullscreenOptions={{ enable: true }}
         onPictureInPictureStart={handlePictureInPictureStart}
         onPictureInPictureStop={handlePictureInPictureStop}

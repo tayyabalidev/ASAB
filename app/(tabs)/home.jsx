@@ -1106,7 +1106,7 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
                 shouldPlay={play && isVisible && isHomeFocused}
                 isLooping
                 isMuted={false}
-                enablePiP
+                enablePiP={false}
                 onError={() => {
                   if (videoSourceIndex < videoPlaybackCandidates.length - 1) {
                     setVideoSourceIndex((prev) => prev + 1);
