@@ -18,6 +18,7 @@ import { EmptyState, VideoProgressBar } from "../../../components";
 import CallButton from "../../../components/CallButton";
 import { toggleFollowUser, getFollowers, getUserLikesCount, getProfileLikers, toggleProfileLike, isProfileLiked, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLike, isPostLiked, getLikeCount } from "../../../lib/appwrite";
 import { toggleCreatorNotificationSubscription, isUserSubscribedToCreator } from "../../../lib/creatorSubscriptions";
+import { reportContent, blockUser, REPORT_REASONS } from "../../../lib/moderation";
 import { images } from "../../../constants";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../../lib/mediaType";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../../lib/muxPlayback";
@@ -1431,14 +1432,54 @@ const UserProfile = () => {
                               {
                                 text: t('profile.actions.reportProfile'),
                                 onPress: () => {
-                                  Alert.alert(t('profile.actions.reportSuccessTitle'), t('profile.actions.reportSuccessMessage'));
+                                  Alert.alert(
+                                    t('profile.actions.reportProfile'),
+                                    'ASAB has zero tolerance for objectionable content and abusive users. Why are you reporting this profile?',
+                                    [
+                                      ...REPORT_REASONS.slice(0, 3).map((reason) => ({
+                                        text: reason,
+                                        onPress: async () => {
+                                          await reportContent({
+                                            type: 'profile',
+                                            targetId: profileUser.$id,
+                                            targetUserId: profileUser.$id,
+                                            reason,
+                                            reporterId: currentUser?.$id,
+                                          });
+                                          Alert.alert(
+                                            t('profile.actions.reportSuccessTitle'),
+                                            t('profile.actions.reportSuccessMessage')
+                                          );
+                                        },
+                                      })),
+                                      { text: t('profile.actions.cancel'), style: 'cancel' },
+                                    ]
+                                  );
                                 },
                                 style: "destructive",
                               },
                               {
                                 text: t('profile.actions.blockUser'),
                                 onPress: () => {
-                                  Alert.alert(t('profile.actions.blockSuccessTitle'), t('profile.actions.blockSuccessMessage'));
+                                  Alert.alert(
+                                    t('profile.actions.blockUser'),
+                                    'Blocked users will no longer appear in your feed. You can also report them.',
+                                    [
+                                      { text: t('profile.actions.cancel'), style: 'cancel' },
+                                      {
+                                        text: t('profile.actions.blockUser'),
+                                        style: 'destructive',
+                                        onPress: async () => {
+                                          await blockUser(profileUser.$id);
+                                          Alert.alert(
+                                            t('profile.actions.blockSuccessTitle'),
+                                            t('profile.actions.blockSuccessMessage')
+                                          );
+                                          router.back();
+                                        },
+                                      },
+                                    ]
+                                  );
                                 },
                                 style: "destructive",
                               },

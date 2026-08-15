@@ -9,6 +9,7 @@ import { addBookmark, isVideoBookmarked, incrementShareCount, getVideoPlaybackUr
 import { getPlaybackUriForPost } from "../lib/muxPlayback";
 import { isMuxPlaceholderVideo } from "../lib/mediaType";
 import { useGlobalContext } from "../context/GlobalProvider";
+import { reportContent, REPORT_REASONS } from "../lib/moderation";
 import VideoProgressBar from "./VideoProgressBar";
 
 const VideoCard = ({
@@ -105,14 +106,30 @@ const VideoCard = ({
   };
 
   const reportVideo = async () => {
-    try {
-      // TODO: Implement report functionality with Appwrite
-      
-      Alert.alert("Success", "Video reported successfully!");
-    } catch (error) {
-      
-      Alert.alert("Error", "Failed to report video");
+    if (!user?.$id) {
+      Alert.alert("Error", "Please sign in to report content.");
+      return;
     }
+    Alert.alert(
+      "Report content",
+      "ASAB has zero tolerance for objectionable content. Why are you reporting this?",
+      [
+        ...REPORT_REASONS.slice(0, 3).map((reason) => ({
+          text: reason,
+          onPress: async () => {
+            await reportContent({
+              type: "video",
+              targetId: videoId,
+              targetUserId: creatorId,
+              reason,
+              reporterId: user.$id,
+            });
+            Alert.alert("Report submitted", "Thanks. We will review this content.");
+          },
+        })),
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
   };
 
   const handleMenuPress = () => {

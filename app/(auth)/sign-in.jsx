@@ -16,6 +16,7 @@ import CustomButton from "../../components/CustomButton";
 import { GoogleSignInButton, LanguageSelector } from "../../components";
 import ThemeToggle from "../../components/ThemeToggle";
 import { signIn, getCurrentUser, signInWithFacebook, signInWithGoogle, appwriteConfig, getAccount, getOrCreateFacebookUser, getOrCreateGoogleUser } from "../../lib/appwrite";
+import { acceptTerms } from "../../lib/moderation";
 import { useRouter } from "expo-router";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { useTranslation } from "react-i18next";
@@ -32,6 +33,7 @@ const SignIn = () => {
     email: "",
     password: "",
   });
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   // Reset loading states if user successfully logged in
   React.useEffect(() => {
@@ -82,11 +84,19 @@ const SignIn = () => {
       Alert.alert(t("common.error"), t("auth.fillAllFields"));
       return;
     }
+    if (!agreedToTerms) {
+      Alert.alert(
+        t("common.error"),
+        "You must agree to the Terms of Use (EULA) before signing in. There is no tolerance for objectionable content or abusive users."
+      );
+      return;
+    }
 
     setIsSubmitting(true);
     try {
       const session = await signIn(form.email, form.password);
       const user = await getCurrentUser();
+      await acceptTerms();
       setUser(user);
       setIsLogged(true);
       Alert.alert(t("common.success"), t("auth.signInSuccess"));
@@ -369,6 +379,53 @@ const SignIn = () => {
               </Text>
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            onPress={() => setAgreedToTerms((v) => !v)}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: isRTL ? 'row-reverse' : 'row',
+              alignItems: 'flex-start',
+              marginTop: 20,
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                borderWidth: 2,
+                borderColor: agreedToTerms ? '#FF9C01' : (isDarkMode ? '#64748b' : '#94a3b8'),
+                backgroundColor: agreedToTerms ? '#FF9C01' : 'transparent',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginTop: 2,
+              }}
+            >
+              {agreedToTerms ? (
+                <Text style={{ color: '#111', fontWeight: '800', fontSize: 14 }}>✓</Text>
+              ) : null}
+            </View>
+            <Text
+              style={{
+                flex: 1,
+                color: isDarkMode ? '#cbd5e1' : '#475569',
+                fontSize: 13,
+                lineHeight: 19,
+                textAlign: isRTL ? 'right' : 'left',
+              }}
+            >
+              I agree to the{' '}
+              <Text
+                onPress={() => router.push('/(auth)/terms')}
+                style={{ color: '#FF9C01', fontWeight: '700' }}
+              >
+                Terms of Use (EULA)
+              </Text>
+              . ASAB has zero tolerance for objectionable content and abusive users.
+            </Text>
+          </TouchableOpacity>
 
           <CustomButton
             title={t('auth.signInButton')}

@@ -22,6 +22,7 @@ import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 import { getFilterCSS, getVideoFilterCSS } from "../../lib/filterCss";
 import FeedVideoPlayer from "../../components/FeedVideoPlayer";
 import { normalizeRouteParam } from "../../lib/notificationNavigation";
+import { reportContent, getBlockedUserIds, filterBlockedPosts, getPostCreatorId, REPORT_REASONS } from "../../lib/moderation";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -427,6 +428,37 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
       
       Alert.alert(t("common.error"), t("alerts.bookmarkFailed"));
     }
+  };
+
+  const handleReport = () => {
+    if (!user?.$id) {
+      Alert.alert(t("common.error"), "Please sign in to report content.");
+      return;
+    }
+    const creatorId = getPostCreatorId(item);
+    Alert.alert(
+      "Report content",
+      "ASAB has zero tolerance for objectionable content. Why are you reporting this?",
+      [
+        ...REPORT_REASONS.slice(0, 3).map((reason) => ({
+          text: reason,
+          onPress: async () => {
+            await reportContent({
+              type: item.postType === "photo" ? "photo" : "video",
+              targetId: item.$id,
+              targetUserId: creatorId,
+              reason,
+              reporterId: user.$id,
+            });
+            Alert.alert(
+              "Report submitted",
+              "Thanks. We will review this and may remove the content or ban the account."
+            );
+          },
+        })),
+        { text: t("common.cancel", { defaultValue: "Cancel" }), style: "cancel" },
+      ]
+    );
   };
 
   const handleShare = async () => {
@@ -1338,6 +1370,23 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
           </View>
           <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(shareCount)}</Text>
         </TouchableOpacity>
+
+        {/* Report Button */}
+        <TouchableOpacity onPress={handleReport} style={{ marginBottom: 20, alignItems: 'center' }}>
+          <View style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginBottom: 5
+          }}>
+            <Text style={{ color: theme.textPrimary, fontSize: 22 }}>⚑</Text>
+          </View>
+          <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+            Report
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Bottom Left Video/Photo Information */}
@@ -1829,6 +1878,7 @@ const Home = () => {
   const [notificationFocusPost, setNotificationFocusPost] = useState(null);
   const handledFocusPostRef = useRef(null);
   const scrolledFocusPostRef = useRef(null);
+  const [blockedUserIds, setBlockedUserIds] = useState([]);
   
   const themedColor = useCallback(
     (darkValue, lightValue) => (isDarkMode ? darkValue : lightValue),
@@ -1869,14 +1919,18 @@ const Home = () => {
       ...(forYouPhotos || []).map(post => ({ ...post, postType: 'photo' }))
     ];
     // Sort by creation date (newest first)
-    return allPosts.sort((a, b) => {
+    const sorted = allPosts.sort((a, b) => {
       const dateA = new Date(a.$createdAt || 0);
       const dateB = new Date(b.$createdAt || 0);
       return dateB - dateA;
     });
-  }, [forYouPosts, forYouPhotos]);
+    return filterBlockedPosts(sorted, blockedUserIds);
+  }, [forYouPosts, forYouPhotos, blockedUserIds]);
   
-  const combinedLatestPosts = useMemo(() => trendingVideos || [], [trendingVideos]);
+  const combinedLatestPosts = useMemo(
+    () => filterBlockedPosts(trendingVideos || [], blockedUserIds),
+    [trendingVideos, blockedUserIds]
+  );
   const trendingCarouselPosts = combinedLatestPosts;
 
   useEffect(() => {
@@ -2008,7 +2062,9 @@ const Home = () => {
 
  
   
-  const posts = selectedTab === 'forYou' ? combinedForYouPosts : followingPosts;
+  const posts = selectedTab === 'forYou'
+    ? combinedForYouPosts
+    : filterBlockedPosts(followingPosts, blockedUserIds);
   const refetch = selectedTab === 'forYou' ? async () => {
     await refetchForYou();
     await refetchForYouPhotos();
@@ -2232,6 +2288,7 @@ const Home = () => {
   useFocusEffect(
     useCallback(() => {
       setIsHomeFocused(true);
+      getBlockedUserIds().then(setBlockedUserIds).catch(() => {});
       // When opening a specific post from search, skip restoring the old scroll (top).
       if (focusPostId) {
         return () => {

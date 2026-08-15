@@ -14,6 +14,7 @@ import { usePushNotifications } from '../hooks/usePushNotifications';
 import { NotificationProvider } from '../context/NotificationProvider';
 import { MessageProvider } from '../context/MessageProvider';
 import IncomingCallHandler from '../components/IncomingCallHandler';
+import TermsGate from '../components/TermsGate';
 import { canLoadVideoSdkNative } from '../lib/videosdkNativeGate';
 // Define background location task at startup (Step 5).
 import '../lib/locationBackground';
@@ -438,6 +439,7 @@ export default function RootLayout() {
         <BadgeNotificationHandler />
         <PushNotificationHandler />
         <IncomingCallHandler />
+        <TermsGate />
         <Stack
           screenOptions={{
             headerShown: false, // Hide all headers by default

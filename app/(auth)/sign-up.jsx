@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { images } from "../../constants";
 import { createUser, signInWithGoogle, signInWithFacebook, appwriteConfig, getAccount, getOrCreateFacebookUser, getOrCreateGoogleUser } from "../../lib/appwrite";
+import { acceptTerms } from "../../lib/moderation";
 import { CustomButton, FormField, GoogleSignInButton, ThemeToggle, LanguageSelector } from "../../components";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
@@ -25,6 +26,7 @@ const SignUp = () => {
     password: "",
     birthday: "",
   });
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   const normalizeBirthdayInput = (value = "") => {
     const digitsOnly = value.replace(/\D/g, "").slice(0, 8);
@@ -134,6 +136,13 @@ const SignUp = () => {
       Alert.alert(t("common.error"), `You must be at least ${minimumAge} years old to sign up`);
       return;
     }
+    if (!agreedToTerms) {
+      Alert.alert(
+        t("common.error"),
+        "You must agree to the Terms of Use (EULA) before creating an account. There is no tolerance for objectionable content or abusive users."
+      );
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -143,6 +152,7 @@ const SignUp = () => {
         form.username,
         toBirthdayIso(parsedBirthday)
       );
+      await acceptTerms();
       setUser(result);
       setIsLogged(true);
       router.replace("/(tabs)/home");
@@ -363,6 +373,53 @@ const SignUp = () => {
             keyboardType="number-pad"
             placeholder="MM/DD/YYYY"
           />
+
+          <TouchableOpacity
+            onPress={() => setAgreedToTerms((v) => !v)}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: isRTL ? 'row-reverse' : 'row',
+              alignItems: 'flex-start',
+              marginTop: 20,
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                borderWidth: 2,
+                borderColor: agreedToTerms ? '#FF9C01' : (isDarkMode ? '#64748b' : '#94a3b8'),
+                backgroundColor: agreedToTerms ? '#FF9C01' : 'transparent',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginTop: 2,
+              }}
+            >
+              {agreedToTerms ? (
+                <Text style={{ color: '#111', fontWeight: '800', fontSize: 14 }}>✓</Text>
+              ) : null}
+            </View>
+            <Text
+              style={{
+                flex: 1,
+                color: isDarkMode ? '#cbd5e1' : '#475569',
+                fontSize: 13,
+                lineHeight: 19,
+                textAlign: isRTL ? 'right' : 'left',
+              }}
+            >
+              I agree to the{' '}
+              <Text
+                onPress={() => router.push('/(auth)/terms')}
+                style={{ color: '#FF9C01', fontWeight: '700' }}
+              >
+                Terms of Use (EULA)
+              </Text>
+              . ASAB has zero tolerance for objectionable content and abusive users.
+            </Text>
+          </TouchableOpacity>
 
           <CustomButton
             title={t('auth.signUpButton')}

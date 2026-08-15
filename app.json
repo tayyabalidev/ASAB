@@ -2,7 +2,7 @@
   "expo": {
     "name": "ASAB",
     "slug": "asab",
-    "version": "1.1.20",
+    "version": "1.1.22",
     "orientation": "default",
     "icon": "./assets/images/asabicon.png",
     "userInterfaceStyle": "dark",
@@ -28,10 +28,11 @@
             ]
           }
         ],
-        "NSCameraUsageDescription": "This app needs access to camera for video calls and recording videos",
-        "NSMicrophoneUsageDescription": "This app needs access to microphone for audio calls and video recording",
-        "NSPhotoLibraryUsageDescription": "This app needs access to photo library to select and upload videos",
-        "NSLocalNetworkUsageDescription": "This app needs access to local network for real-time communication",
+        "NSCameraUsageDescription": "ASAB uses the camera so you can record a video to post, take a profile photo, or join a live video call.",
+        "NSMicrophoneUsageDescription": "ASAB uses the microphone so you can record audio on videos you upload, speak in live streams, and talk during voice or video calls.",
+        "NSPhotoLibraryUsageDescription": "ASAB uses your photo library so you can choose a profile picture on Edit Profile, pick a photo or video to post, or attach an image in chat. For example, you can select a photo from Recents to set as your avatar.",
+        "NSPhotoLibraryAddUsageDescription": "ASAB may save a photo or video you create in the app, such as a recorded clip, to your photo library if you choose to keep it.",
+        "NSLocalNetworkUsageDescription": "ASAB uses the local network to connect live video calls and livestreams on the same Wi-Fi network.",
         "NSLocationWhenInUseUsageDescription": "ASAB uses your location to show you on the friends live map and share your location with people you choose.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "ASAB uses your location in the background so friends can see live updates when you enable location sharing.",
         "NSLocationAlwaysUsageDescription": "ASAB uses your location in the background so friends can see live updates when you enable location sharing.",
@@ -133,7 +134,21 @@
       "./plugins/withAndroidScreenSharePip",
       "./plugins/withIosHostCameraPip",
       "expo-web-browser",
-      "expo-camera",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ASAB uses your photo library so you can choose a profile picture on Edit Profile, pick a photo or video to post, or attach an image in chat. For example, you can select a photo from Recents to set as your avatar.",
+          "cameraPermission": "ASAB uses the camera so you can record a video to post, take a profile photo, or join a live video call."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "ASAB uses the camera so you can record a video to post, take a profile photo, or join a live video call.",
+          "microphonePermission": "ASAB uses the microphone so you can record audio on videos you upload, speak in live streams, and talk during voice or video calls.",
+          "recordAudioAndroid": true
+        }
+      ],
       [
         "expo-screen-orientation",
         {
@@ -144,8 +159,8 @@
       [
         "@config-plugins/react-native-webrtc",
         {
-          "cameraPermission": "Allow camera access",
-          "microphonePermission": "Allow microphone access"
+          "cameraPermission": "ASAB uses the camera so you can record a video to post, take a profile photo, or join a live video call.",
+          "microphonePermission": "ASAB uses the microphone so you can record audio on videos you upload, speak in live streams, and talk during voice or video calls."
         }
       ],
       [

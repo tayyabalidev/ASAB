@@ -23,7 +23,7 @@ import { router } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
 import ClusteredMapView from "react-native-map-clustering";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialIcons } from "@expo/vector-icons";
 
 import { images } from "../../constants";
 import { useGlobalContext } from "../../context/GlobalProvider";
@@ -49,8 +49,16 @@ import {
   openFriendChat,
   openFriendProfile,
 } from "../../lib/liveMapActions";
-import { FriendLocationMarker, YouLocationMarker } from "../../components/LiveMapMarkers";
+import * as ImagePicker from "expo-image-picker";
+import { FriendLocationMarker, YouLocationMarker, MapMomentMarker } from "../../components/LiveMapMarkers";
 import { databases, appwriteConfig } from "../../lib/appwrite";
+import {
+  createMapMoment,
+  getLikedFriendIds,
+  listMapMoments,
+  toggleFriendLike,
+  toggleMomentLike,
+} from "../../lib/mapMoments";
 
 const DEFAULT_REGION = {
   latitude: 40.7231,
@@ -119,6 +127,10 @@ export default function LiveMapScreen() {
   const [inviteNote, setInviteNote] = useState("");
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [likedFriendIds, setLikedFriendIds] = useState([]);
+  const [mapMoments, setMapMoments] = useState([]);
+  const [postingMoment, setPostingMoment] = useState(false);
+  const [selectedMoment, setSelectedMoment] = useState(null);
 
   const mapProvider = Platform.OS === "android" ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
   const mapStyle = useMemo(() => (isDarkMode ? DARK_MAP_STYLE : []), [isDarkMode]);
@@ -587,6 +599,91 @@ export default function LiveMapScreen() {
     }
   }, [allowedViewerIds, isSharing, privacyMode, user]);
 
+  const likedFriendSet = useMemo(
+    () => new Set(likedFriendIds.map(String)),
+    [likedFriendIds]
+  );
+
+  const refreshMapSocial = useCallback(async () => {
+    if (!user?.$id) return;
+    try {
+      const [likes, moments] = await Promise.all([
+        getLikedFriendIds(user.$id),
+        listMapMoments({
+          viewerId: user.$id,
+          friendIds: friendsOnMap.map((f) => f.userId),
+        }),
+      ]);
+      setLikedFriendIds(likes);
+      setMapMoments(moments);
+    } catch (_) {
+      /* ignore */
+    }
+  }, [user?.$id, friendsOnMap]);
+
+  useEffect(() => {
+    refreshMapSocial();
+  }, [refreshMapSocial]);
+
+  const handleToggleFriendLike = useCallback(
+    async (friend) => {
+      if (!user?.$id || !friend?.userId) return;
+      const result = await toggleFriendLike(user.$id, friend.userId);
+      setLikedFriendIds(result.ids);
+    },
+    [user?.$id]
+  );
+
+  const handleTakeMapPic = useCallback(async () => {
+    if (!user?.$id) return;
+    const location = lastCoordsRef.current || coords;
+    if (!location) {
+      Alert.alert("Location needed", "Wait for GPS, then take a photo on the map.");
+      return;
+    }
+
+    const cam = await ImagePicker.requestCameraPermissionsAsync();
+    if (!cam.granted) {
+      Alert.alert(
+        "Camera permission",
+        "Allow camera access so you can take a photo to share on the Friends Live Map."
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+
+    setPostingMoment(true);
+    try {
+      const moment = await createMapMoment({
+        user,
+        photoAsset: result.assets[0],
+        latitude: location.latitude,
+        longitude: location.longitude,
+        placeLabel,
+      });
+      setMapMoments((prev) => [moment, ...prev.filter((m) => m.$id !== moment.$id)]);
+      setSelectedMoment(moment);
+    } catch (e) {
+      Alert.alert("Could not post photo", e?.message || "Try again.");
+    } finally {
+      setPostingMoment(false);
+    }
+  }, [coords, placeLabel, user]);
+
+  const handleToggleMomentLike = useCallback(async () => {
+    if (!selectedMoment || !user?.$id) return;
+    const next = await toggleMomentLike({ moment: selectedMoment, userId: user.$id });
+    setSelectedMoment(next);
+    setMapMoments((prev) => prev.map((m) => (m.$id === next.$id ? next : m)));
+  }, [selectedMoment, user?.$id]);
+
   const toggleAllowed = useCallback((friendId) => {
     setAllowedViewerIds((prev) => {
       const id = String(friendId);
@@ -628,7 +725,16 @@ export default function LiveMapScreen() {
             friend={friend}
             borderColor={theme.border}
             labelColor="#0F172A"
+            liked={likedFriendSet.has(String(friend.userId))}
             onPress={() => openFriendActions(friend)}
+          />
+        ))}
+
+        {mapMoments.map((moment) => (
+          <MapMomentMarker
+            key={moment.$id}
+            moment={moment}
+            onPress={() => setSelectedMoment(moment)}
           />
         ))}
 
@@ -676,6 +782,24 @@ export default function LiveMapScreen() {
             style={[styles.roundBtn, { backgroundColor: theme.surface }]}
           >
             <Feather name="crosshair" size={22} color={theme.accent} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleTakeMapPic}
+            disabled={postingMoment || !coords}
+            style={[
+              styles.roundBtn,
+              {
+                backgroundColor: theme.accent,
+                opacity: postingMoment || !coords ? 0.55 : 1,
+              },
+            ]}
+            accessibilityLabel="Take a photo on the map"
+          >
+            {postingMoment ? (
+              <ActivityIndicator color="#111" size="small" />
+            ) : (
+              <Feather name="camera" size={22} color="#111" />
+            )}
           </TouchableOpacity>
         </View>
 
@@ -882,7 +1006,33 @@ export default function LiveMapScreen() {
                           {friend.placeLabel ? ` · ${friend.placeLabel}` : ""}
                         </Text>
                       </View>
-                      <Feather name="more-horizontal" size={18} color={theme.textMuted} />
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e?.stopPropagation?.();
+                          handleToggleFriendLike(friend);
+                        }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        style={styles.likeHit}
+                        accessibilityLabel={
+                          likedFriendSet.has(String(friend.userId))
+                            ? "Unlike friend"
+                            : "Like friend"
+                        }
+                      >
+                        <MaterialIcons
+                          name={
+                            likedFriendSet.has(String(friend.userId))
+                              ? "favorite"
+                              : "favorite-border"
+                          }
+                          size={22}
+                          color={
+                            likedFriendSet.has(String(friend.userId))
+                              ? "#FF4D6D"
+                              : theme.textMuted
+                          }
+                        />
+                      </TouchableOpacity>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -1201,6 +1351,66 @@ export default function LiveMapScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={!!selectedMoment}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedMoment(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setSelectedMoment(null)}>
+          <Pressable
+            style={[styles.momentCard, { backgroundColor: theme.surface }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {selectedMoment?.photoUrl ? (
+              <Image
+                source={{ uri: selectedMoment.photoUrl }}
+                style={styles.momentPreview}
+                resizeMode="cover"
+              />
+            ) : null}
+            <View style={styles.momentMeta}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-SemiBold" }}>
+                  {selectedMoment?.username || "Photo"}
+                </Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                  {selectedMoment?.placeLabel || "On the map"}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={handleToggleMomentLike}
+                style={styles.momentLikeBtn}
+                accessibilityLabel="Like photo"
+              >
+                <MaterialIcons
+                  name={
+                    selectedMoment?.likedBy?.includes(String(user?.$id))
+                      ? "favorite"
+                      : "favorite-border"
+                  }
+                  size={26}
+                  color={
+                    selectedMoment?.likedBy?.includes(String(user?.$id))
+                      ? "#FF4D6D"
+                      : theme.textMuted
+                  }
+                />
+                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                  {selectedMoment?.likeCount || 0}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[styles.modalBtn, { backgroundColor: theme.surfaceMuted }]}
+              onPress={() => setSelectedMoment(null)}
+            >
+              <Text style={{ color: theme.textPrimary }}>Close</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -1354,6 +1564,32 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   friendAvatar: { width: 36, height: 36, borderRadius: 18 },
+  likeHit: {
+    padding: 6,
+  },
+  momentCard: {
+    width: "100%",
+    borderRadius: 18,
+    padding: 12,
+    gap: 10,
+    marginBottom: 24,
+  },
+  momentPreview: {
+    width: "100%",
+    height: 280,
+    borderRadius: 14,
+    backgroundColor: "#111",
+  },
+  momentMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  momentLikeBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 40,
+  },
   actionHeader: {
     flexDirection: "row",
     alignItems: "center",
