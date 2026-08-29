@@ -61,6 +61,10 @@ const getNotificationMessage = (item, t) => {
       return 'posted a new photo';
     case 'call':
       return 'is calling you';
+    case 'location_invite':
+      return 'invited you to share live location';
+    case 'location_share':
+      return 'started sharing their live location';
     default:
       return 'interacted with you';
   }
@@ -326,7 +330,11 @@ const Inbox = () => {
   const subscriptionNotifications = useMemo(
     () =>
       filteredNotifications.filter((n) =>
-        n.type === 'live' || n.type === 'video_post' || n.type === 'photo_post'
+        n.type === 'live' ||
+        n.type === 'video_post' ||
+        n.type === 'photo_post' ||
+        n.type === 'location_invite' ||
+        n.type === 'location_share'
       ),
     [filteredNotifications]
   );
@@ -689,7 +697,9 @@ const Inbox = () => {
             item.type === 'call' ||
             item.type === 'live' ||
             item.type === 'video_post' ||
-            item.type === 'photo_post'
+            item.type === 'photo_post' ||
+            item.type === 'location_invite' ||
+            item.type === 'location_share'
           ) {
             return renderNotificationItem({ item });
           } else {

@@ -19,7 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
 import ClusteredMapView from "react-native-map-clustering";
@@ -33,6 +33,9 @@ import {
 } from "../../lib/locationPermissions";
 import { LOCATION_PRIVACY_MODES } from "../../lib/locationSchema";
 import {
+  addLocationSharePartner,
+  getConnectedUserIds,
+  getLocationSharePartnerIds,
   getMutualFriendIds,
   getMyLocationDocument,
   subscribeVisibleFriendLocations,
@@ -96,6 +99,7 @@ const PRIVACY_OPTIONS = [
 
 export default function LiveMapScreen() {
   const { theme, isDarkMode, user, isRTL } = useGlobalContext();
+  const { partnerId: partnerIdParam } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
   const watchRef = useRef(null);
@@ -135,6 +139,29 @@ export default function LiveMapScreen() {
   const mapProvider = Platform.OS === "android" ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
   const mapStyle = useMemo(() => (isDarkMode ? DARK_MAP_STYLE : []), [isDarkMode]);
   const mutualFriends = useMemo(() => getMutualFriendIds(user), [user]);
+
+  useEffect(() => {
+    const partnerId = Array.isArray(partnerIdParam) ? partnerIdParam[0] : partnerIdParam;
+    if (!user?.$id || !partnerId) return;
+    (async () => {
+      await addLocationSharePartner(user.$id, String(partnerId));
+      const coords = lastCoordsRef.current;
+      if (!sharingRef.current || coords?.latitude == null) return;
+      await upsertMyLocation({
+        userId: user.$id,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        accuracy: coords.accuracy,
+        heading: coords.heading,
+        speed: coords.speed,
+        altitude: coords.altitude,
+        isSharing: true,
+        privacyMode: privacyRef.current,
+        allowedViewerIds: [...allowedRef.current, String(partnerId)],
+        force: true,
+      });
+    })().catch(() => {});
+  }, [user?.$id, partnerIdParam]);
 
   const filteredFriends = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -415,9 +442,9 @@ export default function LiveMapScreen() {
     setInviteOpen(true);
     setInviteNote("");
     try {
-      const following = Array.isArray(user.following) ? user.following.map(String) : [];
-      const followers = Array.isArray(user.followers) ? user.followers.map(String) : [];
-      const ids = [...new Set([...following, ...followers])].filter(
+      const mutualSet = new Set(getMutualFriendIds(user));
+      const partners = await getLocationSharePartnerIds(user.$id);
+      const ids = getConnectedUserIds(user, partners).filter(
         (id) => id && id !== String(user.$id)
       );
       const sharingIds = new Set(friendsOnMap.map((f) => String(f.userId)));
@@ -434,7 +461,7 @@ export default function LiveMapScreen() {
               username: u.username || id,
               avatar: u.avatar || "",
               alreadySharing: sharingIds.has(String(id)),
-              isMutual: following.includes(id) && followers.includes(id),
+              isMutual: mutualSet.has(String(id)),
             };
           } catch {
             return {
@@ -442,7 +469,7 @@ export default function LiveMapScreen() {
               username: id,
               avatar: "",
               alreadySharing: sharingIds.has(String(id)),
-              isMutual: following.includes(id) && followers.includes(id),
+              isMutual: mutualSet.has(String(id)),
             };
           }
         })
@@ -465,7 +492,23 @@ export default function LiveMapScreen() {
       setInviteNote("");
       try {
         await inviteUserToShareLocation({ fromUser: user, toUserId: target.$id });
-        setInviteNote(`Invite sent to ${target.username}`);
+        const coords = lastCoordsRef.current;
+        if (sharingRef.current && coords?.latitude != null) {
+          await upsertMyLocation({
+            userId: user.$id,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            accuracy: coords.accuracy,
+            heading: coords.heading,
+            speed: coords.speed,
+            altitude: coords.altitude,
+            isSharing: true,
+            privacyMode: privacyRef.current,
+            allowedViewerIds: [...allowedRef.current, String(target.$id)],
+            force: true,
+          });
+        }
+        setInviteNote(`Invite sent to ${target.username}. They’ll appear when they share too.`);
       } catch (e) {
         setInviteNote(e?.message || "Invite failed");
       } finally {
@@ -496,17 +539,18 @@ export default function LiveMapScreen() {
         }
 
         const coordsPayload = lastCoordsRef.current;
+        const partners = await getLocationSharePartnerIds(user.$id);
         const { background } = await enableLocationSharingSession({
           user,
           privacyMode: mode,
-          allowedViewerIds: [],
+          allowedViewerIds: partners,
           coords: coordsPayload,
           enableBackground: true,
           notifyFriends: true,
         });
         setIsSharing(true);
         setPrivacyMode(mode);
-        setAllowedViewerIds([]);
+        setAllowedViewerIds(partners);
         setStatusNote(
           background?.ok
             ? `Sharing · ${mode} · background on`
@@ -955,8 +999,8 @@ export default function LiveMapScreen() {
 
               {friendsOnMap.length === 0 ? (
                 <Text style={[styles.sheetHint, { color: theme.textMuted }]}>
-                  No one is sharing yet. Tap Invite to share, or follow each other
-                  and both turn Sharing on.
+                  No one is sharing yet. Invite them (or follow each other) and
+                  both turn Sharing on — Friends is enough; you don’t need Everyone.
                 </Text>
               ) : filteredFriends.length === 0 ? (
                 <Text style={[styles.sheetHint, { color: theme.textMuted }]}>
