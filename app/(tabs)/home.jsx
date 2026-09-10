@@ -25,6 +25,7 @@ import FeedVideoPlayer from "../../components/FeedVideoPlayer";
 import PhotoSlideCarousel, { PhotoSlideCountBadge } from "../../components/PhotoSlideCarousel";
 import { normalizeRouteParam } from "../../lib/notificationNavigation";
 import { reportContent, getBlockedUserIds, filterBlockedPosts, getPostCreatorId, REPORT_REASONS } from "../../lib/moderation";
+import { subscribeContentFeedInvalidate } from "../../lib/contentFeedEvents";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1940,6 +1941,21 @@ const Home = () => {
   
   // Get active advertisements
   const { data: activeAds, refetch: refetchAds } = useAppwrite(getActiveAdvertisements, []);
+
+  useEffect(() => {
+    const sub = subscribeContentFeedInvalidate((payload) => {
+      const type = payload?.type;
+      if (!type || type === "all" || type === "photo") {
+        refetchForYouPhotos();
+        refetchFollowing();
+      }
+      if (!type || type === "all" || type === "video") {
+        refetchForYou();
+        refetchFollowing();
+      }
+    });
+    return () => sub.remove();
+  }, [refetchForYouPhotos, refetchFollowing, refetchForYou]);
   
   // Combine videos and photos into single feed, sorted by date
   const combinedForYouPosts = useMemo(() => {
