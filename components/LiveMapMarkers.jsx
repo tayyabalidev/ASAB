@@ -1,14 +1,42 @@
 /**
  * Memoized map markers — prevents search TextInput re-renders from
  * baking typed text into react-native-maps marker bitmaps.
+ *
+ * Remote avatars must keep `tracksViewChanges` on until the image loads,
+ * otherwise Google Maps snapshots a blank white circle.
  */
-import React, { memo } from "react";
+import React, { memo, useCallback, useEffect, useState } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { Marker } from "react-native-maps";
 import { Feather } from "@expo/vector-icons";
 import { images } from "../constants";
+import { getPhotoUrl } from "../lib/appwrite";
 
-function FriendMarkerView({ avatar, username, lastSeen, isLive, liked, borderColor, labelColor }) {
+function resolveImageSource(value) {
+  if (!value || typeof value !== "string") return images.profile;
+  const trimmed = value.trim();
+  if (!trimmed) return images.profile;
+  if (/^(https?:|file:|data:|content:)/i.test(trimmed)) {
+    return { uri: trimmed };
+  }
+  const url = getPhotoUrl(trimmed);
+  return url ? { uri: url } : images.profile;
+}
+
+function useMarkerTracking(key) {
+  const [tracks, setTracks] = useState(true);
+
+  useEffect(() => {
+    setTracks(true);
+    const timer = setTimeout(() => setTracks(false), 2500);
+    return () => clearTimeout(timer);
+  }, [key]);
+
+  const stopTracking = useCallback(() => setTracks(false), []);
+  return [tracks, stopTracking];
+}
+
+function FriendMarkerView({ avatar, username, lastSeen, isLive, liked, borderColor, labelColor, onImageReady }) {
   return (
     <View style={styles.markerWrap} collapsable={false}>
       <View
@@ -18,8 +46,12 @@ function FriendMarkerView({ avatar, username, lastSeen, isLive, liked, borderCol
         ]}
       >
         <Image
-          source={avatar ? { uri: avatar } : images.profile}
+          source={resolveImageSource(avatar)}
+          defaultSource={images.profile}
           style={styles.markerAvatar}
+          resizeMode="cover"
+          onLoadEnd={onImageReady}
+          onError={onImageReady}
         />
       </View>
       <View style={styles.labelRow}>
@@ -38,13 +70,17 @@ function FriendMarkerView({ avatar, username, lastSeen, isLive, liked, borderCol
 
 const MemoFriendMarkerView = memo(FriendMarkerView);
 
-function YouMarkerView({ avatar, labelColor }) {
+function YouMarkerView({ avatar, labelColor, onImageReady }) {
   return (
     <View style={styles.markerWrap} collapsable={false}>
       <View style={[styles.markerRing, styles.youRing]}>
         <Image
-          source={avatar ? { uri: avatar } : images.profile}
+          source={resolveImageSource(avatar)}
+          defaultSource={images.profile}
           style={styles.markerAvatar}
+          resizeMode="cover"
+          onLoadEnd={onImageReady}
+          onError={onImageReady}
         />
       </View>
       <Text style={[styles.markerLabel, { color: labelColor }]}>You · Now</Text>
@@ -54,14 +90,26 @@ function YouMarkerView({ avatar, labelColor }) {
 
 const MemoYouMarkerView = memo(YouMarkerView);
 
-function MomentMarkerView({ photoUrl, likeCount }) {
+function MomentMarkerView({ photoUrl, avatar, likeCount, onImageReady }) {
   return (
     <View style={styles.momentWrap} collapsable={false}>
       <View style={styles.momentFrame}>
         <Image
-          source={photoUrl ? { uri: photoUrl } : images.profile}
+          source={resolveImageSource(photoUrl)}
+          defaultSource={images.profile}
           style={styles.momentImage}
+          resizeMode="cover"
+          onLoadEnd={onImageReady}
+          onError={onImageReady}
         />
+        <View style={styles.momentPinAvatarWrap}>
+          <Image
+            source={resolveImageSource(avatar)}
+            defaultSource={images.profile}
+            style={styles.momentPinAvatar}
+            resizeMode="cover"
+          />
+        </View>
       </View>
       {likeCount > 0 ? (
         <View style={styles.momentLikeRow}>
@@ -82,6 +130,9 @@ export const FriendLocationMarker = memo(function FriendLocationMarker({
   liked = false,
   onPress,
 }) {
+  const trackKey = `${friend?.$id || friend?.userId || ""}:${friend?.avatar || ""}`;
+  const [tracks, stopTracking] = useMarkerTracking(trackKey);
+
   return (
     <Marker
       coordinate={{
@@ -89,7 +140,7 @@ export const FriendLocationMarker = memo(function FriendLocationMarker({
         longitude: friend.longitude,
       }}
       onPress={onPress}
-      tracksViewChanges={false}
+      tracksViewChanges={tracks}
       stopPropagation
     >
       <MemoFriendMarkerView
@@ -100,6 +151,7 @@ export const FriendLocationMarker = memo(function FriendLocationMarker({
         liked={liked}
         borderColor={borderColor}
         labelColor={labelColor}
+        onImageReady={stopTracking}
       />
     </Marker>
   );
@@ -110,15 +162,22 @@ export const YouLocationMarker = memo(function YouLocationMarker({
   avatar,
   labelColor,
 }) {
+  const [tracks, stopTracking] = useMarkerTracking(avatar || "local");
+
   if (!coordinate) return null;
   return (
     <Marker
       coordinate={coordinate}
-      tracksViewChanges={false}
+      tracksViewChanges={tracks}
       cluster={false}
+      zIndex={1000}
       stopPropagation
     >
-      <MemoYouMarkerView avatar={avatar} labelColor={labelColor} />
+      <MemoYouMarkerView
+        avatar={avatar}
+        labelColor={labelColor}
+        onImageReady={stopTracking}
+      />
     </Marker>
   );
 });
@@ -127,6 +186,10 @@ export const MapMomentMarker = memo(function MapMomentMarker({
   moment,
   onPress,
 }) {
+  const [tracks, stopTracking] = useMarkerTracking(
+    `${moment?.$id || ""}:${moment?.photoUrl || ""}:${moment?.avatar || ""}`
+  );
+
   if (!moment?.photoUrl) return null;
   return (
     <Marker
@@ -135,13 +198,15 @@ export const MapMomentMarker = memo(function MapMomentMarker({
         longitude: moment.longitude,
       }}
       onPress={onPress}
-      tracksViewChanges={false}
+      tracksViewChanges={tracks}
       cluster={false}
       stopPropagation
     >
       <MemoMomentMarkerView
         photoUrl={moment.photoUrl}
+        avatar={moment.avatar}
         likeCount={moment.likeCount || 0}
+        onImageReady={stopTracking}
       />
     </Marker>
   );
@@ -155,7 +220,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 3,
     overflow: "hidden",
-    backgroundColor: "#fff",
+    backgroundColor: "#E2E8F0",
   },
   youRing: { borderColor: "#22C55E" },
   markerAvatar: { width: "100%", height: "100%" },
@@ -200,6 +265,22 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   momentImage: { width: "100%", height: "100%" },
+  momentPinAvatarWrap: {
+    position: "absolute",
+    left: 4,
+    bottom: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    overflow: "hidden",
+    backgroundColor: "#E2E8F0",
+  },
+  momentPinAvatar: {
+    width: "100%",
+    height: "100%",
+  },
   momentLikeRow: {
     marginTop: 2,
     flexDirection: "row",

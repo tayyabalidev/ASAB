@@ -16,7 +16,8 @@ import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAcce
 import { useNotifications } from "../../hooks/useNotifications";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost, isMuxProcessingPost } from "../../lib/muxPlayback";
 import { useGlobalContext } from "../../context/GlobalProvider";
-import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar } from "../../components";
+import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar, PhotoSlideCarousel, PhotoSlideCountBadge } from "../../components";
+import { getSlidePhotoUris } from "../../lib/photoSlides";
 import { images } from "../../constants";
 import { useTranslation } from "react-i18next";
 import { isAdminUser } from "../../lib/admin";
@@ -1448,7 +1449,7 @@ const Profile = () => {
     [isDarkMode]
   );
 
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
   const profileEditBirthdayHint = useMemo(() => {
@@ -2743,6 +2744,7 @@ const Profile = () => {
                             />
                           );
                         })()}
+                        <PhotoSlideCountBadge count={getSlidePhotoUris(photo).length} />
                       </TouchableOpacity>
                       {/* Delete Button */}
                       <TouchableOpacity
@@ -2943,6 +2945,9 @@ const Profile = () => {
                               />
                             </>
                           )}
+                          {post.postType === "photo" ? (
+                            <PhotoSlideCountBadge count={getSlidePhotoUris(post).length} />
+                          ) : null}
                         </View>
                       </TouchableOpacity>
                     </View>
@@ -3627,7 +3632,13 @@ const Profile = () => {
               </TouchableOpacity>
 
               <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                {(() => {
+                <PhotoSlideCarousel
+                  uris={getSlidePhotoUris(selectedPhoto)}
+                  width={windowWidth}
+                  height={Math.max(320, windowHeight - 180)}
+                  style={{ width: '100%' }}
+                  renderFirst={() =>
+                (() => {
                   // Get filter and adjustments from photo
                   const filterId = selectedPhoto.filter || 'none';
                   let adjustments = null;
@@ -3823,7 +3834,9 @@ const Profile = () => {
                       resizeMode="contain"
                     />
                   );
-                })()}
+                })()
+                  }
+                />
               </View>
 
               {/* Photo Info Overlay */}

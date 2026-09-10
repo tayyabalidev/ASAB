@@ -50,7 +50,9 @@ import {
   FormField,
   MediaEditor,
   PhotoEditor,
+  PhotoSlideCarousel,
 } from "../../components";
+import { MAX_PHOTO_SLIDES } from "../../lib/photoSlides";
 import { Feather } from "@expo/vector-icons";
 import { useGlobalContext } from "../../context/GlobalProvider";
 
@@ -86,6 +88,48 @@ const FILTERS = [
   { id: "process", name: "Process" },
 ];
 
+const PHOTO_CROP_RATIOS = [
+  { id: "1:1", label: "1:1", ratio: 1 },
+  { id: "4:5", label: "4:5", ratio: 4 / 5 },
+  { id: "9:16", label: "9:16", ratio: 9 / 16 },
+];
+
+async function cropImageToRatio(uri, ratio) {
+  const { width, height } = await new Promise((resolve, reject) => {
+    Image.getSize(uri, (w, h) => resolve({ width: w, height: h }), reject);
+  });
+  const current = width / Math.max(1, height);
+  let cropWidth = width;
+  let cropHeight = height;
+  let originX = 0;
+  let originY = 0;
+  if (current > ratio) {
+    cropWidth = Math.round(height * ratio);
+    originX = Math.round((width - cropWidth) / 2);
+  } else if (current < ratio) {
+    cropHeight = Math.round(width / ratio);
+    originY = Math.round((height - cropHeight) / 2);
+  } else {
+    return { uri, width, height };
+  }
+  cropWidth = Math.max(1, Math.min(cropWidth, width - originX));
+  cropHeight = Math.max(1, Math.min(cropHeight, height - originY));
+  return ImageManipulator.manipulateAsync(
+    uri,
+    [
+      {
+        crop: {
+          originX,
+          originY,
+          width: cropWidth,
+          height: cropHeight,
+        },
+      },
+    ],
+    { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG }
+  );
+}
+
 const Create = () => {
   const { user, isRTL, theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
@@ -107,6 +151,10 @@ const Create = () => {
     filter: "none",
     link: "",
   });
+  const [slidePhotos, setSlidePhotos] = useState([]);
+  const [photoPreviewIndex, setPhotoPreviewIndex] = useState(0);
+  const [showPhotoCropModal, setShowPhotoCropModal] = useState(false);
+  const [photoCropBusy, setPhotoCropBusy] = useState(false);
   const [originalImage, setOriginalImage] = useState(null);
   const [editedImage, setEditedImage] = useState(null);
   const [edits, setEdits] = useState({});
@@ -456,7 +504,132 @@ const Create = () => {
     }
   }, [showTextModal]);
 
-  const openPicker = async (selectType) => {
+  const buildPickedFile = async (selectedAsset, selectType) => {
+    if (!selectedAsset?.uri) {
+      throw new Error("Failed to get media file path. Please try again.");
+    }
+
+    let fileName =
+      selectedAsset.fileName ||
+      selectedAsset.name ||
+      selectedAsset.uri.split("/").pop() ||
+      `file_${Date.now()}`;
+
+    if (selectType === "video") {
+      if (!/\.[a-zA-Z0-9]+$/.test(fileName)) {
+        const uriExt = selectedAsset.uri?.split(".").pop()?.split("?")[0];
+        if (uriExt) {
+          fileName = `${fileName}.${uriExt}`;
+        }
+      }
+    } else if (selectType === "image") {
+      const baseName = fileName.split(".")[0];
+      fileName = `${baseName}.jpg`;
+    }
+
+    const guessedFromExt = (() => {
+      const lower = (fileName || "").toLowerCase();
+      if (lower.endsWith(".mov") || lower.endsWith(".qt")) return "video/quicktime";
+      if (lower.endsWith(".m4v")) return "video/x-m4v";
+      if (lower.endsWith(".3gp")) return "video/3gpp";
+      if (lower.endsWith(".webm")) return "video/webm";
+      if (lower.endsWith(".mp4")) return "video/mp4";
+      if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+      if (lower.endsWith(".png")) return "image/png";
+      return null;
+    })();
+
+    const fileType =
+      selectedAsset.mimeType ||
+      (selectedAsset.type === "image"
+        ? "image/jpeg"
+        : selectedAsset.type === "video"
+        ? guessedFromExt || "video/mp4"
+        : selectedAsset.type) ||
+      guessedFromExt ||
+      (selectType === "video" ? "video/mp4" : "image/jpeg");
+    const fileSize = selectedAsset.fileSize || selectedAsset.size;
+
+    let finalUri = selectedAsset.uri;
+    if (selectType === "video") {
+      try {
+        const permanentPath = `${
+          FileSystem.documentDirectory
+        }trimmed_video_${Date.now()}.mp4`;
+        await FileSystem.copyAsync({
+          from: selectedAsset.uri,
+          to: permanentPath,
+        });
+        const fileInfo = await FileSystem.getInfoAsync(permanentPath);
+        if (fileInfo.exists) {
+          finalUri = permanentPath;
+        }
+      } catch (copyError) {
+        finalUri = selectedAsset.uri;
+      }
+    }
+
+    return {
+      uri: finalUri,
+      name: fileName,
+      type: fileType,
+      mimeType: fileType,
+      size: fileSize,
+    };
+  };
+
+  const applyMainPhoto = (file) => {
+    setOriginalImage(file);
+    setEditedImage(file);
+    setPhotoForm((prev) => ({ ...prev, photo: file }));
+    setIsMediaEdited(false);
+    manuallySetBase64Ref.current = false;
+  };
+
+  const applyPhotoCrop = async (ratio) => {
+    const isMain = photoPreviewIndex <= 0;
+    const source = isMain
+      ? editedImage || photoForm.photo
+      : slidePhotos[photoPreviewIndex - 1];
+    if (!source?.uri) {
+      Alert.alert("No Photo", "Please select a photo first");
+      return;
+    }
+    setPhotoCropBusy(true);
+    try {
+      const result = await cropImageToRatio(source.uri, ratio);
+      if (!result?.uri) return;
+      const file = {
+        ...source,
+        uri: result.uri,
+        name: `cropped_${Date.now()}.jpg`,
+        type: "image/jpeg",
+        mimeType: "image/jpeg",
+        width: result.width,
+        height: result.height,
+      };
+      if (isMain) {
+        applyMainPhoto(file);
+        setImageUpdateKey((key) => key + 1);
+      } else {
+        setSlidePhotos((prev) =>
+          prev.map((photo, index) =>
+            index === photoPreviewIndex - 1 ? file : photo
+          )
+        );
+      }
+      setShowPhotoCropModal(false);
+    } catch (error) {
+      Alert.alert(
+        "Crop failed",
+        error?.message || "Could not crop this photo. Try another photo."
+      );
+    } finally {
+      setPhotoCropBusy(false);
+    }
+  };
+
+  const openPicker = async (selectType, options = {}) => {
     try {
       // Request permissions
       const permission =
@@ -469,6 +642,11 @@ const Create = () => {
         );
         return;
       }
+
+      const appendSlides = Boolean(options.append);
+      const replaceMain = Boolean(options.replace);
+      const isPhotoSlides = postType === "photo" && selectType === "image";
+      const allowMultiple = isPhotoSlides && !replaceMain;
 
       const pickerOptions = {
         mediaTypes:
@@ -483,6 +661,17 @@ const Create = () => {
       if (selectType === "image") {
         // Keep original framing; avoid native crop UI resets.
         pickerOptions.allowsEditing = false;
+        if (allowMultiple) {
+          pickerOptions.allowsMultipleSelection = true;
+          pickerOptions.orderedSelection = true;
+          const usedCount =
+            (appendSlides && (photoForm.photo || editedImage) ? 1 : 0) +
+            (appendSlides ? slidePhotos.length : 0);
+          pickerOptions.selectionLimit = Math.max(
+            1,
+            MAX_PHOTO_SLIDES - usedCount
+          );
+        }
       } else if (selectType === "video") {
         pickerOptions.allowsEditing = false; // Disable editing for videos (we handle trimming separately)
         pickerOptions.videoMaxDuration = 360; // Support up to 6 minutes
@@ -504,107 +693,22 @@ const Create = () => {
         return;
       }
 
-      const selectedAsset = result.assets[0];
+      const pickedFiles = [];
+      const assetsToUse =
+        postType === "video" || replaceMain
+          ? [result.assets[0]]
+          : result.assets;
+      for (const asset of assetsToUse) {
+        if (!asset) continue;
+        pickedFiles.push(await buildPickedFile(asset, selectType));
+      }
 
-      // Validate selected asset
-      if (!selectedAsset) {
+      if (!pickedFiles.length) {
         Alert.alert("Error", "Invalid media file selected. Please try again.");
         return;
       }
 
-      if (!selectedAsset.uri) {
-        Alert.alert(
-          "Error",
-          "Failed to get media file path. Please try again."
-        );
-        return;
-      }
-
-      let fileName =
-        selectedAsset.fileName ||
-        selectedAsset.name ||
-        selectedAsset.uri.split("/").pop() ||
-        `file_${Date.now()}`;
-
-      // Ensure proper file extension for image uploads.
-      // For videos, preserve original extension/container to avoid codec mismatch.
-      if (selectType === "video") {
-        if (!/\.[a-zA-Z0-9]+$/.test(fileName)) {
-          const uriExt = selectedAsset.uri?.split(".").pop()?.split("?")[0];
-          if (uriExt) {
-            fileName = `${fileName}.${uriExt}`;
-          }
-        }
-      } else if (selectType === "image") {
-        // Force .jpg extension for images
-        const baseName = fileName.split(".")[0];
-        fileName = `${baseName}.jpg`;
-      }
-
-      const guessedFromExt = (() => {
-        const lower = (fileName || "").toLowerCase();
-        if (lower.endsWith(".mov") || lower.endsWith(".qt")) return "video/quicktime";
-        if (lower.endsWith(".m4v")) return "video/x-m4v";
-        if (lower.endsWith(".3gp")) return "video/3gpp";
-        if (lower.endsWith(".webm")) return "video/webm";
-        if (lower.endsWith(".mp4")) return "video/mp4";
-        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-        if (lower.endsWith(".png")) return "image/png";
-        return null;
-      })();
-
-      const fileType =
-        selectedAsset.mimeType ||
-        (selectedAsset.type === "image"
-          ? "image/jpeg"
-          : selectedAsset.type === "video"
-          ? guessedFromExt || "video/mp4"
-          : selectedAsset.type) ||
-        guessedFromExt ||
-        (selectType === "video" ? "video/mp4" : "image/jpeg");
-      const fileSize = selectedAsset.fileSize || selectedAsset.size;
-
-      // For videos, copy the trimmed video to a permanent location
-      // This ensures the trimmed video persists and is used when posting
-      // The trimmed video from ImagePicker might be in a temporary location
-      // that gets deleted, so we copy it to a permanent location
-      let finalUri = selectedAsset.uri;
-      if (selectType === "video") {
-        try {
-          // Create a permanent file path for the trimmed video
-          const permanentPath = `${
-            FileSystem.documentDirectory
-          }trimmed_video_${Date.now()}.mp4`;
-
-          // Copy the trimmed video from temporary location to permanent location
-          // This ensures the trimmed video is preserved and used when uploading
-          await FileSystem.copyAsync({
-            from: selectedAsset.uri,
-            to: permanentPath,
-          });
-
-          // Verify the file was copied successfully
-          const fileInfo = await FileSystem.getInfoAsync(permanentPath);
-          if (fileInfo.exists) {
-            // Use the permanent path - this is the trimmed video
-            finalUri = permanentPath;
-          } else {  
-            finalUri = selectedAsset.uri;
-          }
-        } catch (copyError) {
-          // If copy fails, use original URI (might still work on some platforms)
-          // but the trimmed video might not persist
-          finalUri = selectedAsset.uri;
-        }
-      }
-
-      const file = {
-        uri: finalUri,
-        name: fileName,
-        type: fileType,
-        mimeType: fileType, // Add mimeType for iOS compatibility
-        size: fileSize,
-      };
+      const file = pickedFiles[0];
 
       if (postType === "video") {
         if (selectType === "image") {
@@ -646,12 +750,25 @@ const Create = () => {
           });
         }
       } else {
-        // Photo mode
-        setOriginalImage(file);
-        setEditedImage(file);
-        setPhotoForm({ ...photoForm, photo: file });
-        setIsMediaEdited(false); // Reset edit flag when new photo is selected
-        manuallySetBase64Ref.current = false; // Reset manual base64 flag when new image is selected
+        // Photo mode — first image is the cover, the rest become swipe slides
+        if (appendSlides && (photoForm.photo || editedImage)) {
+          const remaining = Math.max(0, MAX_PHOTO_SLIDES - 1 - slidePhotos.length);
+          if (remaining <= 0) {
+            Alert.alert(
+              "Limit reached",
+              `You can add up to ${MAX_PHOTO_SLIDES} photos in one sliding post.`
+            );
+            return;
+          }
+          setSlidePhotos((prev) => [...prev, ...pickedFiles.slice(0, remaining)]);
+          return;
+        }
+
+        applyMainPhoto(file);
+        if (replaceMain) {
+          return;
+        }
+        setSlidePhotos(pickedFiles.slice(1, MAX_PHOTO_SLIDES));
       }
     } catch (error) {
       const errorMessage =
@@ -1953,6 +2070,7 @@ const Create = () => {
         const photoPost = await createPhotoPost({
           ...photoForm,
           photo: finalPhoto,
+          extraPhotos: slidePhotos,
           userId: user.$id,
           edits: finalEdits,
         });
@@ -1970,7 +2088,12 @@ const Create = () => {
         setProcessingProgress(0);
         setUploading(false);
 
-        Alert.alert(t("common.success"), "Photo uploaded successfully!");
+        Alert.alert(
+          t("common.success"),
+          slidePhotos.length > 0
+            ? "Sliding photos uploaded successfully!"
+            : "Photo uploaded successfully!"
+        );
         emitContentFeedInvalidate({ type: 'photo', userId: user.$id });
         // Stay on create page - user can navigate manually if they want
       } catch (error) {
@@ -2021,6 +2144,8 @@ const Create = () => {
           filter: "none",
           link: "",
         });
+        setSlidePhotos([]);
+        setPhotoPreviewIndex(0);
         setOriginalImage(null);
         setEditedImage(null);
         setEdits({});
@@ -3029,10 +3154,26 @@ const Create = () => {
                           textAlign: isRTL ? "right" : "left",
                         }}
                       >
-                        Select Photo
+                        Select Photos
                       </Text>
 
                       {editedImage ? (
+                        <View style={{ width: "100%" }}>
+                          <PhotoSlideCarousel
+                            uris={[
+                              editedImage.uri,
+                              ...slidePhotos
+                                .map((photo) => photo?.uri)
+                                .filter(Boolean),
+                            ]}
+                            width={Math.max(
+                              1,
+                              Dimensions.get("window").width - 32
+                            )}
+                            height={400}
+                            onIndexChange={setPhotoPreviewIndex}
+                            renderSlide={(uri, slideIndex) =>
+                              slideIndex === 0 ? (
                         <View
                           style={{
                             position: "relative",
@@ -3044,7 +3185,7 @@ const Create = () => {
                         >
                           {/* Change Photo Button */}
                           <TouchableOpacity
-                            onPress={() => openPicker("image")}
+                            onPress={() => openPicker("image", { replace: true })}
                             style={{
                               position: "absolute",
                               top: 10,
@@ -3255,6 +3396,7 @@ const Create = () => {
                               setEditedImage(null);
                               setOriginalImage(null);
                               setPhotoForm({ ...photoForm, photo: null });
+                              setSlidePhotos([]);
                               setEdits({});
                               setTextOverlays([]);
                               setImageOverlays([]);
@@ -3631,10 +3773,173 @@ const Create = () => {
                                       Edit
                                     </Text>
                                   </TouchableOpacity>
+
+                                  {/* Crop Button */}
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      const hasMain =
+                                        editedImage || photoForm.photo;
+                                      if (!hasMain) {
+                                        Alert.alert(
+                                          "No Photo",
+                                          "Please select a photo first"
+                                        );
+                                        return;
+                                      }
+                                      setShowPhotoCropModal(true);
+                                    }}
+                                    style={{
+                                      width: 60,
+                                      height: 60,
+                                      borderRadius: 12,
+                                      backgroundColor:
+                                        "rgba(255, 255, 255, 0.15)",
+                                      justifyContent: "center",
+                                      alignItems: "center",
+                                      marginRight: 4,
+                                      paddingTop: 8,
+                                      paddingBottom: 4,
+                                    }}
+                                    activeOpacity={0.8}
+                                  >
+                                    <Feather
+                                      name="crop"
+                                      size={22}
+                                      color="#FFFFFF"
+                                    />
+                                    <Text
+                                      style={{
+                                        color: "#FFFFFF",
+                                        fontSize: 11,
+                                        fontWeight: "500",
+                                        fontFamily: "Poppins-Medium",
+                                        marginTop: 2,
+                                        textAlign: "center",
+                                      }}
+                                    >
+                                      Crop
+                                    </Text>
+                                  </TouchableOpacity>
                                 </View>
                               </View>
                             </View>
                           </View>
+                              ) : (
+                                <View
+                                  style={{
+                                    position: "relative",
+                                    width: "100%",
+                                    height: 400,
+                                    borderRadius: 16,
+                                    overflow: "hidden",
+                                    backgroundColor: "#000",
+                                  }}
+                                >
+                                  <Image
+                                    source={{ uri }}
+                                    style={{ width: "100%", height: 400 }}
+                                    resizeMode="contain"
+                                  />
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      setPhotoPreviewIndex(slideIndex);
+                                      setShowPhotoCropModal(true);
+                                    }}
+                                    style={{
+                                      position: "absolute",
+                                      left: 10,
+                                      bottom: 10,
+                                      backgroundColor: "rgba(0,0,0,0.7)",
+                                      borderRadius: 8,
+                                      paddingHorizontal: 12,
+                                      paddingVertical: 8,
+                                      zIndex: 10,
+                                      flexDirection: "row",
+                                      alignItems: "center",
+                                      gap: 6,
+                                    }}
+                                  >
+                                    <Feather name="crop" size={16} color="#fff" />
+                                    <Text
+                                      style={{
+                                        color: "#fff",
+                                        fontSize: 12,
+                                        fontWeight: "600",
+                                      }}
+                                    >
+                                      Crop
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() =>
+                                      setSlidePhotos((prev) =>
+                                        prev.filter(
+                                          (_, idx) => idx !== slideIndex - 1
+                                        )
+                                      )
+                                    }
+                                    style={{
+                                      position: "absolute",
+                                      top: 10,
+                                      right: 10,
+                                      backgroundColor: "rgba(255, 59, 48, 0.9)",
+                                      borderRadius: 20,
+                                      width: 36,
+                                      height: 36,
+                                      justifyContent: "center",
+                                      alignItems: "center",
+                                      zIndex: 10,
+                                    }}
+                                  >
+                                    <Text
+                                      style={{
+                                        color: "#fff",
+                                        fontSize: 20,
+                                        fontWeight: "bold",
+                                      }}
+                                    >
+                                      ×
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              )
+                            }
+                          />
+                          {1 + slidePhotos.length < MAX_PHOTO_SLIDES ? (
+                            <TouchableOpacity
+                              onPress={() =>
+                                openPicker("image", { append: true })
+                              }
+                              style={{
+                                marginTop: 12,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                borderWidth: 1,
+                                borderStyle: "dashed",
+                                borderColor: theme.accent,
+                                borderRadius: 12,
+                                paddingVertical: 12,
+                                gap: 8,
+                              }}
+                            >
+                              <Feather
+                                name="plus"
+                                size={18}
+                                color={theme.accent}
+                              />
+                              <Text
+                                style={{
+                                  color: theme.accent,
+                                  fontFamily: "Poppins-Medium",
+                                }}
+                              >
+                                Add photos ({1 + slidePhotos.length}/
+                                {MAX_PHOTO_SLIDES})
+                              </Text>
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
                         ) : (
                           <TouchableOpacity onPress={() => openPicker("image")}>
                             <View
@@ -3681,7 +3986,17 @@ const Create = () => {
                                   marginTop: 12,
                                 }}
                               >
-                                Tap to select photo
+                                Tap to select photos
+                              </Text>
+                              <Text
+                                style={{
+                                  color: theme.textMuted || theme.textSecondary,
+                                  marginTop: 4,
+                                  fontSize: 12,
+                                  textAlign: "center",
+                                }}
+                              >
+                                Pick several to make a sliding post
                               </Text>
                             </View>
                           </TouchableOpacity>
@@ -3699,6 +4014,8 @@ const Create = () => {
                       ? "Uploading..."
                       : postType === "video"
                       ? t("create.submitButton")
+                      : slidePhotos.length > 0
+                      ? "Post Photos"
                       : "Post Photo"
                   }
                   handlePress={submit}
@@ -7705,6 +8022,122 @@ const Create = () => {
                 }}
               />
             )}
+
+            {/* Photo Crop Modal */}
+            <Modal
+              visible={showPhotoCropModal}
+              transparent
+              animationType="slide"
+              onRequestClose={() =>
+                !photoCropBusy && setShowPhotoCropModal(false)
+              }
+            >
+              <View
+                style={{
+                  flex: 1,
+                  backgroundColor: "rgba(0,0,0,0.95)",
+                  paddingTop: Platform.OS === "ios" ? 50 : 20,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    paddingHorizontal: 16,
+                    paddingBottom: 12,
+                  }}
+                >
+                  <TouchableOpacity
+                    disabled={photoCropBusy}
+                    onPress={() => setShowPhotoCropModal(false)}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+                  <Text
+                    style={{ color: "#fff", fontSize: 18, fontWeight: "bold" }}
+                  >
+                    Crop photo
+                  </Text>
+                  <View style={{ width: 56 }} />
+                </View>
+                <View
+                  style={{
+                    flex: 1,
+                    justifyContent: "center",
+                    alignItems: "center",
+                    paddingHorizontal: 16,
+                  }}
+                >
+                  {(() => {
+                    const previewUri =
+                      photoPreviewIndex <= 0
+                        ? editedImage?.uri || photoForm.photo?.uri
+                        : slidePhotos[photoPreviewIndex - 1]?.uri;
+                    return previewUri ? (
+                      <Image
+                        source={{ uri: previewUri }}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          maxHeight: 480,
+                        }}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <ActivityIndicator color="#fff" />
+                    );
+                  })()}
+                </View>
+                <Text
+                  style={{
+                    color: "rgba(255,255,255,0.7)",
+                    textAlign: "center",
+                    paddingHorizontal: 24,
+                    marginBottom: 12,
+                  }}
+                >
+                  Choose how this photo should be framed. Original stays uncut.
+                </Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "center",
+                    flexWrap: "wrap",
+                    gap: 10,
+                    paddingHorizontal: 16,
+                    paddingBottom: Math.max(24, 16),
+                  }}
+                >
+                  {PHOTO_CROP_RATIOS.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      disabled={photoCropBusy}
+                      onPress={() => applyPhotoCrop(item.ratio)}
+                      style={{
+                        paddingHorizontal: 18,
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        backgroundColor: "rgba(255,255,255,0.12)",
+                        opacity: photoCropBusy ? 0.6 : 1,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: "#fff",
+                          fontFamily: "Poppins-SemiBold",
+                          fontSize: 14,
+                        }}
+                      >
+                        {photoCropBusy ? "Cropping…" : item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </Modal>
 
             {/* Photo Editor Modal */}
             <PhotoEditor

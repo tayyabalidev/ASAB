@@ -54,7 +54,7 @@ import {
 } from "../../lib/liveMapActions";
 import * as ImagePicker from "expo-image-picker";
 import { FriendLocationMarker, YouLocationMarker, MapMomentMarker } from "../../components/LiveMapMarkers";
-import { databases, appwriteConfig } from "../../lib/appwrite";
+import { databases, appwriteConfig, getPhotoUrl } from "../../lib/appwrite";
 import {
   createMapMoment,
   getLikedFriendIds,
@@ -728,6 +728,33 @@ export default function LiveMapScreen() {
     setMapMoments((prev) => prev.map((m) => (m.$id === next.$id ? next : m)));
   }, [selectedMoment, user?.$id]);
 
+  const resolveMomentAvatar = useCallback(
+    (moment) => {
+      if (!moment) return "";
+      const raw =
+        moment.avatar ||
+        (String(moment.userId) === String(user?.$id) ? user?.avatar : "") ||
+        friendsOnMap.find((f) => String(f.userId) === String(moment.userId))
+          ?.avatar ||
+        "";
+      if (!raw || typeof raw !== "string") return "";
+      const trimmed = raw.trim();
+      if (!trimmed) return "";
+      if (/^(https?:|file:|data:|content:)/i.test(trimmed)) return trimmed;
+      return getPhotoUrl(trimmed) || trimmed;
+    },
+    [user?.$id, user?.avatar, friendsOnMap]
+  );
+
+  const momentsWithAvatars = useMemo(
+    () =>
+      mapMoments.map((moment) => ({
+        ...moment,
+        avatar: resolveMomentAvatar(moment),
+      })),
+    [mapMoments, resolveMomentAvatar]
+  );
+
   const toggleAllowed = useCallback((friendId) => {
     setAllowedViewerIds((prev) => {
       const id = String(friendId);
@@ -774,7 +801,7 @@ export default function LiveMapScreen() {
           />
         ))}
 
-        {mapMoments.map((moment) => (
+        {momentsWithAvatars.map((moment) => (
           <MapMomentMarker
             key={moment.$id}
             moment={moment}
@@ -1408,11 +1435,24 @@ export default function LiveMapScreen() {
             onPress={(e) => e.stopPropagation()}
           >
             {selectedMoment?.photoUrl ? (
-              <Image
-                source={{ uri: selectedMoment.photoUrl }}
-                style={styles.momentPreview}
-                resizeMode="cover"
-              />
+              <View style={styles.momentPreviewWrap}>
+                <Image
+                  source={{ uri: selectedMoment.photoUrl }}
+                  style={styles.momentPreview}
+                  resizeMode="cover"
+                />
+                <View style={styles.momentPhotoAvatarWrap}>
+                  <Image
+                    source={
+                      resolveMomentAvatar(selectedMoment)
+                        ? { uri: resolveMomentAvatar(selectedMoment) }
+                        : images.profile
+                    }
+                    style={styles.momentPhotoAvatar}
+                    resizeMode="cover"
+                  />
+                </View>
+              </View>
             ) : null}
             <View style={styles.momentMeta}>
               <View style={{ flex: 1 }}>
@@ -1618,11 +1658,37 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 24,
   },
-  momentPreview: {
+  momentPreviewWrap: {
     width: "100%",
     height: 280,
     borderRadius: 14,
+    overflow: "hidden",
     backgroundColor: "#111",
+  },
+  momentPreview: {
+    width: "100%",
+    height: "100%",
+  },
+  momentPhotoAvatarWrap: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 3,
+    borderColor: "#fff",
+    overflow: "hidden",
+    backgroundColor: "#E2E8F0",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  momentPhotoAvatar: {
+    width: "100%",
+    height: "100%",
   },
   momentMeta: {
     flexDirection: "row",

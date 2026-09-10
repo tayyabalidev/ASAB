@@ -18,13 +18,15 @@ import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
 import { appwriteConfig } from "../../lib/appwrite";
 import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
+import { getSlidePhotoUris } from "../../lib/photoSlides";
 import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 import { getFilterCSS, getVideoFilterCSS } from "../../lib/filterCss";
 import FeedVideoPlayer from "../../components/FeedVideoPlayer";
+import PhotoSlideCarousel, { PhotoSlideCountBadge } from "../../components/PhotoSlideCarousel";
 import { normalizeRouteParam } from "../../lib/notificationNavigation";
 import { reportContent, getBlockedUserIds, filterBlockedPosts, getPostCreatorId, REPORT_REASONS } from "../../lib/moderation";
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onVideoStateChange, isHomeFocused, theme, isDarkMode, cardHeight = SCREEN_HEIGHT }) => {
   const { user, followStatus, updateFollowStatus, isRTL } = useGlobalContext();
@@ -697,6 +699,33 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
     [isDarkMode]
   );
 
+  const slideUris = item.postType === 'photo' ? getSlidePhotoUris(item) : [];
+  const hasPhotoSlides = slideUris.length > 1;
+  const PhotoMediaWrap = hasPhotoSlides ? View : TouchableOpacity;
+  const photoWrapProps = hasPhotoSlides
+    ? {
+        style: {
+          width: '100%',
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          backgroundColor: themedColor('#000', theme.surface),
+        },
+      }
+    : {
+        activeOpacity: 0.9,
+        onPress: handleVideoPress,
+        style: {
+          width: '100%',
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          backgroundColor: themedColor('#000', theme.surface),
+        },
+      };
+
   return (
     <View style={{ 
       height: cardHeight, 
@@ -709,7 +738,7 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
       })
     }}>
     
-                                         {/* Swipe Gesture Handler for Profile Opening - TikTok Style */}
+      {!hasPhotoSlides ? (
                    <PanGestureHandler
             onHandlerStateChange={(event) => {
               const { translationX, state } = event.nativeEvent;
@@ -744,21 +773,19 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
             
            </View>
         </PanGestureHandler>
+      ) : null}
       
       {/* Video/Photo Background */}
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={handleVideoPress}
-        style={{
-          width: '100%',
-          height: '100%',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          backgroundColor: themedColor('#000', theme.surface),
-        }}
+      <PhotoMediaWrap
+        {...photoWrapProps}
       >
         {item.postType === 'photo' && item.photo && typeof item.photo === 'string' && item.photo.trim() !== '' ? (
+          <PhotoSlideCarousel
+            uris={slideUris.length ? slideUris : [String(item.photo)]}
+            width={SCREEN_WIDTH}
+            height={cardHeight}
+            showArrows={false}
+            renderFirst={() =>
           (() => {
             // Get filter and adjustments from item
             const filterId = item.filter || 'none';
@@ -974,6 +1001,8 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
               />
             );
           })()
+            }
+          />
         ) : isVideoMedia(item?.video, item?.postType) ? (
           (() => {
             // Get filter and video adjustments from item
@@ -1197,7 +1226,7 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
             </Text>
           </TouchableOpacity>
         )}
-      </TouchableOpacity>
+      </PhotoMediaWrap>
 
       {/* Progress Bar - Only show for native Video component (not WebView) - Outside TouchableOpacity to receive touches */}
       {showProgressBar && isVideoMedia(item?.video, item?.postType) && playbackDuration > 0 && isVideoReady && (
@@ -2833,7 +2862,8 @@ const Home = () => {
             }}
           >
             {item.postType === 'photo' && item.photo && typeof item.photo === 'string' && item.photo.trim() !== '' ? (
-              (() => {
+              <View style={{ width: '100%', height: '100%' }}>
+              {(() => {
                 // Get filter and adjustments from item
                 const filterId = item.filter || 'none';
                 let adjustments = null;
@@ -3047,7 +3077,9 @@ const Home = () => {
                     }}
                   />
                 );
-              })()
+              })()}
+              <PhotoSlideCountBadge count={getSlidePhotoUris(item).length} />
+              </View>
             ) : isVideoMedia(item?.video, item?.postType) ? (
               trendingVideoPlaybackUri ? (
               <Video
@@ -3560,6 +3592,12 @@ const Home = () => {
               {/* Video or Photo */}
               <View style={{ flex: 1, backgroundColor: theme.background, position: 'relative' }}>
                 {trendingModalVideo.postType === 'photo' && trendingModalVideo.photo && typeof trendingModalVideo.photo === 'string' && trendingModalVideo.photo.trim() !== '' ? (
+                  <PhotoSlideCarousel
+                    uris={getSlidePhotoUris(trendingModalVideo)}
+                    width={SCREEN_WIDTH}
+                    height={SCREEN_HEIGHT}
+                    style={{ flex: 1, width: '100%', height: '100%' }}
+                    renderFirst={() =>
                   (() => {
                     // Get filter and adjustments from item
                     const filterId = trendingModalVideo.filter || 'none';
@@ -3776,6 +3814,8 @@ const Home = () => {
                       />
                     );
                   })()
+                    }
+                  />
                 ) : isVideoMedia(trendingModalVideo?.video, trendingModalVideo?.postType) ? (
                   (() => {
                     const modalThumbRaw = trendingModalVideo?.thumbnail
