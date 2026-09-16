@@ -1121,6 +1121,7 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
                               muted
                               playsinline
                               webkit-playsinline
+                              preload="auto"
                             ></video>
                           </body>
                         </html>

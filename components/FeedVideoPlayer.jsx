@@ -3,14 +3,15 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 import { AppState, Image, Platform, View } from 'react-native';
 import { VideoView, useVideoPlayer, isPictureInPictureSupported } from 'expo-video';
-import { buildFeedVideoSource } from '../lib/feedVideoSource';
+import { buildFeedVideoSource, isHlsVideoUri } from '../lib/feedVideoSource';
 
-function configurePlayer(player, { isLooping, isMuted }) {
+function configurePlayer(player, { isLooping, isMuted, isHls }) {
   player.loop = isLooping;
   player.muted = isMuted;
   player.timeUpdateEventInterval = 0.5;
@@ -18,10 +19,16 @@ function configurePlayer(player, { isLooping, isMuted }) {
   // we are actively inside a PiP session (set only in onPictureInPictureStart).
   player.staysActiveInBackground = false;
   if (Platform.OS === 'ios') {
-    player.bufferOptions = {
-      preferredForwardBufferDuration: 2,
-      waitsToMinimizeStalling: false,
-    };
+    player.bufferOptions = isHls
+      ? {
+          preferredForwardBufferDuration: 2,
+          waitsToMinimizeStalling: false,
+        }
+      : {
+          // Raw Appwrite MOV/MP4 files need metadata (often at end of file) before play.
+          preferredForwardBufferDuration: 8,
+          waitsToMinimizeStalling: true,
+        };
     player.audioMixingMode = 'mixWithOthers';
     player.showNowPlayingNotification = false;
   }
@@ -47,10 +54,30 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
   const isInPipRef = useRef(false);
   const shouldPlayRef = useRef(shouldPlay);
   const appStateRef = useRef(AppState.currentState);
+  const isMutedRef = useRef(isMuted);
   const [showPoster, setShowPoster] = useState(Boolean(posterUri));
 
-  const player = useVideoPlayer(null, (instance) => {
-    configurePlayer(instance, { isLooping, isMuted });
+  const videoSource = useMemo(
+    () => (loadSource && videoUrl ? buildFeedVideoSource(videoUrl) : null),
+    [loadSource, videoUrl]
+  );
+  const isHls = isHlsVideoUri(videoUrl);
+
+  const player = useVideoPlayer(videoSource, (instance) => {
+    configurePlayer(instance, {
+      isLooping,
+      isMuted: isMutedRef.current,
+      isHls,
+    });
+    if (
+      shouldPlayRef.current &&
+      appStateRef.current !== 'background' &&
+      videoSource
+    ) {
+      try {
+        instance.play();
+      } catch (_) {}
+    }
   });
 
   const hardStop = useCallback(() => {
@@ -78,23 +105,25 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     shouldPlayRef.current = shouldPlay;
   }, [shouldPlay]);
 
-  // Leave / close app → always stop feed audio (no ghost playback).
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  // Leave / close app → stop feed audio. Do not treat iOS `inactive`
+  // (Control Center, screenshot, notification shade) as a full stop.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       const previousState = appStateRef.current;
       appStateRef.current = nextState;
 
-      if (
-        (nextState === 'inactive' || nextState === 'background') &&
-        previousState === 'active'
-      ) {
+      if (nextState === 'background' && previousState !== 'background') {
         hardStop();
         return;
       }
 
       if (nextState === 'active' && previousState !== 'active') {
         try {
-          player.muted = isMuted;
+          player.muted = isMutedRef.current;
         } catch (_) {}
         if (shouldPlayRef.current) {
           try {
@@ -105,7 +134,7 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     });
 
     return () => subscription.remove();
-  }, [hardStop, player, isMuted]);
+  }, [hardStop, player]);
 
   useImperativeHandle(
     ref,
@@ -136,37 +165,34 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
 
   const tryPlay = useCallback(() => {
     if (!shouldPlayRef.current) return;
-    if (appStateRef.current !== 'active') return;
+    if (appStateRef.current === 'background') return;
     try {
-      player.muted = isMuted;
+      player.muted = isMutedRef.current;
       player.play();
     } catch (_) {}
-  }, [player, isMuted]);
+  }, [player]);
 
   useEffect(() => {
-    if (!videoUrl || !loadSource) return;
     setShowPoster(Boolean(posterUri));
-    try {
-      player.replace(buildFeedVideoSource(videoUrl));
-    } catch (_) {}
-  }, [videoUrl, player, posterUri, loadSource]);
+  }, [videoUrl, posterUri]);
 
   useEffect(() => {
-    configurePlayer(player, { isLooping, isMuted });
-  }, [isLooping, isMuted, player]);
+    configurePlayer(player, { isLooping, isMuted, isHls });
+  }, [isLooping, isMuted, isHls, player]);
 
   useEffect(() => {
     if (!player) return;
 
-    if (shouldPlay && appStateRef.current === 'active') {
+    if (shouldPlay) {
       tryPlay();
-      return;
+      const retries = [300, 1000, 2500].map((ms) => setTimeout(tryPlay, ms));
+      return () => retries.forEach(clearTimeout);
     }
 
     try {
       player.pause();
     } catch (_) {}
-  }, [shouldPlay, player, tryPlay]);
+  }, [shouldPlay, player, videoSource, tryPlay]);
 
   const handlePlaybackUpdate = useCallback(
     (payload) => {
@@ -211,18 +237,12 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
       if (event.status === 'readyToPlay') {
         tryPlay();
       }
-    });
-    return () => subscription.remove();
-  }, [player, tryPlay]);
-
-  useEffect(() => {
-    const subscription = player.addListener('statusChange', (event) => {
       if (event.status === 'error') {
         handleError();
       }
     });
     return () => subscription.remove();
-  }, [player, handleError]);
+  }, [player, tryPlay, handleError]);
 
   // Hard-stop when this feed item unmounts so audio cannot linger.
   useEffect(() => {
@@ -248,7 +268,7 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
     const appActive = appStateRef.current === 'active';
     if (appActive && shouldPlayRef.current) {
       try {
-        player.muted = isMuted;
+        player.muted = isMutedRef.current;
         player.play();
       } catch (_) {}
       return;
@@ -257,13 +277,14 @@ const FeedVideoPlayer = forwardRef(function FeedVideoPlayer(
   };
 
   return (
-    <View style={{ width: '100%', height: '100%' }}>
+    <View style={{ width: '100%', height: '100%', backgroundColor: '#000' }}>
       <VideoView
         ref={videoViewRef}
         player={player}
         style={{ width: '100%', height: '100%' }}
         contentFit="contain"
         nativeControls={false}
+        allowsVideoFrameAnalysis={false}
         allowsPictureInPicture={enablePiP && isPictureInPictureSupported()}
         startsPictureInPictureAutomatically={false}
         fullscreenOptions={{ enable: true }}
