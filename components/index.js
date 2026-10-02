@@ -6,6 +6,7 @@ export { default as PhotoEditor } from './PhotoEditor';
 export { default as PhotoSlideCarousel, PhotoSlideCountBadge } from './PhotoSlideCarousel';
 export { default as VideoCard } from './VideoCard';
 export { default as VideoProgressBar } from './VideoProgressBar';
+export { default as FeedReactionBurst, FeedFireAction, FEED_SIDE_ACTIONS_STYLE } from './FeedReactionBurst';
 export { default as EmptyState } from './EmptyState';
 export { default as InfoBox } from './InfoBox';
 export { default as SearchInput } from './SearchInput';

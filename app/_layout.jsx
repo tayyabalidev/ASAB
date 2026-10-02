@@ -495,6 +495,24 @@ export default function RootLayout() {
               animation: 'slide_from_right',
             }}
           />
+          <Stack.Screen
+            name="circle/[id]"
+            options={{
+              headerShown: false,
+              title: '',
+              headerTitle: '',
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="circle/create"
+            options={{
+              headerShown: false,
+              title: '',
+              headerTitle: '',
+              animation: 'slide_from_right',
+            }}
+          />
           <Stack.Screen 
             name="post/[id]" 
             options={{ 

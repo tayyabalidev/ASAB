@@ -34,6 +34,7 @@ const TabLayout = () => {
   const tabLabels = {
     home: t("nav.home"),
     liveStreams: t("nav.liveStreams"),
+    circles: t("nav.circles"),
     friends: t("nav.friends"),
     create: t("nav.create"),
     inbox: t("nav.inbox"),
@@ -92,19 +93,27 @@ const TabLayout = () => {
           }}
         />
         <Tabs.Screen
-          name="friends"
+          name="circles"
           options={{
-            title: tabLabels.friends,
+            title: tabLabels.circles,
             headerShown: false,
             tabBarIcon: ({ color, focused }) => (
               <TabIcon
                 iconName="users"
-                label={tabLabels.friends}
+                label={tabLabels.circles}
                 color={color}
                 focused={focused}
                 isRTL={isRTL}
               />
             ),
+          }}
+        />
+        <Tabs.Screen
+          name="friends"
+          options={{
+            title: tabLabels.friends,
+            headerShown: false,
+            href: null, // Replaced by Circles in tab bar; still reachable via /friends
           }}
         />
 

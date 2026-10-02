@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 import { images, icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getAllPosts, getTrendingVideos, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, getVideoPosterUri, toggleFollowUser, getAllPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, toggleLike, isPostLiked, getLikeCount, getVideoById, getPhotoById } from "../../lib/appwrite";
+import { getAllPosts, getTrendingVideos, getComments, addComment, getFollowingPosts, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getIOSCompatibleVideoUrl, getVideoPlaybackUrls, getVideoPosterUri, toggleFollowUser, getAllPhotoPosts, getPhotoUrl, getActiveAdvertisements, toggleLikeComment, getCommentLikes, getVideoById, getPhotoById } from "../../lib/appwrite";
 import AdvertisementCard from "../../components/AdvertisementCard";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { databases } from "../../lib/appwrite";
@@ -22,10 +22,13 @@ import { getSlidePhotoUris } from "../../lib/photoSlides";
 import { getPlaybackUriForPost } from "../../lib/muxPlayback";
 import { getFilterCSS, getVideoFilterCSS } from "../../lib/filterCss";
 import FeedVideoPlayer from "../../components/FeedVideoPlayer";
+import FeedReactionBurst, { FeedFireAction, FEED_SIDE_ACTIONS_STYLE } from "../../components/FeedReactionBurst";
 import PhotoSlideCarousel, { PhotoSlideCountBadge } from "../../components/PhotoSlideCarousel";
 import { normalizeRouteParam } from "../../lib/notificationNavigation";
 import { reportContent, getBlockedUserIds, filterBlockedPosts, getPostCreatorId, REPORT_REASONS } from "../../lib/moderation";
 import { subscribeContentFeedInvalidate } from "../../lib/contentFeedEvents";
+import { addFeedReaction, getFeedReactions } from "../../lib/feedReactions";
+import { FIRE_SHARE_COOLDOWN_MS, sharePostToActiveFriends } from "../../lib/fireShare";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -50,6 +53,9 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
   const [shareCount, setShareCount] = useState(item.shares || 0);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
+  const [fireCount, setFireCount] = useState(0);
+  const [fireSending, setFireSending] = useState(false);
+  const [fireSent, setFireSent] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [showProfileHint, setShowProfileHint] = useState(false);
   const [creatorData, setCreatorData] = useState(null);
@@ -62,7 +68,21 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
   const [seekPosition, setSeekPosition] = useState(0);
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [videoSourceIndex, setVideoSourceIndex] = useState(0);
+  const [reactionType, setReactionType] = useState(null);
+  const [reactionKey, setReactionKey] = useState(0);
   const progressBarTimeoutRef = useRef(null);
+  const fireCooldownRef = useRef(null);
+  const lastTapRef = useRef(0);
+  const likedRef = useRef(liked);
+
+  useEffect(() => {
+    likedRef.current = liked;
+  }, [liked]);
+
+  const showReaction = (type) => {
+    setReactionType(type);
+    setReactionKey((key) => key + 1);
+  };
   const resolvedStreamUri = useMemo(
     () => getPlaybackUriForPost(item),
     [item?.video, item?.mux_playback_id, item?.muxPlaybackId]
@@ -181,33 +201,36 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
     fetchShareCount();
   }, [isVisible, item.$id]);
 
-  // Check like status when visible
   useEffect(() => {
-    if (!isVisible || !user?.$id) return undefined;
-    async function checkLikeStatus() {
-      try {
-        const isLiked = await isPostLiked(user.$id, item.$id);
-        setLiked(isLiked);
-      } catch (error) {
-        
-      }
-    }
-    checkLikeStatus();
-  }, [isVisible, user?.$id, item.$id]);
+    setLikeCount(0);
+    setFireCount(0);
+    setFireSent(false);
+    setFireSending(false);
+    setLiked(false);
+    likedRef.current = false;
+  }, [item.$id]);
 
-  // Fetch like count when visible
+  // Load this viewer's heart/fire click counts
   useEffect(() => {
-    if (!isVisible) return undefined;
-    async function fetchLikeCount() {
+    if (!isVisible || !user?.$id || !item.$id) return undefined;
+    const postId = item.$id;
+    let cancelled = false;
+    (async () => {
       try {
-        const likes = await getLikeCount(item.$id);
-        setLikeCount(likes);
-      } catch (error) {
-        
-      }
-    }
-    fetchLikeCount();
-  }, [isVisible, item.$id]);
+        const counts = await getFeedReactions(user.$id, postId);
+        if (cancelled) return;
+        setLikeCount((prev) => Math.max(prev, counts.heart));
+        setFireCount((prev) => Math.max(prev, counts.fire));
+        if (counts.heart > 0) {
+          setLiked(true);
+          likedRef.current = true;
+        }
+      } catch (_) {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isVisible, user?.$id, item.$id]);
 
 
   // Check if current user is following the video/photo creator when visible
@@ -296,10 +319,21 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
       if (progressBarTimeoutRef.current) {
         clearTimeout(progressBarTimeoutRef.current);
       }
+      if (fireCooldownRef.current) {
+        clearTimeout(fireCooldownRef.current);
+      }
     };
   }, []);
 
   const handleVideoPress = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 280) {
+      lastTapRef.current = 0;
+      handleHeartPress();
+      return;
+    }
+    lastTapRef.current = now;
+
     // Tap: show progress bar and play/pause control briefly (do not toggle play here)
     if (isVideoMedia(item?.video, item?.postType)) {
       setShowProgressBar(true);
@@ -542,30 +576,55 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
     }
   };
 
-  const handleLike = async () => {
+  const handleHeartPress = async () => {
     if (!user?.$id) {
       Alert.alert(t("common.error"), "Please login to like posts");
       return;
     }
-
+    showReaction('heart');
+    setLikeCount((prev) => prev + 1);
+    setLiked(true);
+    likedRef.current = true;
     try {
-      // Optimistic update
-      const newLikedState = !liked;
-      setLiked(newLikedState);
-      setLikeCount(prev => newLikedState ? prev + 1 : Math.max(0, prev - 1));
-
-      const newLikeStatus = await toggleLike(user.$id, item.$id);
-      setLiked(newLikeStatus);
-      
-      // Refresh like count to ensure accuracy
-      const updatedLikeCount = await getLikeCount(item.$id);
-      setLikeCount(updatedLikeCount);
+      const counts = await addFeedReaction(user.$id, item.$id, 'heart');
+      setLikeCount((prev) => Math.max(prev, counts.heart));
     } catch (error) {
-      // Revert optimistic update on error
-      setLiked(!liked);
-      setLikeCount(prev => liked ? prev + 1 : Math.max(0, prev - 1));
       Alert.alert(t("common.error"), error.message || "Failed to like post");
     }
+  };
+
+  const handleFirePress = async () => {
+    if (!user?.$id) {
+      Alert.alert(t("common.error"), "Please login to share");
+      return;
+    }
+    if (fireSending || fireSent) return;
+    showReaction('fire');
+    setFireSending(true);
+    try {
+      const result = await sharePostToActiveFriends({ user, post: item });
+      if (result.cooldown) {
+        setFireSent(true);
+        fireCooldownRef.current = setTimeout(() => setFireSent(false), result.remainingMs || FIRE_SHARE_COOLDOWN_MS);
+        return;
+      }
+      if (!result.ok) {
+        Alert.alert(t("common.error"), result.error || "Could not send");
+        return;
+      }
+      setFireSent(true);
+      setFireCount((prev) => prev + 1);
+      Alert.alert("Sent!", result.message);
+      fireCooldownRef.current = setTimeout(() => setFireSent(false), FIRE_SHARE_COOLDOWN_MS);
+    } catch (error) {
+      Alert.alert(t("common.error"), error.message || "Failed to send");
+    } finally {
+      setFireSending(false);
+    }
+  };
+
+  const handleLike = async () => {
+    await handleHeartPress();
   };
 
   const handleCommentPress = () => {
@@ -1275,7 +1334,7 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
 
 
       {/* Right Side Interaction Buttons */}
-      <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 20 }}>
+      <View style={FEED_SIDE_ACTIONS_STYLE}>
         {/* Profile Picture */}
         <TouchableOpacity onPress={handleProfilePress} style={{ marginBottom: 20, alignItems: 'center' }}>
           <View style={{ position: 'relative' }}>
@@ -1322,7 +1381,11 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
         </TouchableOpacity>
 
         {/* Like Button */}
-        <TouchableOpacity onPress={handleLike} style={{ marginBottom: 20, alignItems: 'center' }}>
+        <TouchableOpacity
+          onPress={handleHeartPress}
+          style={{ marginBottom: 20, alignItems: 'center' }}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
           <View style={{
             width: 40,
             height: 40,
@@ -1339,6 +1402,14 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
           </View>
           <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(likeCount)}</Text>
         </TouchableOpacity>
+
+        <FeedFireAction
+          onPress={handleFirePress}
+          count={fireCount}
+          textColor={theme.textPrimary}
+          sending={fireSending}
+          sent={fireSent}
+        />
 
         {/* Comments Button */}
         <TouchableOpacity onPress={handleCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
@@ -1470,6 +1541,8 @@ const StrollVideoCard = ({ item, index, isVisible, shouldLoadSource = false, onV
           </Text>
         </View>
       </View>
+
+      <FeedReactionBurst type={reactionType} burstKey={reactionKey} />
 
       {/* TikTok-style Comments Modal */}
       <Modal
@@ -1889,6 +1962,9 @@ const Home = () => {
   const [trendingShareCount, setTrendingShareCount] = useState(0);
   const [trendingLiked, setTrendingLiked] = useState(false);
   const [trendingLikeCount, setTrendingLikeCount] = useState(0);
+  const [trendingFireCount, setTrendingFireCount] = useState(0);
+  const [trendingFireSending, setTrendingFireSending] = useState(false);
+  const [trendingFireSent, setTrendingFireSent] = useState(false);
   const [trendingCommentsModalVisible, setTrendingCommentsModalVisible] = useState(false);
   const [trendingComments, setTrendingComments] = useState([]);
   const [loadingTrendingComments, setLoadingTrendingComments] = useState(false);
@@ -1898,8 +1974,12 @@ const Home = () => {
   const [trendingReplyText, setTrendingReplyText] = useState("");
   const [trendingPostingReply, setTrendingPostingReply] = useState(false);
   const [trendingBookmarked, setTrendingBookmarked] = useState(false);
+  const [trendingReactionType, setTrendingReactionType] = useState(null);
+  const [trendingReactionKey, setTrendingReactionKey] = useState(0);
   const trendingVideoRef = useRef(null);
   const trendingPlayOverlayTimeoutRef = useRef(null);
+  const trendingLastTapRef = useRef(0);
+  const trendingLikedRef = useRef(false);
   const recentTrendingLikeActionRef = useRef(false);
   const lastSyncedVideoIdRef = useRef(null); // Track last synced video ID to prevent re-syncing
   const flatListRef = useRef(null);
@@ -2379,6 +2459,10 @@ const Home = () => {
     ) {
       // Mark this video as synced
       lastSyncedVideoIdRef.current = trendingModalVideo.$id;
+      setTrendingLikeCount(0);
+      setTrendingFireCount(0);
+      setTrendingLiked(false);
+      trendingLikedRef.current = false;
       
       // Fetch comments count
       getComments(trendingModalVideo.$id)
@@ -2392,17 +2476,22 @@ const Home = () => {
           .catch(() => setTrendingBookmarked(false));
       }
 
-      // Check like status
       if (user?.$id) {
-        isPostLiked(user.$id, trendingModalVideo.$id)
-          .then((isLiked) => setTrendingLiked(isLiked))
-          .catch(() => setTrendingLiked(false));
+        getFeedReactions(user.$id, trendingModalVideo.$id)
+          .then((counts) => {
+            setTrendingLikeCount((prev) => Math.max(prev, counts.heart));
+            setTrendingFireCount((prev) => Math.max(prev, counts.fire));
+            if (counts.heart > 0) {
+              setTrendingLiked(true);
+              trendingLikedRef.current = true;
+            }
+          })
+          .catch(() => {
+            setTrendingLikeCount(0);
+            setTrendingFireCount(0);
+            setTrendingLiked(false);
+          });
       }
-
-      // Fetch like count
-      getLikeCount(trendingModalVideo.$id)
-        .then((likes) => setTrendingLikeCount(likes))
-        .catch(() => setTrendingLikeCount(0));
     }
   }, [trendingModalVideo?.$id, user?.$id, trendingModalVisible]);
   
@@ -2439,30 +2528,64 @@ const Home = () => {
 
 
   // Handle trending modal like
-  const handleTrendingLike = async () => {
+  const showTrendingReaction = (type) => {
+    setTrendingReactionType(type);
+    setTrendingReactionKey((key) => key + 1);
+  };
+
+  useEffect(() => {
+    trendingLikedRef.current = trendingLiked;
+  }, [trendingLiked]);
+
+  const handleTrendingHeartPress = async () => {
     if (!user?.$id || !trendingModalVideo) {
       Alert.alert(t("common.error"), "Please login to like posts");
       return;
     }
-
+    showTrendingReaction('heart');
+    setTrendingLikeCount((prev) => prev + 1);
+    setTrendingLiked(true);
+    trendingLikedRef.current = true;
     try {
-      // Optimistic update
-      const newLikedState = !trendingLiked;
-      setTrendingLiked(newLikedState);
-      setTrendingLikeCount(prev => newLikedState ? prev + 1 : Math.max(0, prev - 1));
-
-      const newLikeStatus = await toggleLike(user.$id, trendingModalVideo.$id);
-      setTrendingLiked(newLikeStatus);
-      
-      // Refresh like count to ensure accuracy
-      const updatedLikeCount = await getLikeCount(trendingModalVideo.$id);
-      setTrendingLikeCount(updatedLikeCount);
+      const counts = await addFeedReaction(user.$id, trendingModalVideo.$id, 'heart');
+      setTrendingLikeCount((prev) => Math.max(prev, counts.heart));
     } catch (error) {
-      // Revert optimistic update on error
-      setTrendingLiked(!trendingLiked);
-      setTrendingLikeCount(prev => trendingLiked ? prev + 1 : Math.max(0, prev - 1));
       Alert.alert(t("common.error"), "Failed to like post");
     }
+  };
+
+  const handleTrendingFirePress = async () => {
+    if (!user?.$id || !trendingModalVideo) {
+      Alert.alert(t("common.error"), "Please login to share");
+      return;
+    }
+    if (trendingFireSending || trendingFireSent) return;
+    showTrendingReaction('fire');
+    setTrendingFireSending(true);
+    try {
+      const result = await sharePostToActiveFriends({ user, post: trendingModalVideo });
+      if (result.cooldown) {
+        setTrendingFireSent(true);
+        setTimeout(() => setTrendingFireSent(false), result.remainingMs || FIRE_SHARE_COOLDOWN_MS);
+        return;
+      }
+      if (!result.ok) {
+        Alert.alert(t("common.error"), result.error || "Could not send");
+        return;
+      }
+      setTrendingFireSent(true);
+      setTrendingFireCount((prev) => prev + 1);
+      Alert.alert("Sent!", result.message);
+      setTimeout(() => setTrendingFireSent(false), FIRE_SHARE_COOLDOWN_MS);
+    } catch (error) {
+      Alert.alert(t("common.error"), error.message || "Failed to send");
+    } finally {
+      setTrendingFireSending(false);
+    }
+  };
+
+  const handleTrendingLike = async () => {
+    await handleTrendingHeartPress();
   };
 
   // Handle trending modal bookmark
@@ -3601,7 +3724,7 @@ const Home = () => {
                   setTrendingModalVisible(false);
                   setTrendingCommentsModalVisible(false);
                 }} 
-                style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}
+                style={{ position: 'absolute', top: 40, left: 20, zIndex: 30 }}
               >
                 <Text style={{ color: theme.textPrimary, fontSize: 28 }}>×</Text>
               </TouchableOpacity>
@@ -3860,6 +3983,13 @@ const Home = () => {
                     activeOpacity={1}
                     style={{ flex: 1, width: '100%', height: '100%' }}
                     onPress={() => {
+                      const now = Date.now();
+                      if (now - trendingLastTapRef.current < 280) {
+                        trendingLastTapRef.current = 0;
+                        handleTrendingHeartPress();
+                        return;
+                      }
+                      trendingLastTapRef.current = now;
                       setShowTrendingPlayOverlay(true);
                       if (trendingPlayOverlayTimeoutRef.current) {
                         clearTimeout(trendingPlayOverlayTimeoutRef.current);
@@ -3945,11 +4075,15 @@ const Home = () => {
                     </Text>
                   </View>
                 )}
-                
+
                 {/* Right Side Interaction Buttons - TikTok Style */}
-                <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 10 }}>
+                <View style={FEED_SIDE_ACTIONS_STYLE}>
                   {/* Like Button */}
-                  <TouchableOpacity onPress={handleTrendingLike} style={{ marginBottom: 20, alignItems: 'center' }}>
+                  <TouchableOpacity
+                    onPress={handleTrendingHeartPress}
+                    style={{ marginBottom: 20, alignItems: 'center' }}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  >
                     <View style={{
                       width: 40,
                       height: 40,
@@ -3967,6 +4101,14 @@ const Home = () => {
                     </View>
                     <Text style={{ color: theme.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>{formatCount(trendingLikeCount)}</Text>
                   </TouchableOpacity>
+
+                  <FeedFireAction
+                    onPress={handleTrendingFirePress}
+                    count={trendingFireCount}
+                    textColor={theme.textPrimary}
+                    sending={trendingFireSending}
+                    sent={trendingFireSent}
+                  />
 
                   {/* Comments Button */}
                   <TouchableOpacity onPress={handleTrendingCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
@@ -4050,6 +4192,8 @@ const Home = () => {
                     </Text>
                   )}
                 </View>
+
+                <FeedReactionBurst type={trendingReactionType} burstKey={trendingReactionKey} />
               </View>
 
               {/* Comments Section - Inside the trending modal */}

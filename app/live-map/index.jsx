@@ -21,8 +21,7 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
-import ClusteredMapView from "react-native-map-clustering";
+import MapView, { PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
 import { Feather, MaterialIcons } from "@expo/vector-icons";
 
 import { images } from "../../constants";
@@ -53,7 +52,8 @@ import {
   openFriendProfile,
 } from "../../lib/liveMapActions";
 import * as ImagePicker from "expo-image-picker";
-import { FriendLocationMarker, YouLocationMarker, MapMomentMarker } from "../../components/LiveMapMarkers";
+import { FriendLocationMarker, YouLocationMarker, MapMomentMarker, MapPinMarker, DraftPinMarker } from "../../components/LiveMapMarkers";
+import FeedVideoPlayer from "../../components/FeedVideoPlayer";
 import { databases, appwriteConfig, getPhotoUrl } from "../../lib/appwrite";
 import {
   createMapMoment,
@@ -62,6 +62,18 @@ import {
   toggleFriendLike,
   toggleMomentLike,
 } from "../../lib/mapMoments";
+import {
+  MAP_PIN_TYPES,
+  MAP_PIN_VISIBILITY,
+  createMapPin,
+  defaultEventDate,
+  deleteMapPin,
+  formatPinDateTime,
+  listMapPins,
+  togglePinLike,
+  togglePinRsvp,
+} from "../../lib/mapPins";
+import MapDateTimePicker from "../../components/MapDateTimePicker";
 
 const DEFAULT_REGION = {
   latitude: 40.7231,
@@ -105,6 +117,9 @@ export default function LiveMapScreen() {
   const watchRef = useRef(null);
   const followingRef = useRef(true);
   const lastCoordsRef = useRef(null);
+  const mapRegionRef = useRef(null);
+  const draftPinRef = useRef(null);
+  const geocodeSeq = useRef(0);
   const sharingRef = useRef(false);
   const privacyRef = useRef(LOCATION_PRIVACY_MODES.FRIENDS);
   const allowedRef = useRef([]);
@@ -133,8 +148,19 @@ export default function LiveMapScreen() {
   const [searchFocused, setSearchFocused] = useState(false);
   const [likedFriendIds, setLikedFriendIds] = useState([]);
   const [mapMoments, setMapMoments] = useState([]);
+  const [mapPins, setMapPins] = useState([]);
   const [postingMoment, setPostingMoment] = useState(false);
   const [selectedMoment, setSelectedMoment] = useState(null);
+  const [selectedPin, setSelectedPin] = useState(null);
+  const [draftPin, setDraftPin] = useState(null);
+  const [pinComposer, setPinComposer] = useState(null);
+  const [pinType, setPinType] = useState(MAP_PIN_TYPES.EVENT);
+  const [pinVisibility, setPinVisibility] = useState(MAP_PIN_VISIBILITY.FRIENDS);
+  const [pinTitle, setPinTitle] = useState("");
+  const [pinNote, setPinNote] = useState("");
+  const [pinStartsAt, setPinStartsAt] = useState(defaultEventDate);
+  const [savingPin, setSavingPin] = useState(false);
+  draftPinRef.current = draftPin;
 
   const mapProvider = Platform.OS === "android" ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
   const mapStyle = useMemo(() => (isDarkMode ? DARK_MAP_STYLE : []), [isDarkMode]);
@@ -276,6 +302,13 @@ export default function LiveMapScreen() {
         speed: location.coords.speed,
         altitude: location.coords.altitude,
       };
+      if (!mapRegionRef.current) {
+        mapRegionRef.current = {
+          ...next,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        };
+      }
       setCoords(next);
       setLoading(false);
       setError("");
@@ -651,15 +684,20 @@ export default function LiveMapScreen() {
   const refreshMapSocial = useCallback(async () => {
     if (!user?.$id) return;
     try {
-      const [likes, moments] = await Promise.all([
+      const [likes, moments, pins] = await Promise.all([
         getLikedFriendIds(user.$id),
         listMapMoments({
+          viewerId: user.$id,
+          friendIds: friendsOnMap.map((f) => f.userId),
+        }),
+        listMapPins({
           viewerId: user.$id,
           friendIds: friendsOnMap.map((f) => f.userId),
         }),
       ]);
       setLikedFriendIds(likes);
       setMapMoments(moments);
+      setMapPins(pins);
     } catch (_) {
       /* ignore */
     }
@@ -678,48 +716,195 @@ export default function LiveMapScreen() {
     [user?.$id]
   );
 
-  const handleTakeMapPic = useCallback(async () => {
-    if (!user?.$id) return;
-    const location = lastCoordsRef.current || coords;
-    if (!location) {
-      Alert.alert("Location needed", "Wait for GPS, then take a photo on the map.");
-      return;
-    }
+  const captureMapMedia = useCallback(
+    async (kind) => {
+      if (!user?.$id) return;
+      const location = lastCoordsRef.current || coords;
+      if (!location) {
+        Alert.alert("Location needed", "Wait for GPS, then share a photo or short on the map.");
+        return;
+      }
 
-    const cam = await ImagePicker.requestCameraPermissionsAsync();
-    if (!cam.granted) {
-      Alert.alert(
-        "Camera permission",
-        "Allow camera access so you can take a photo to share on the Friends Live Map."
+      const cam = await ImagePicker.requestCameraPermissionsAsync();
+      if (!cam.granted) {
+        Alert.alert(
+          "Camera permission",
+          "Allow camera access so you can post a photo or video short on the Friends Live Map."
+        );
+        return;
+      }
+
+      const isVideo = kind === "video";
+      if (isVideo) {
+        try {
+          const { Audio } = await import("expo-av");
+          const mic = await Audio.requestPermissionsAsync();
+          if (!mic.granted) {
+            Alert.alert(
+              "Microphone permission",
+              "Allow microphone access to record a video short on the map."
+            );
+            return;
+          }
+        } catch (_) {
+          /* camera may still prompt for mic on some devices */
+        }
+      }
+      const result = await ImagePicker.launchCameraAsync(
+        isVideo
+          ? {
+              mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+              videoMaxDuration: 30,
+              quality: 0.6,
+              allowsEditing: false,
+            }
+          : {
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              quality: 0.8,
+              allowsEditing: true,
+              aspect: [1, 1],
+            }
       );
-      return;
-    }
+      if (result.canceled || !result.assets?.[0]) return;
 
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      allowsEditing: true,
-      aspect: [1, 1],
-    });
-    if (result.canceled || !result.assets?.[0]) return;
+      setPostingMoment(true);
+      try {
+        const moment = await createMapMoment({
+          user,
+          photoAsset: isVideo ? undefined : result.assets[0],
+          videoAsset: isVideo ? result.assets[0] : undefined,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          placeLabel,
+        });
+        setMapMoments((prev) => [moment, ...prev.filter((m) => m.$id !== moment.$id)]);
+        setSelectedMoment(moment);
+      } catch (e) {
+        Alert.alert(
+          isVideo ? "Could not post short" : "Could not post photo",
+          e?.message || "Try again."
+        );
+      } finally {
+        setPostingMoment(false);
+      }
+    },
+    [coords, placeLabel, user]
+  );
 
-    setPostingMoment(true);
+  const handleTakeMapPic = useCallback(() => {
+    Alert.alert("Share on the map", "Post at your current location for friends to tap.", [
+      { text: "Photo", onPress: () => captureMapMedia("photo") },
+      { text: "Video short", onPress: () => captureMapMedia("video") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [captureMapMedia]);
+
+  const resetPinForm = useCallback(() => {
+    setPinType(MAP_PIN_TYPES.EVENT);
+    setPinVisibility(MAP_PIN_VISIBILITY.FRIENDS);
+    setPinTitle("");
+    setPinNote("");
+    setPinStartsAt(defaultEventDate());
+  }, []);
+
+  const placeDraftPin = useCallback(
+    async (coordinate, source = "map", { resetForm = false } = {}) => {
+      if (!user?.$id) {
+        Alert.alert("Sign in", "Sign in to drop a pin for friends.");
+        return;
+      }
+      if (
+        !coordinate ||
+        !Number.isFinite(coordinate.latitude) ||
+        !Number.isFinite(coordinate.longitude)
+      ) {
+        Alert.alert("Pick a place", "Tap anywhere on the map to place a pin.");
+        return;
+      }
+      setFollowing(false);
+      setSelectedPin(null);
+      setSelectedMoment(null);
+      if (source !== "drag") setPinComposer(null);
+      if (resetForm) resetPinForm();
+      const next = {
+        latitude: coordinate.latitude,
+        longitude: coordinate.longitude,
+        placeLabel: "",
+        source,
+      };
+      setDraftPin(next);
+      const seq = ++geocodeSeq.current;
+      try {
+        const label =
+          (await reverseGeocodeLabel(coordinate.latitude, coordinate.longitude)) || "";
+        if (seq !== geocodeSeq.current) return;
+        setDraftPin((prev) =>
+          prev &&
+          prev.latitude === coordinate.latitude &&
+          prev.longitude === coordinate.longitude
+            ? { ...prev, placeLabel: label }
+            : prev
+        );
+      } catch (_) {}
+    },
+    [resetPinForm, user?.$id]
+  );
+
+  const startPinPlacement = useCallback(() => {
+    const region = mapRegionRef.current || lastCoordsRef.current || coords || DEFAULT_REGION;
+    placeDraftPin(
+      { latitude: region.latitude, longitude: region.longitude },
+      "center",
+      { resetForm: true }
+    );
+  }, [coords, placeDraftPin]);
+
+  const confirmDraftLocation = useCallback(() => {
+    if (!draftPin) return;
+    setPinComposer({ ...draftPin });
+  }, [draftPin]);
+
+  const cancelPinPlacement = useCallback(() => {
+    setDraftPin(null);
+    setPinComposer(null);
+  }, []);
+
+  const handleSavePin = useCallback(async () => {
+    if (!pinComposer || !user) return;
+    setSavingPin(true);
     try {
-      const moment = await createMapMoment({
+      const pin = await createMapPin({
         user,
-        photoAsset: result.assets[0],
-        latitude: location.latitude,
-        longitude: location.longitude,
-        placeLabel,
+        pinType,
+        visibility: pinVisibility,
+        title: pinTitle,
+        note: pinNote,
+        startsAt: pinType === MAP_PIN_TYPES.EVENT ? pinStartsAt.toISOString() : "",
+        whenLabel:
+          pinType === MAP_PIN_TYPES.EVENT ? formatPinDateTime(pinStartsAt) : "",
+        latitude: Number(draftPin?.latitude ?? pinComposer.latitude),
+        longitude: Number(draftPin?.longitude ?? pinComposer.longitude),
+        placeLabel: draftPin?.placeLabel || pinComposer.placeLabel || placeLabel,
       });
-      setMapMoments((prev) => [moment, ...prev.filter((m) => m.$id !== moment.$id)]);
-      setSelectedMoment(moment);
+      setMapPins((prev) => [pin, ...prev.filter((item) => item.$id !== pin.$id)]);
+      setPinComposer(null);
+      setDraftPin(null);
+      setSelectedPin(pin);
+      mapRef.current?.animateToRegion?.(
+        {
+          latitude: pin.latitude,
+          longitude: pin.longitude,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        },
+        400
+      );
     } catch (e) {
-      Alert.alert("Could not post photo", e?.message || "Try again.");
+      Alert.alert("Could not drop pin", e?.message || "Try again.");
     } finally {
-      setPostingMoment(false);
+      setSavingPin(false);
     }
-  }, [coords, placeLabel, user]);
+  }, [draftPin, pinComposer, pinNote, pinStartsAt, pinTitle, pinType, pinVisibility, placeLabel, user]);
 
   const handleToggleMomentLike = useCallback(async () => {
     if (!selectedMoment || !user?.$id) return;
@@ -727,6 +912,31 @@ export default function LiveMapScreen() {
     setSelectedMoment(next);
     setMapMoments((prev) => prev.map((m) => (m.$id === next.$id ? next : m)));
   }, [selectedMoment, user?.$id]);
+
+  const handleTogglePinLike = useCallback(async () => {
+    if (!selectedPin || !user?.$id) return;
+    const next = await togglePinLike({ pin: selectedPin, userId: user.$id });
+    setSelectedPin(next);
+    setMapPins((prev) => prev.map((item) => (item.$id === next.$id ? next : item)));
+  }, [selectedPin, user?.$id]);
+
+  const handleTogglePinRsvp = useCallback(async () => {
+    if (!selectedPin || !user?.$id) return;
+    const next = await togglePinRsvp({ pin: selectedPin, user });
+    setSelectedPin(next);
+    setMapPins((prev) => prev.map((item) => (item.$id === next.$id ? next : item)));
+  }, [selectedPin, user]);
+
+  const handleDeletePin = useCallback(async () => {
+    if (!selectedPin || !user?.$id) return;
+    try {
+      await deleteMapPin({ pin: selectedPin, userId: user.$id });
+      setMapPins((prev) => prev.filter((item) => item.$id !== selectedPin.$id));
+      setSelectedPin(null);
+    } catch (e) {
+      Alert.alert("Could not remove pin", e?.message || "Try again.");
+    }
+  }, [selectedPin, user?.$id]);
 
   const resolveMomentAvatar = useCallback(
     (moment) => {
@@ -746,13 +956,44 @@ export default function LiveMapScreen() {
     [user?.$id, user?.avatar, friendsOnMap]
   );
 
+  const resolveMomentName = useCallback(
+    (moment) => {
+      const existing = String(moment?.username || "").trim();
+      if (existing && existing !== "User") return existing;
+      if (String(moment?.userId) === String(user?.$id)) {
+        return user?.username || "You";
+      }
+      return (
+        friendsOnMap.find((f) => String(f.userId) === String(moment?.userId))
+          ?.username || "Friend"
+      );
+    },
+    [user?.$id, user?.username, friendsOnMap]
+  );
+
   const momentsWithAvatars = useMemo(
     () =>
       mapMoments.map((moment) => ({
         ...moment,
         avatar: resolveMomentAvatar(moment),
+        username: resolveMomentName(moment),
       })),
-    [mapMoments, resolveMomentAvatar]
+    [mapMoments, resolveMomentAvatar, resolveMomentName]
+  );
+
+  const pinsWithNames = useMemo(
+    () =>
+      mapPins.map((pin) => ({
+        ...pin,
+        username:
+          String(pin.username || "").trim() && pin.username !== "User"
+            ? pin.username
+            : String(pin.userId) === String(user?.$id)
+              ? user?.username || "You"
+              : friendsOnMap.find((f) => String(f.userId) === String(pin.userId))
+                  ?.username || pin.username || "Friend",
+      })),
+    [mapPins, user?.$id, user?.username, friendsOnMap]
   );
 
   const toggleAllowed = useCallback((friendId) => {
@@ -765,7 +1006,7 @@ export default function LiveMapScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
-      <ClusteredMapView
+      <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
         provider={mapProvider}
@@ -779,16 +1020,28 @@ export default function LiveMapScreen() {
         showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={false}
+        moveOnMarkerPress={false}
         onPanDrag={() => setFollowing(false)}
-        animationEnabled
-        clusteringEnabled
-        radius={48}
-        extent={512}
-        minPoints={2}
-        spiderLineColor={theme.accent}
-        clusterColor={theme.accent}
-        clusterTextColor="#111827"
-        clusterFontFamily="Poppins-SemiBold"
+        onRegionChangeComplete={(region) => {
+          if (region?.latitude != null) mapRegionRef.current = region;
+        }}
+        onPress={(event) => {
+          const action = event?.nativeEvent?.action;
+          if (action && action !== "press") return;
+          const coordinate = event?.nativeEvent?.coordinate;
+          if (!coordinate) return;
+          placeDraftPin(coordinate, "map", { resetForm: !draftPinRef.current });
+        }}
+        onLongPress={(event) => {
+          const coordinate = event?.nativeEvent?.coordinate;
+          if (!coordinate) return;
+          placeDraftPin(coordinate, "map", { resetForm: !draftPinRef.current });
+        }}
+        onPoiClick={(event) => {
+          const coordinate = event?.nativeEvent?.coordinate;
+          if (!coordinate) return;
+          placeDraftPin(coordinate, "map", { resetForm: !draftPinRef.current });
+        }}
       >
         {friendsOnMap.map((friend) => (
           <FriendLocationMarker
@@ -809,12 +1062,30 @@ export default function LiveMapScreen() {
           />
         ))}
 
+        {pinsWithNames.map((pin) => (
+          <MapPinMarker
+            key={pin.$id}
+            pin={pin}
+            onPress={() => setSelectedPin(pin)}
+          />
+        ))}
+
         <YouLocationMarker
           coordinate={coords}
           avatar={user?.avatar}
           labelColor="#0F172A"
         />
-      </ClusteredMapView>
+
+        <DraftPinMarker
+          coordinate={draftPin}
+          placeLabel={draftPin?.placeLabel}
+          onDragEnd={(event) => {
+            const coordinate = event?.nativeEvent?.coordinate;
+            if (!coordinate) return;
+            placeDraftPin(coordinate, "drag");
+          }}
+        />
+      </MapView>
 
       <SafeAreaView pointerEvents="box-none" style={styles.overlay}>
         <View style={styles.topRow} pointerEvents="box-none">
@@ -864,13 +1135,25 @@ export default function LiveMapScreen() {
                 opacity: postingMoment || !coords ? 0.55 : 1,
               },
             ]}
-            accessibilityLabel="Take a photo on the map"
+            accessibilityLabel="Share a photo or video short on the map"
           >
             {postingMoment ? (
               <ActivityIndicator color="#111" size="small" />
             ) : (
               <Feather name="camera" size={22} color="#111" />
             )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={startPinPlacement}
+            style={[
+              styles.roundBtn,
+              {
+                backgroundColor: draftPin ? "#F97316" : theme.surface,
+              },
+            ]}
+            accessibilityLabel="Drop a pin anywhere on the map"
+          >
+            <Feather name="map-pin" size={22} color={draftPin ? "#fff" : theme.accent} />
           </TouchableOpacity>
         </View>
 
@@ -906,7 +1189,47 @@ export default function LiveMapScreen() {
             </View>
           ) : null}
 
-          {!loading && !error ? (
+          {draftPin && !pinComposer ? (
+            <View
+              style={[
+                styles.sheet,
+                {
+                  backgroundColor: isDarkMode ? "#0F172A" : "#FFFFFF",
+                  borderColor: "#F97316",
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              <Text style={[styles.youTitle, { color: theme.textPrimary }]}>
+                Confirm pin location
+              </Text>
+              <Text style={[styles.sheetText, { color: theme.textSecondary }]}>
+                {draftPin.placeLabel ||
+                  `${draftPin.latitude.toFixed(5)}, ${draftPin.longitude.toFixed(5)}`}
+              </Text>
+              <Text style={[styles.sheetHint, { color: theme.textMuted }]}>
+                Tap another spot or drag the orange pin to move it.
+              </Text>
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: theme.surfaceMuted }]}
+                  onPress={cancelPinPlacement}
+                >
+                  <Text style={{ color: theme.textPrimary }}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: "#F97316" }]}
+                  onPress={confirmDraftLocation}
+                >
+                  <Text style={{ color: "#fff", fontFamily: "Poppins-SemiBold" }}>
+                    Confirm Location
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+
+          {!loading && !error && !(draftPin && !pinComposer) ? (
             <View
               style={[
                 styles.sheet,
@@ -931,6 +1254,9 @@ export default function LiveMapScreen() {
                       (coords
                         ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`
                         : "Waiting for GPS")}
+                  </Text>
+                  <Text style={[styles.sheetHint, { color: theme.textMuted }]}>
+                    Tap anywhere on the map to drop a pin, then drag it before you confirm.
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -1434,7 +1760,28 @@ export default function LiveMapScreen() {
             style={[styles.momentCard, { backgroundColor: theme.surface }]}
             onPress={(e) => e.stopPropagation()}
           >
-            {selectedMoment?.photoUrl ? (
+            {selectedMoment?.videoUrl ? (
+              <View style={styles.momentPreviewWrap}>
+                <FeedVideoPlayer
+                  videoUrl={selectedMoment.videoUrl}
+                  posterUri={selectedMoment.photoUrl || undefined}
+                  shouldPlay
+                  isLooping
+                  isMuted={false}
+                />
+                <View style={styles.momentPhotoAvatarWrap}>
+                  <Image
+                    source={
+                      resolveMomentAvatar(selectedMoment)
+                        ? { uri: resolveMomentAvatar(selectedMoment) }
+                        : images.profile
+                    }
+                    style={styles.momentPhotoAvatar}
+                    resizeMode="cover"
+                  />
+                </View>
+              </View>
+            ) : selectedMoment?.photoUrl ? (
               <View style={styles.momentPreviewWrap}>
                 <Image
                   source={{ uri: selectedMoment.photoUrl }}
@@ -1457,7 +1804,7 @@ export default function LiveMapScreen() {
             <View style={styles.momentMeta}>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-SemiBold" }}>
-                  {selectedMoment?.username || "Photo"}
+                  {selectedMoment?.username || (selectedMoment?.videoUrl ? "Short" : "Photo")}
                 </Text>
                 <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
                   {selectedMoment?.placeLabel || "On the map"}
@@ -1494,6 +1841,306 @@ export default function LiveMapScreen() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={!!selectedPin}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedPin(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setSelectedPin(null)}>
+          <Pressable
+            style={[styles.momentCard, { backgroundColor: theme.surface }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.pinDetailHeader}>
+              <View
+                style={[
+                  styles.pinDetailIcon,
+                  {
+                    backgroundColor:
+                      selectedPin?.pinType === MAP_PIN_TYPES.FAVORITE ? "#8B5CF6" : "#F97316",
+                  },
+                ]}
+              >
+                <Feather
+                  name={selectedPin?.pinType === MAP_PIN_TYPES.FAVORITE ? "star" : "calendar"}
+                  size={20}
+                  color="#fff"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 12, fontFamily: "Poppins-SemiBold" }}>
+                  {selectedPin?.pinType === MAP_PIN_TYPES.FAVORITE ? "Favorite spot" : "Upcoming event"}
+                </Text>
+                <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-SemiBold", fontSize: 18 }}>
+                  {selectedPin?.title}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.pinBadgeRow}>
+              <View style={[styles.pinInfoBadge, { backgroundColor: theme.surfaceMuted }]}>
+                <Feather
+                  name={selectedPin?.visibility === MAP_PIN_VISIBILITY.EVERYONE ? "globe" : "users"}
+                  size={12}
+                  color={theme.textSecondary}
+                />
+                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                  {selectedPin?.visibility === MAP_PIN_VISIBILITY.EVERYONE ? "Public" : "Friends"}
+                </Text>
+              </View>
+              {selectedPin?.pinType === MAP_PIN_TYPES.EVENT ? (
+                <View style={[styles.pinInfoBadge, { backgroundColor: "rgba(249,115,22,0.16)" }]}>
+                  <Feather name="user-check" size={12} color="#F97316" />
+                  <Text style={{ color: theme.textPrimary, fontSize: 12 }}>
+                    {selectedPin?.rsvpCount || 0} going
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+            {selectedPin?.startsAt || selectedPin?.whenLabel ? (
+              <Text style={{ color: theme.textPrimary, fontSize: 14 }}>
+                {formatPinDateTime(selectedPin?.startsAt) || selectedPin?.whenLabel}
+              </Text>
+            ) : null}
+            {selectedPin?.note ? (
+              <Text style={{ color: theme.textSecondary, fontSize: 14, lineHeight: 20 }}>
+                {selectedPin.note}
+              </Text>
+            ) : null}
+            <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+              {selectedPin?.placeLabel || "Dropped on the map"} · {selectedPin?.username || "Friend"}
+            </Text>
+            {selectedPin?.pinType === MAP_PIN_TYPES.EVENT && selectedPin?.rsvpUsernames?.length ? (
+              <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                {selectedPin.rsvpUsernames.slice(0, 3).join(", ")}
+                {selectedPin.rsvpUsernames.length > 3
+                  ? ` +${selectedPin.rsvpUsernames.length - 3} more`
+                  : ""}
+              </Text>
+            ) : null}
+            <View style={styles.momentMeta}>
+              {selectedPin?.pinType === MAP_PIN_TYPES.EVENT ? (
+                <TouchableOpacity
+                  onPress={handleTogglePinRsvp}
+                  style={[
+                    styles.rsvpBtn,
+                    {
+                      backgroundColor: selectedPin?.rsvpUserIds?.includes(String(user?.$id))
+                        ? "rgba(34,197,94,0.18)"
+                        : theme.accent,
+                    },
+                  ]}
+                >
+                  <Feather
+                    name={
+                      selectedPin?.rsvpUserIds?.includes(String(user?.$id))
+                        ? "check"
+                        : "plus"
+                    }
+                    size={16}
+                    color={
+                      selectedPin?.rsvpUserIds?.includes(String(user?.$id))
+                        ? "#16A34A"
+                        : "#111"
+                    }
+                  />
+                  <Text
+                    style={{
+                      color: selectedPin?.rsvpUserIds?.includes(String(user?.$id))
+                        ? "#16A34A"
+                        : "#111",
+                      fontFamily: "Poppins-SemiBold",
+                    }}
+                  >
+                    {selectedPin?.rsvpUserIds?.includes(String(user?.$id))
+                      ? "Going"
+                      : "RSVP"}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                onPress={handleTogglePinLike}
+                style={styles.momentLikeBtn}
+                accessibilityLabel="Like pin"
+              >
+                <MaterialIcons
+                  name={
+                    selectedPin?.likedBy?.includes(String(user?.$id))
+                      ? "favorite"
+                      : "favorite-border"
+                  }
+                  size={26}
+                  color={
+                    selectedPin?.likedBy?.includes(String(user?.$id))
+                      ? "#FF4D6D"
+                      : theme.textMuted
+                  }
+                />
+                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                  {selectedPin?.likeCount || 0}
+                </Text>
+              </TouchableOpacity>
+              {String(selectedPin?.userId) === String(user?.$id) ? (
+                <TouchableOpacity
+                  onPress={handleDeletePin}
+                  style={[styles.modalBtn, { backgroundColor: theme.surfaceMuted, flex: 0, paddingHorizontal: 16 }]}
+                >
+                  <Text style={{ color: theme.danger || "#EF4444" }}>Remove</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <TouchableOpacity
+              style={[styles.modalBtn, { backgroundColor: theme.surfaceMuted }]}
+              onPress={() => setSelectedPin(null)}
+            >
+              <Text style={{ color: theme.textPrimary }}>Close</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={!!pinComposer}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPinComposer(null)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.inviteModalDismiss} onPress={() => setPinComposer(null)} />
+          <View style={[styles.inviteSheet, { backgroundColor: theme.surface }]}>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Drop a pin</Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 13, marginBottom: 8 }}>
+              {pinComposer?.placeLabel ||
+                (pinComposer
+                  ? `${Number(pinComposer.latitude).toFixed(5)}, ${Number(pinComposer.longitude).toFixed(5)}`
+                  : "")}
+            </Text>
+            <View style={styles.pinTypeRow}>
+              <TouchableOpacity
+                onPress={() => setPinType(MAP_PIN_TYPES.EVENT)}
+                style={[
+                  styles.pinTypeChip,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      pinType === MAP_PIN_TYPES.EVENT ? "rgba(249,115,22,0.16)" : theme.surfaceMuted,
+                  },
+                ]}
+              >
+                <Feather name="calendar" size={16} color="#F97316" />
+                <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-SemiBold" }}>Event</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setPinType(MAP_PIN_TYPES.FAVORITE)}
+                style={[
+                  styles.pinTypeChip,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      pinType === MAP_PIN_TYPES.FAVORITE ? "rgba(139,92,246,0.16)" : theme.surfaceMuted,
+                  },
+                ]}
+              >
+                <Feather name="star" size={16} color="#8B5CF6" />
+                <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-SemiBold" }}>Favorite</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.pinTypeRow}>
+              <TouchableOpacity
+                onPress={() => setPinVisibility(MAP_PIN_VISIBILITY.FRIENDS)}
+                style={[
+                  styles.pinTypeChip,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      pinVisibility === MAP_PIN_VISIBILITY.FRIENDS
+                        ? theme.accentSoft || "rgba(255,156,1,0.16)"
+                        : theme.surfaceMuted,
+                  },
+                ]}
+              >
+                <Feather name="users" size={16} color={theme.accent} />
+                <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-SemiBold" }}>Friends</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setPinVisibility(MAP_PIN_VISIBILITY.EVERYONE)}
+                style={[
+                  styles.pinTypeChip,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      pinVisibility === MAP_PIN_VISIBILITY.EVERYONE
+                        ? "rgba(34,197,94,0.16)"
+                        : theme.surfaceMuted,
+                  },
+                ]}
+              >
+                <Feather name="globe" size={16} color="#16A34A" />
+                <Text style={{ color: theme.textPrimary, fontFamily: "Poppins-SemiBold" }}>Public</Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              value={pinTitle}
+              onChangeText={setPinTitle}
+              placeholder={pinType === MAP_PIN_TYPES.FAVORITE ? "Spot name" : "Event name"}
+              placeholderTextColor={theme.inputPlaceholder || theme.textMuted}
+              style={[
+                styles.pinInput,
+                { color: theme.textPrimary, borderColor: theme.border, backgroundColor: theme.surfaceMuted },
+              ]}
+              maxLength={80}
+            />
+            {pinType === MAP_PIN_TYPES.EVENT ? (
+              <MapDateTimePicker
+                value={pinStartsAt}
+                onChange={setPinStartsAt}
+                theme={theme}
+              />
+            ) : null}
+            <TextInput
+              value={pinNote}
+              onChangeText={setPinNote}
+              placeholder="What should friends know?"
+              placeholderTextColor={theme.inputPlaceholder || theme.textMuted}
+              style={[
+                styles.pinInput,
+                styles.pinNoteInput,
+                { color: theme.textPrimary, borderColor: theme.border, backgroundColor: theme.surfaceMuted },
+              ]}
+              maxLength={280}
+              multiline
+            />
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 8, marginBottom: 12 }}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: theme.surfaceMuted }]}
+                onPress={() => setPinComposer(null)}
+              >
+                <Text style={{ color: theme.textPrimary }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalBtn,
+                  { backgroundColor: theme.accent, opacity: savingPin || !pinTitle.trim() ? 0.55 : 1 },
+                ]}
+                disabled={savingPin || !pinTitle.trim()}
+                onPress={handleSavePin}
+              >
+                {savingPin ? (
+                  <ActivityIndicator color="#111" size="small" />
+                ) : (
+                  <Text style={{ color: "#111", fontFamily: "Poppins-SemiBold" }}>Drop pin</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -1740,6 +2387,66 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
     borderRadius: 12,
+  },
+  pinTypeRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 8,
+  },
+  pinTypeChip: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+  },
+  pinInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    marginBottom: 8,
+  },
+  pinNoteInput: {
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  pinDetailHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  pinDetailIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pinBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  pinInfoBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  rsvpBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
 });
 

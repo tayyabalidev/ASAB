@@ -12,11 +12,12 @@ import { WebView } from 'react-native-webview';
 
 import { icons } from "../../constants";
 import useAppwrite from "../../lib/useAppwrite";
-import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getProfileLikers, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, toggleLike, isPostLiked, getLikeCount, getIOSCompatibleVideoUrl, getVideoPosterUri, getVideoPlaybackUrls, getCurrentUser } from "../../lib/appwrite";
+import { getUserPosts, signOut, updateUserProfile, uploadFile, handleProfileAccessRequest, getFollowers, getFollowing, getProfileLikers, getComments, addComment, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, databases, appwriteConfig, getVideoById, toggleFollowUser, getUserPhotos, getPhotoById, deleteVideoPost, deletePhotoPost, getUserBookmarks, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, createStripeAccount, createAccountLink, getStripeAccountStatus, updateUserStripeAccount, deleteAccount, getIOSCompatibleVideoUrl, getVideoPosterUri, getVideoPlaybackUrls, getCurrentUser } from "../../lib/appwrite";
 import { useNotifications } from "../../hooks/useNotifications";
 import { getPlaybackUriForPost, getGridThumbnailUriForPost, isMuxProcessingPost } from "../../lib/muxPlayback";
 import { useGlobalContext } from "../../context/GlobalProvider";
 import { EmptyState, InfoBox, VideoCard, ThemeToggle, VideoProgressBar, PhotoSlideCarousel, PhotoSlideCountBadge } from "../../components";
+import FeedReactionBurst, { FeedFireAction, FEED_SIDE_ACTIONS_STYLE } from "../../components/FeedReactionBurst";
 import { getSlidePhotoUris } from "../../lib/photoSlides";
 import { images } from "../../constants";
 import { useTranslation } from "react-i18next";
@@ -25,6 +26,8 @@ import { isVideoMedia, isMuxPlaceholderVideo } from "../../lib/mediaType";
 import { getFilterCSS } from "../../lib/filterCss";
 import { prefetchAdjacentProfileVideos } from "../../lib/prefetchVideoSource";
 import { subscribeContentFeedInvalidate } from "../../lib/contentFeedEvents";
+import { addFeedReaction, getFeedReactions } from "../../lib/feedReactions";
+import { FIRE_SHARE_COOLDOWN_MS, sharePostToActiveFriends } from "../../lib/fireShare";
 
 // Component to display pending request with user details
 const PendingRequestItem = ({ requestingUserId, onApprove, onDeny }) => {
@@ -355,6 +358,13 @@ const Profile = () => {
   const [bookmarked, setBookmarked] = useState(false);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
+  const [fireCount, setFireCount] = useState(0);
+  const [fireSending, setFireSending] = useState(false);
+  const [fireSent, setFireSent] = useState(false);
+  const [reactionType, setReactionType] = useState(null);
+  const [reactionKey, setReactionKey] = useState(0);
+  const lastTapRef = useRef(0);
+  const likedRef = useRef(false);
   const [commentsCount, setCommentsCount] = useState(0);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
   const [comments, setComments] = useState([]);
@@ -1348,6 +1358,12 @@ const Profile = () => {
   useEffect(() => {
     if (!modalVideo || !user?.$id) return;
     let isMounted = true;
+    setLikeCount(0);
+    setFireCount(0);
+    setFireSent(false);
+    setFireSending(false);
+    setLiked(false);
+    likedRef.current = false;
 
     const checkBookmarkStatus = async () => {
       try {
@@ -1363,48 +1379,82 @@ const Profile = () => {
       } catch (error) {
       }
     };
-    const checkLikeStatus = async () => {
+    const loadReactions = async () => {
       try {
-        const isLiked = await isPostLiked(user.$id, modalVideo.$id);
-        if (isMounted) setLiked(isLiked);
-      } catch (error) {
-      }
-    };
-    const fetchLikeCount = async () => {
-      try {
-        const likes = await getLikeCount(modalVideo.$id);
-        if (isMounted) setLikeCount(likes);
+        const counts = await getFeedReactions(user.$id, modalVideo.$id);
+        if (!isMounted) return;
+        setLikeCount((prev) => Math.max(prev, counts.heart));
+        setFireCount((prev) => Math.max(prev, counts.fire));
+        if (counts.heart > 0) {
+          setLiked(true);
+          likedRef.current = true;
+        }
       } catch (error) {
       }
     };
 
     checkBookmarkStatus();
     fetchShareCount();
-    checkLikeStatus();
-    fetchLikeCount();
+    loadReactions();
     return () => { isMounted = false; };
   }, [modalVideo, user?.$id]);
 
-  const handleLike = async () => {
+  useEffect(() => {
+    likedRef.current = liked;
+  }, [liked]);
+
+  const showReaction = (type) => {
+    setReactionType(type);
+    setReactionKey((key) => key + 1);
+  };
+
+  const handleHeartPress = async () => {
     if (!user?.$id || !modalVideo?.$id) {
       Alert.alert(t("common.error"), t("auth.signInRequired") || "Please login to like posts");
       return;
     }
-
-    const nextLiked = !liked;
-    setLiked(nextLiked);
-    setLikeCount((prev) => (nextLiked ? prev + 1 : Math.max(0, prev - 1)));
-
+    showReaction('heart');
+    setLikeCount((prev) => prev + 1);
+    setLiked(true);
+    likedRef.current = true;
     try {
-      const newLikeStatus = await toggleLike(user.$id, modalVideo.$id);
-      setLiked(newLikeStatus);
-      const updatedLikeCount = await getLikeCount(modalVideo.$id);
-      setLikeCount(updatedLikeCount);
+      const counts = await addFeedReaction(user.$id, modalVideo.$id, 'heart');
+      setLikeCount((prev) => Math.max(prev, counts.heart));
     } catch (error) {
-      // Revert optimistic update on error
-      setLiked(!nextLiked);
-      setLikeCount((prev) => (!nextLiked ? prev + 1 : Math.max(0, prev - 1)));
     }
+  };
+
+  const handleFirePress = async () => {
+    if (!user?.$id || !modalVideo?.$id) {
+      Alert.alert(t("common.error"), t("auth.signInRequired") || "Please login to share");
+      return;
+    }
+    if (fireSending || fireSent) return;
+    showReaction('fire');
+    setFireSending(true);
+    try {
+      const result = await sharePostToActiveFriends({ user, post: modalVideo });
+      if (result.cooldown) {
+        setFireSent(true);
+        setTimeout(() => setFireSent(false), result.remainingMs || FIRE_SHARE_COOLDOWN_MS);
+        return;
+      }
+      if (!result.ok) {
+        Alert.alert(t("common.error"), result.error || "Could not send");
+        return;
+      }
+      setFireSent(true);
+      setFireCount((prev) => prev + 1);
+      Alert.alert("Sent!", result.message);
+      setTimeout(() => setFireSent(false), FIRE_SHARE_COOLDOWN_MS);
+    } catch (error) {
+    } finally {
+      setFireSending(false);
+    }
+  };
+
+  const handleLike = async () => {
+    await handleHeartPress();
   };
 
   // Track loaded thumbnails to prevent reloading
@@ -3028,7 +3078,7 @@ const Profile = () => {
               >
                 <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
                   {/* Close Button */}
-                  <TouchableOpacity onPress={() => setModalVisible(false)} style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}>
+                  <TouchableOpacity onPress={() => setModalVisible(false)} style={{ position: 'absolute', top: 40, left: 20, zIndex: 30 }}>
                     <Text style={{ color: theme.textPrimary, fontSize: 28 }}>×</Text>
                   </TouchableOpacity>
                   
@@ -3107,6 +3157,13 @@ const Profile = () => {
                         {/* Video Control Overlay - Only shows progress bar, doesn't pause/play */}
                         <TouchableOpacity
                           onPress={() => {
+                            const now = Date.now();
+                            if (now - lastTapRef.current < 280) {
+                              lastTapRef.current = 0;
+                              handleHeartPress();
+                              return;
+                            }
+                            lastTapRef.current = now;
                             setShowProgressBar(true);
                           }}
                           style={{
@@ -3193,9 +3250,9 @@ const Profile = () => {
                       />
                     )}
                   </View>
-                  
+
                   {/* Right Side Interaction Buttons - TikTok Style */}
-                  <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 10 }}>
+                  <View style={FEED_SIDE_ACTIONS_STYLE}>
                     {/* Profile Picture - Above Like Button */}
                     <TouchableOpacity style={{ marginBottom: 15, alignItems: 'center' }}>
                       <View style={{ position: 'relative' }}>
@@ -3229,7 +3286,7 @@ const Profile = () => {
                     </TouchableOpacity>
 
                     {/* Like Button */}
-                    <TouchableOpacity onPress={handleLike} style={{ marginBottom: 20, alignItems: 'center' }}>
+                    <TouchableOpacity onPress={handleHeartPress} style={{ marginBottom: 20, alignItems: 'center' }}>
                       <View style={{
                         width: 40,
                         height: 40,
@@ -3248,6 +3305,14 @@ const Profile = () => {
                         {formatCount(likeCount)}
                       </Text>
                     </TouchableOpacity>
+
+                    <FeedFireAction
+                      onPress={handleFirePress}
+                      count={fireCount}
+                      textColor={theme.textPrimary}
+                      sending={fireSending}
+                      sent={fireSent}
+                    />
 
                     {/* Comments Button */}
                     <TouchableOpacity onPress={handleCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
@@ -3348,6 +3413,8 @@ const Profile = () => {
                       {t('profile.general.trendingTags')}
                     </Text>
                   </View>
+
+                  <FeedReactionBurst type={reactionType} burstKey={reactionKey} />
                   
                   {/* Comments Modal */}
                   <Modal

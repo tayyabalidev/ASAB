@@ -15,8 +15,9 @@ import useAppwrite from "../../../lib/useAppwrite";
 import { getUserPosts, getCurrentUser, databases, appwriteConfig, getVideoPosterUri, getIOSCompatibleVideoUrl, getVideoPlaybackUrls } from "../../../lib/appwrite";
 import { useGlobalContext } from "../../../context/GlobalProvider";
 import { EmptyState, VideoProgressBar } from "../../../components";
+import FeedReactionBurst, { FeedFireAction, FEED_SIDE_ACTIONS_STYLE } from "../../../components/FeedReactionBurst";
 import CallButton from "../../../components/CallButton";
-import { toggleFollowUser, getFollowers, getUserLikesCount, getProfileLikers, toggleProfileLike, isProfileLiked, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout, toggleLike, isPostLiked, getLikeCount } from "../../../lib/appwrite";
+import { toggleFollowUser, getFollowers, getUserLikesCount, getProfileLikers, toggleProfileLike, isProfileLiked, toggleLikePost, getComments, addComment, getPostLikes, toggleBookmark, isVideoBookmarked, getShareCount, incrementShareCount, getCreatorTotalDonations, getPendingPayoutAmount, getCreatorDonations, getCreatorPayouts, createPayout } from "../../../lib/appwrite";
 import { toggleCreatorNotificationSubscription, isUserSubscribedToCreator } from "../../../lib/creatorSubscriptions";
 import { reportContent, blockUser, REPORT_REASONS } from "../../../lib/moderation";
 import { images } from "../../../constants";
@@ -25,6 +26,8 @@ import { getPlaybackUriForPost, getGridThumbnailUriForPost } from "../../../lib/
 import { normalizeRouteParam } from "../../../lib/notificationNavigation";
 import { safeRouterBack } from "../../../lib/routerHelpers";
 import { prefetchAdjacentProfileVideos } from "../../../lib/prefetchVideoSource";
+import { addFeedReaction, getFeedReactions } from "../../../lib/feedReactions";
+import { FIRE_SHARE_COOLDOWN_MS, sharePostToActiveFriends } from "../../../lib/fireShare";
 
 const UserProfile = () => {
   const { id: idParam } = useLocalSearchParams();
@@ -52,6 +55,13 @@ const UserProfile = () => {
   const [bookmarked, setBookmarked] = useState(false);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
+  const [fireCount, setFireCount] = useState(0);
+  const [fireSending, setFireSending] = useState(false);
+  const [fireSent, setFireSent] = useState(false);
+  const [reactionType, setReactionType] = useState(null);
+  const [reactionKey, setReactionKey] = useState(0);
+  const lastTapRef = useRef(0);
+  const likedRef = useRef(false);
   const [commentsCount, setCommentsCount] = useState(0);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
   const [comments, setComments] = useState([]);
@@ -786,6 +796,12 @@ const UserProfile = () => {
   // Check bookmark status and share count when modal video changes
   useEffect(() => {
     if (modalVideo && currentUser?.$id) {
+      setLikeCount(0);
+      setFireCount(0);
+      setFireSent(false);
+      setFireSending(false);
+      setLiked(false);
+      likedRef.current = false;
       // Check bookmark status
       const checkBookmarkStatus = async () => {
         try {
@@ -795,21 +811,16 @@ const UserProfile = () => {
         }
       };
 
-      const checkLikeStatus = async () => {
+      const loadReactions = async () => {
         try {
-          const isLiked = await isPostLiked(currentUser.$id, modalVideo.$id);
-          setLiked(isLiked);
+          const counts = await getFeedReactions(currentUser.$id, modalVideo.$id);
+          setLikeCount((prev) => Math.max(prev, counts.heart));
+          setFireCount((prev) => Math.max(prev, counts.fire));
+          if (counts.heart > 0) {
+            setLiked(true);
+            likedRef.current = true;
+          }
         } catch (error) {
-          setLiked(false);
-        }
-      };
-
-      const fetchLikeCount = async () => {
-        try {
-          const likes = await getLikeCount(modalVideo.$id);
-          setLikeCount(likes);
-        } catch (error) {
-          setLikeCount(0);
         }
       };
 
@@ -823,31 +834,67 @@ const UserProfile = () => {
       };
 
       checkBookmarkStatus();
-      checkLikeStatus();
-      fetchLikeCount();
+      loadReactions();
       fetchShareCount();
     }
   }, [modalVideo, currentUser?.$id]);
 
-  const handleLike = async () => {
+  useEffect(() => {
+    likedRef.current = liked;
+  }, [liked]);
+
+  const showReaction = (type) => {
+    setReactionType(type);
+    setReactionKey((key) => key + 1);
+  };
+
+  const handleHeartPress = async () => {
     if (!currentUser?.$id || !modalVideo?.$id) {
       Alert.alert(t("common.error"), "Please login to like posts");
       return;
     }
-
-    const nextLiked = !liked;
-    setLiked(nextLiked);
-    setLikeCount((prev) => (nextLiked ? prev + 1 : Math.max(0, prev - 1)));
-
+    showReaction('heart');
+    setLikeCount((prev) => prev + 1);
+    setLiked(true);
+    likedRef.current = true;
     try {
-      const newLikeStatus = await toggleLike(currentUser.$id, modalVideo.$id);
-      setLiked(newLikeStatus);
-      const updatedLikeCount = await getLikeCount(modalVideo.$id);
-      setLikeCount(updatedLikeCount);
+      const counts = await addFeedReaction(currentUser.$id, modalVideo.$id, 'heart');
+      setLikeCount((prev) => Math.max(prev, counts.heart));
     } catch (error) {
-      setLiked(!nextLiked);
-      setLikeCount((prev) => (!nextLiked ? prev + 1 : Math.max(0, prev - 1)));
     }
+  };
+
+  const handleFirePress = async () => {
+    if (!currentUser?.$id || !modalVideo?.$id) {
+      Alert.alert(t("common.error"), "Please login to share");
+      return;
+    }
+    if (fireSending || fireSent) return;
+    showReaction('fire');
+    setFireSending(true);
+    try {
+      const result = await sharePostToActiveFriends({ user: currentUser, post: modalVideo });
+      if (result.cooldown) {
+        setFireSent(true);
+        setTimeout(() => setFireSent(false), result.remainingMs || FIRE_SHARE_COOLDOWN_MS);
+        return;
+      }
+      if (!result.ok) {
+        Alert.alert(t("common.error"), result.error || "Could not send");
+        return;
+      }
+      setFireSent(true);
+      setFireCount((prev) => prev + 1);
+      Alert.alert("Sent!", result.message);
+      setTimeout(() => setFireSent(false), FIRE_SHARE_COOLDOWN_MS);
+    } catch (error) {
+    } finally {
+      setFireSending(false);
+    }
+  };
+
+  const handleLike = async () => {
+    await handleHeartPress();
   };
 
   if (loading) {
@@ -1620,7 +1667,7 @@ const UserProfile = () => {
                 >
                   <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
                {/* Close Button */}
-               <TouchableOpacity onPress={() => setModalVisible(false)} style={{ position: 'absolute', top: 40, right: 20, zIndex: 10 }}>
+               <TouchableOpacity onPress={() => setModalVisible(false)} style={{ position: 'absolute', top: 40, left: 20, zIndex: 30 }}>
                  <Text style={{ color: '#fff', fontSize: 28 }}>×</Text>
                </TouchableOpacity>
                
@@ -1698,6 +1745,13 @@ const UserProfile = () => {
                       {/* Video Control Overlay - Only shows progress bar, doesn't pause/play */}
                       <TouchableOpacity
                         onPress={() => {
+                          const now = Date.now();
+                          if (now - lastTapRef.current < 280) {
+                            lastTapRef.current = 0;
+                            handleHeartPress();
+                            return;
+                          }
+                          lastTapRef.current = now;
                           setShowProgressBar(true);
                         }}
                         style={{
@@ -1784,9 +1838,9 @@ const UserProfile = () => {
                     />
                   )}
                 </View>
-                
+
                {/* Right Side Interaction Buttons - TikTok Style */}
-               <View style={{ position: 'absolute', right: 15, bottom: 150, zIndex: 10 }}>
+               <View style={FEED_SIDE_ACTIONS_STYLE}>
                  {/* Profile Picture */}
                  <TouchableOpacity style={{ marginBottom: 15, alignItems: 'center' }}>
                    <View style={{ position: 'relative' }}>
@@ -1802,7 +1856,7 @@ const UserProfile = () => {
                  </TouchableOpacity>
 
                {/* Like Button */}
-               <TouchableOpacity onPress={handleLike} style={{ marginBottom: 20, alignItems: 'center' }}>
+               <TouchableOpacity onPress={handleHeartPress} style={{ marginBottom: 20, alignItems: 'center' }}>
                  <View style={{
                    width: 40,
                    height: 40,
@@ -1821,6 +1875,14 @@ const UserProfile = () => {
                    {formatCount(likeCount)}
                  </Text>
                </TouchableOpacity>
+
+                 <FeedFireAction
+                   onPress={handleFirePress}
+                   count={fireCount}
+                   textColor="#fff"
+                   sending={fireSending}
+                   sent={fireSent}
+                 />
 
                  {/* Comments Button */}
                  <TouchableOpacity onPress={handleCommentPress} style={{ marginBottom: 20, alignItems: 'center' }}>
@@ -1906,6 +1968,8 @@ const UserProfile = () => {
                    {t('profile.general.trendingTags')}
                  </Text>
                </View>
+
+               <FeedReactionBurst type={reactionType} burstKey={reactionKey} />
                
                {/* Comments Modal */}
                <Modal

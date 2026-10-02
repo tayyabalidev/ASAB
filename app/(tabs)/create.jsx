@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { ResizeMode, Video, Audio } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -133,6 +133,34 @@ async function cropImageToRatio(uri, ratio) {
 const Create = () => {
   const { user, isRTL, theme, isDarkMode } = useGlobalContext();
   const { t } = useTranslation();
+  const params = useLocalSearchParams();
+  const circleIdParam = Array.isArray(params.circleId)
+    ? params.circleId[0]
+    : params.circleId;
+  const circleIdFromParams = circleIdParam ? String(circleIdParam).trim() : "";
+  const circleNameParam = Array.isArray(params.circleName)
+    ? params.circleName[0]
+    : params.circleName;
+  const circleNameFromParams = circleNameParam
+    ? String(circleNameParam).trim()
+    : "";
+  // Persist Circle scope across ImagePicker / camera blur. Clearing on blur
+  // previously dropped circleId and published into Home by mistake.
+  const circleIdRef = useRef("");
+  const circleNameRef = useRef("");
+  useEffect(() => {
+    if (circleIdFromParams) circleIdRef.current = circleIdFromParams;
+    if (circleNameFromParams) circleNameRef.current = circleNameFromParams;
+  }, [circleIdFromParams, circleNameFromParams]);
+  const circleId = circleIdFromParams || circleIdRef.current;
+  const circleName = circleNameFromParams || circleNameRef.current;
+  const clearCircleComposeContext = useCallback(() => {
+    circleIdRef.current = "";
+    circleNameRef.current = "";
+    if (circleIdFromParams || circleNameFromParams) {
+      router.setParams({ circleId: undefined, circleName: undefined });
+    }
+  }, [circleIdFromParams, circleNameFromParams]);
   const [uploading, setUploading] = useState(false);
   const [postType, setPostType] = useState("video"); // 'video' or 'photo'
   const [form, setForm] = useState({
@@ -1748,7 +1776,7 @@ const Create = () => {
         try {
           if (isMuxUploadEnabled()) {
             const muxPost = await publishVideoWithMux(
-              { ...form, userId: user.$id },
+              { ...form, userId: user.$id, ...(circleId ? { circleId } : {}) },
               processedVideo
             );
             if (muxPost?.$id) {
@@ -1765,6 +1793,7 @@ const Create = () => {
               ...form,
               video: processedVideo,
               userId: user.$id,
+              ...(circleId ? { circleId } : {}),
             });
             scheduleCreatorSubscriberNotifications({
               creatorId: user.$id,
@@ -1777,7 +1806,14 @@ const Create = () => {
 
           Alert.alert(t("common.success"), t("alerts.uploadSuccess"));
           emitContentFeedInvalidate({ type: 'video', userId: user.$id });
-          router.push("/(tabs)/home");
+          if (circleId) {
+            const targetCircleId = circleId;
+            clearCircleComposeContext();
+            router.replace(`/circle/${targetCircleId}`);
+          } else {
+            clearCircleComposeContext();
+            router.push("/(tabs)/home");
+          }
         } catch (uploadError) {
           throw uploadError; // Re-throw to be caught by outer catch
         }
@@ -2073,6 +2109,7 @@ const Create = () => {
           extraPhotos: slidePhotos,
           userId: user.$id,
           edits: finalEdits,
+          ...(circleId ? { circleId } : {}),
         });
 
         scheduleCreatorSubscriberNotifications({
@@ -2095,7 +2132,14 @@ const Create = () => {
             : "Photo uploaded successfully!"
         );
         emitContentFeedInvalidate({ type: 'photo', userId: user.$id });
-        // Stay on create page - user can navigate manually if they want
+        if (circleId) {
+          const targetCircleId = circleId;
+          clearCircleComposeContext();
+          router.replace(`/circle/${targetCircleId}`);
+        } else {
+          clearCircleComposeContext();
+        }
+        // Stay on create page when not posting to a Circle
       } catch (error) {
         const errorMessage = error.message || error.toString();
         let userMessage = errorMessage;
@@ -2220,8 +2264,45 @@ const Create = () => {
                     textAlign: isRTL ? "right" : "left",
                   }}
                 >
-                  {t("create.screenTitle")}
+                  {circleId
+                    ? t("circles.createForCircleTitle")
+                    : t("create.screenTitle")}
                 </Text>
+                {circleId ? (
+                  <View
+                    style={{
+                      flexDirection: isRTL ? "row-reverse" : "row",
+                      alignItems: "center",
+                      gap: 8,
+                      marginTop: -12,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      borderRadius: 12,
+                      backgroundColor: themedColor(
+                        "rgba(255,156,1,0.15)",
+                        "rgba(255,156,1,0.12)"
+                      ),
+                      borderWidth: 1,
+                      borderColor: theme.accent,
+                    }}
+                  >
+                    <Feather name="users" size={16} color={theme.accent} />
+                    <Text
+                      style={{
+                        flex: 1,
+                        color: theme.textPrimary,
+                        fontFamily: "Poppins-Medium",
+                        fontSize: 13,
+                        textAlign: isRTL ? "right" : "left",
+                      }}
+                      numberOfLines={1}
+                    >
+                      {t("circles.postingToCircle", {
+                        name: circleName || t("circles.title"),
+                      })}
+                    </Text>
+                  </View>
+                ) : null}
 
                 {/* Post Type Selection */}
                 <View
